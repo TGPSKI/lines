@@ -1,9 +1,3 @@
-# Scenario 5: External Target Advance
-# Shows stale success blast radius when target moves outside housekeeping.
-# Several MRs have successful pipelines on target-001, but an external merge
-# will advance target to target-002, making all those successes stale.
-# Expected: all policies suffer some stale success, active-cap limits blast radius.
-
 project:
   id: 1001
   name: sim-repo
@@ -11,96 +5,103 @@ project:
   path_with_namespace: app-sre/sim-repo
   default_branch: master
   target_head: target-001
-
 merge_requests:
-  - id: 2001
-    iid: 1
-    title: "MR 1 - success on target-001"
-    state: opened
+- id: 2001
+  iid: 1
+  title: MR 1 - success on target-001
+  state: opened
+  sha: mr1-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-a
+  priority: 1
+  pipelines:
+  - id: 5001
+    status: success
     sha: mr1-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-a"]
-    priority: 1
-    pipelines:
-      - id: 5001
-        status: success
-        sha: mr1-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2002
-    iid: 2
-    title: "MR 2 - success on target-001"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2002
+  iid: 2
+  title: MR 2 - success on target-001
+  state: opened
+  sha: mr2-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-b
+  priority: 2
+  pipelines:
+  - id: 5002
+    status: success
     sha: mr2-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-b"]
-    priority: 2
-    pipelines:
-      - id: 5002
-        status: success
-        sha: mr2-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2003
-    iid: 3
-    title: "MR 3 - success on target-001"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2003
+  iid: 3
+  title: MR 3 - success on target-001
+  state: opened
+  sha: mr3-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-c
+  priority: 3
+  pipelines:
+  - id: 5003
+    status: success
     sha: mr3-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-c"]
-    priority: 3
-    pipelines:
-      - id: 5003
-        status: success
-        sha: mr3-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2004
-    iid: 4
-    title: "MR 4 - running on target-001"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2004
+  iid: 4
+  title: MR 4 - running on target-001
+  state: opened
+  sha: mr4-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-d
+  priority: 4
+  pipelines:
+  - id: 5004
+    status: running
     sha: mr4-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-d"]
-    priority: 4
-    pipelines:
-      - id: 5004
-        status: running
-        sha: mr4-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 5
-        outcome: success
-
-  - id: 2005
-    iid: 5
-    title: "MR 5 - running on target-001"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 5
+    outcome: success
+- id: 2005
+  iid: 5
+  title: MR 5 - running on target-001
+  state: opened
+  sha: mr5-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-e
+  priority: 5
+  pipelines:
+  - id: 5005
+    status: running
     sha: mr5-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-e"]
-    priority: 5
-    pipelines:
-      - id: 5005
-        status: running
-        sha: mr5-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 5
-        outcome: success
-
+    root_sha: target-001
+    running_ticks_remaining: 5
+    outcome: success
 sha_pools:
   mr_rebases:
-    "1": ["mr1-sha-rebased-001"]
-    "2": ["mr2-sha-rebased-001"]
-    "3": ["mr3-sha-rebased-001"]
-    "4": ["mr4-sha-rebased-001"]
-    "5": ["mr5-sha-rebased-001"]
+    '1':
+    - mr1-sha-rebased-001
+    '2':
+    - mr2-sha-rebased-001
+    '3':
+    - mr3-sha-rebased-001
+    '4':
+    - mr4-sha-rebased-001
+    '5':
+    - mr5-sha-rebased-001
   target_advances:
-    master: ["target-002", "target-003", "target-004"]
+    master:
+    - target-002
+    - target-003
+    - target-004

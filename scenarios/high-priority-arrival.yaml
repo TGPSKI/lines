@@ -1,8 +1,3 @@
-# Scenario 3: High-Priority Arrival
-# Shows the priority preemption tradeoff fairly.
-# limit = 2, two lower-priority MRs have long-running pipelines,
-# new high-priority MR appears.
-
 project:
   id: 1001
   name: sim-repo
@@ -10,55 +5,59 @@ project:
   path_with_namespace: app-sre/sim-repo
   default_branch: master
   target_head: target-001
-
 merge_requests:
-  - id: 2001
-    iid: 1
-    title: "MR 1 - low priority, long pipeline"
-    state: opened
+- id: 2001
+  iid: 1
+  title: MR 1 - low priority, long pipeline
+  state: opened
+  sha: mr1-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-a
+  priority: 10
+  pipelines:
+  - id: 5001
+    status: running
     sha: mr1-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-a"]
-    priority: 10
-    pipelines:
-      - id: 5001
-        status: running
-        sha: mr1-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 10
-        outcome: success
-
-  - id: 2002
-    iid: 2
-    title: "MR 2 - low priority, long pipeline"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 10
+    outcome: success
+- id: 2002
+  iid: 2
+  title: MR 2 - low priority, long pipeline
+  state: opened
+  sha: mr2-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-b
+  priority: 10
+  pipelines:
+  - id: 5002
+    status: running
     sha: mr2-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-b"]
-    priority: 10
-    pipelines:
-      - id: 5002
-        status: running
-        sha: mr2-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 10
-        outcome: success
-
-  - id: 2003
-    iid: 3
-    title: "MR 3 - HIGH PRIORITY, needs rebase"
-    state: opened
-    sha: mr3-sha-001
-    rebased_target_sha: target-000
-    labels: ["lgtm", "priority/critical"]
-    tenant_domains: ["tenant-c"]
-    priority: 1
-    pipelines: []
-
+    root_sha: target-001
+    running_ticks_remaining: 10
+    outcome: success
+- id: 2003
+  iid: 3
+  title: MR 3 - HIGH PRIORITY, needs rebase
+  state: opened
+  sha: mr3-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - lgtm
+  - priority/critical
+  - tenant-tenant-c
+  priority: 1
+  pipelines: []
 sha_pools:
   mr_rebases:
-    "3": ["mr3-sha-rebased-001", "mr3-sha-rebased-002"]
+    '3':
+    - mr3-sha-rebased-001
+    - mr3-sha-rebased-002
   target_advances:
-    master: ["target-002", "target-003"]
+    master:
+    - target-002
+    - target-003

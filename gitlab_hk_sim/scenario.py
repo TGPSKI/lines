@@ -42,8 +42,7 @@ def _build_state(raw: dict[str, Any]) -> SimState:
                 max_pipeline_id = p.id + 1
 
     scheduled_target_advances = {
-        int(k): str(v)
-        for k, v in raw.get("scheduled_target_advances", {}).items()
+        int(k): str(v) for k, v in raw.get("scheduled_target_advances", {}).items()
     }
 
     return SimState(
@@ -103,13 +102,13 @@ def _build_mr(raw: dict[str, Any], project_id: int) -> MergeRequest:
         sha=raw.get("sha", ""),
         rebased_target_sha=raw.get("rebased_target_sha", ""),
         labels=raw.get("labels", []),
-        tenant_domains=raw.get("tenant_domains", []),
         pipelines=pipelines,
         commits=commits,
         approved_at=raw.get("approved_at", ""),
         arrival_tick=arrival_tick,
         cancel_tick=int(raw.get("cancel_tick", 0)),
         force_merge_tick=int(raw.get("force_merge_tick", 0)),
+        push_tick=int(raw.get("push_tick", 0)),
         ci_duration=int(raw["ci_duration"]) if "ci_duration" in raw else None,
     )
 

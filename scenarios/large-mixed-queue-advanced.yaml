@@ -1,0 +1,1696 @@
+project:
+  id: 1001
+  name: config-repo
+  path: config-repo
+  path_with_namespace: team/config-repo
+  default_branch: master
+  target_head: target-001
+merge_requests:
+- id: 3001
+  iid: 1
+  title: cluster-mgmt/node-pool-config
+  state: opened
+  sha: mr1-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: critical'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T08:00:00Z'
+  pipelines:
+  - id: 7001
+    status: running
+    sha: mr1-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 15
+    outcome: success
+- id: 3002
+  iid: 2
+  title: registry/mirror-sync-config
+  state: opened
+  sha: mr2-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: critical'
+  - tenant-registry
+  approved_at: '2024-03-11T08:05:00Z'
+  pipelines:
+  - id: 7002
+    status: running
+    sha: mr2-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 7
+    outcome: success
+- id: 3003
+  iid: 3
+  title: provisioning/deployment-template
+  state: opened
+  sha: mr3-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T08:10:00Z'
+  pipelines:
+  - id: 7003
+    status: running
+    sha: mr3-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 20
+    outcome: success
+- id: 3004
+  iid: 4
+  title: sre-infra/alertmanager-routing
+  state: opened
+  sha: mr4-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-sre-infra
+  - tenant-monitoring
+  approved_at: '2024-03-11T08:15:00Z'
+  pipelines:
+  - id: 7004
+    status: running
+    sha: mr4-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 9
+    outcome: success
+- id: 3005
+  iid: 5
+  title: analytics/advisor-rule-update
+  state: opened
+  sha: mr5-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: medium'
+  - tenant-analytics
+  approved_at: '2024-03-11T08:20:00Z'
+  pipelines:
+  - id: 7005
+    status: running
+    sha: mr5-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 11
+    outcome: success
+  push_tick: 12
+- id: 3006
+  iid: 6
+  title: telemetry/metric-rule-sync
+  state: opened
+  sha: mr6-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: medium'
+  - tenant-telemetry
+  approved_at: '2024-03-11T08:25:00Z'
+  pipelines:
+  - id: 7006
+    status: running
+    sha: mr6-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 6
+    outcome: success
+- id: 3007
+  iid: 7
+  title: auth-service/project-quota-bump
+  state: opened
+  sha: mr7-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: low'
+  - tenant-auth-service
+  approved_at: '2024-03-11T08:30:00Z'
+  pipelines:
+  - id: 7007
+    status: running
+    sha: mr7-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 8
+    outcome: success
+- id: 3008
+  iid: 8
+  title: monitoring/grafana-datasource
+  state: opened
+  sha: mr8-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: critical'
+  - tenant-monitoring
+  approved_at: '2024-03-11T08:35:00Z'
+  pipelines:
+  - id: 7008
+    status: running
+    sha: mr8-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 22
+    outcome: success
+- id: 3009
+  iid: 9
+  title: gateway/rbac-policy-change
+  state: opened
+  sha: mr9-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-gateway
+  approved_at: '2024-03-11T08:40:00Z'
+  pipelines:
+  - id: 7009
+    status: running
+    sha: mr9-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 13
+    outcome: success
+- id: 3010
+  iid: 10
+  title: identity/realm-config-v2
+  state: opened
+  sha: mr10-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: medium'
+  - tenant-identity
+  approved_at: '2024-03-11T08:45:00Z'
+  pipelines:
+  - id: 7010
+    status: running
+    sha: mr10-sha-001
+    root_sha: target-001
+    running_ticks_remaining: 10
+    outcome: success
+- id: 3011
+  iid: 11
+  title: installer/agent-config
+  state: opened
+  sha: mr11-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-installer
+  approved_at: '2024-03-11T09:00:00Z'
+  pipelines:
+  - id: 7011
+    status: pending
+    sha: mr11-sha-001
+    root_sha: target-001
+    pending_ticks_remaining: 1
+    running_ticks_remaining: 14
+    outcome: success
+- id: 3012
+  iid: 12
+  title: fleet-mgr/upgrade-policy
+  state: opened
+  sha: mr12-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: critical'
+  - tenant-fleet-mgr
+  approved_at: '2024-03-11T09:05:00Z'
+  pipelines:
+  - id: 7012
+    status: pending
+    sha: mr12-sha-001
+    root_sha: target-001
+    pending_ticks_remaining: 1
+    running_ticks_remaining: 8
+    outcome: success
+- id: 3013
+  iid: 13
+  title: toggles/feature-flag-cleanup
+  state: opened
+  sha: mr13-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: low'
+  - tenant-toggles
+  approved_at: '2024-03-11T09:10:00Z'
+  pipelines:
+  - id: 7013
+    status: pending
+    sha: mr13-sha-001
+    root_sha: target-001
+    pending_ticks_remaining: 1
+    running_ticks_remaining: 5
+    outcome: success
+- id: 3014
+  iid: 14
+  title: platform/saas-deploy-config
+  state: opened
+  sha: mr14-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: medium'
+  - tenant-platform
+  approved_at: '2024-03-11T09:15:00Z'
+  pipelines:
+  - id: 7014
+    status: pending
+    sha: mr14-sha-001
+    root_sha: target-001
+    pending_ticks_remaining: 1
+    running_ticks_remaining: 18
+    outcome: success
+- id: 3015
+  iid: 15
+  title: cluster-mgmt/logging-forwarder
+  state: opened
+  sha: mr15-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T09:20:00Z'
+  pipelines:
+  - id: 7015
+    status: pending
+    sha: mr15-sha-001
+    root_sha: target-001
+    pending_ticks_remaining: 1
+    running_ticks_remaining: 9
+    outcome: success
+  push_tick: 35
+- id: 3016
+  iid: 16
+  title: release-eng/graph-data-update
+  state: opened
+  sha: mr16-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - bot/approved
+  - tenant-release-eng
+  approved_at: '2024-03-11T09:30:00Z'
+  pipelines:
+  - id: 7016
+    status: success
+    sha: mr16-sha-001
+    root_sha: target-001
+    outcome: success
+- id: 3017
+  iid: 17
+  title: scanner/version-bump
+  state: opened
+  sha: mr17-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: low'
+  - tenant-scanner
+  approved_at: '2024-03-11T09:35:00Z'
+  pipelines:
+  - id: 7017
+    status: success
+    sha: mr17-sha-001
+    root_sha: target-001
+    outcome: success
+- id: 3018
+  iid: 18
+  title: secrets-mgr/rotation-schedule
+  state: opened
+  sha: mr18-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: high'
+  - tenant-secrets-mgr
+  approved_at: '2024-03-11T09:40:00Z'
+  pipelines:
+  - id: 7018
+    status: success
+    sha: mr18-sha-001
+    root_sha: target-001
+    outcome: success
+- id: 3019
+  iid: 19
+  title: ci-pipeline/template-v3
+  state: opened
+  sha: mr19-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - 'bot/approved: medium'
+  - tenant-ci-pipeline
+  approved_at: '2024-03-11T09:45:00Z'
+  pipelines:
+  - id: 7019
+    status: success
+    sha: mr19-sha-001
+    root_sha: target-001
+    outcome: success
+- id: 3020
+  iid: 20
+  title: status-page/component-status
+  state: opened
+  sha: mr20-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-status-page
+  approved_at: '2024-03-11T09:50:00Z'
+  pipelines:
+  - id: 7020
+    status: success
+    sha: mr20-sha-001
+    root_sha: target-001
+    outcome: success
+- id: 3021
+  iid: 21
+  title: platform/namespace-quota-prod
+  state: opened
+  sha: mr21-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-platform
+  approved_at: '2024-03-11T10:00:00Z'
+  pipelines: []
+- id: 3022
+  iid: 22
+  title: provisioning/syncset-update
+  state: opened
+  sha: mr22-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T10:05:00Z'
+  pipelines: []
+  push_tick: 60
+- id: 3023
+  iid: 23
+  title: registry/robot-account-cleanup
+  state: opened
+  sha: mr23-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-registry
+  approved_at: '2024-03-11T10:10:00Z'
+  pipelines: []
+- id: 3024
+  iid: 24
+  title: cluster-mgmt/addon-operator-params
+  state: opened
+  sha: mr24-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-cluster-mgmt
+  - tenant-provisioning
+  approved_at: '2024-03-11T10:15:00Z'
+  pipelines: []
+- id: 3025
+  iid: 25
+  title: sre-infra/slo-document-update
+  state: opened
+  sha: mr25-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T10:20:00Z'
+  pipelines: []
+- id: 3026
+  iid: 26
+  title: hosting/fleet-mgr-scaling
+  state: opened
+  sha: mr26-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-hosting
+  approved_at: '2024-03-11T10:25:00Z'
+  pipelines: []
+- id: 3027
+  iid: 27
+  title: analytics/ingress-controller-tune
+  state: opened
+  sha: mr27-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-analytics
+  approved_at: '2024-03-11T10:30:00Z'
+  pipelines: []
+- id: 3028
+  iid: 28
+  title: signing/transparency-log
+  state: opened
+  sha: mr28-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-signing
+  approved_at: '2024-03-11T10:35:00Z'
+  pipelines: []
+- id: 3029
+  iid: 29
+  title: platform/role-permission-fix
+  state: opened
+  sha: mr29-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-platform
+  approved_at: '2024-03-11T10:40:00Z'
+  pipelines: []
+- id: 3030
+  iid: 30
+  title: query-engine/config-update
+  state: opened
+  sha: mr30-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-query-engine
+  approved_at: '2024-03-11T10:45:00Z'
+  pipelines: []
+  force_merge_tick: 80
+- id: 3031
+  iid: 31
+  title: telemetry/compact-retention
+  state: opened
+  sha: mr31-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-telemetry
+  approved_at: '2024-03-11T10:50:00Z'
+  pipelines: []
+- id: 3032
+  iid: 32
+  title: incident-mgr/template-v2
+  state: opened
+  sha: mr32-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-incident-mgr
+  approved_at: '2024-03-11T10:55:00Z'
+  pipelines: []
+- id: 3033
+  iid: 33
+  title: monitoring/alertmanager-silence
+  state: opened
+  sha: mr33-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-monitoring
+  approved_at: '2024-03-11T11:00:00Z'
+  pipelines: []
+- id: 3034
+  iid: 34
+  title: registry/security-scanner-policy
+  state: opened
+  sha: mr34-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-registry
+  approved_at: '2024-03-11T11:05:00Z'
+  pipelines: []
+- id: 3035
+  iid: 35
+  title: gateway/proxy-timeout-tune
+  state: opened
+  sha: mr35-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-gateway
+  approved_at: '2024-03-11T11:10:00Z'
+  pipelines: []
+- id: 3036
+  iid: 36
+  title: sre-infra/jenkins-job-migration
+  state: opened
+  sha: mr36-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T11:15:00Z'
+  pipelines: []
+- id: 3037
+  iid: 37
+  title: fleet-mgr/machine-pool-config
+  state: opened
+  sha: mr37-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-fleet-mgr
+  approved_at: '2024-03-11T11:20:00Z'
+  pipelines: []
+- id: 3038
+  iid: 38
+  title: provisioning/pool-scaling
+  state: opened
+  sha: mr38-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-provisioning
+  approved_at: '2024-03-11T11:25:00Z'
+  pipelines: []
+  push_tick: 120
+- id: 3039
+  iid: 39
+  title: cluster-mgmt/subscription-sync
+  state: opened
+  sha: mr39-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T11:30:00Z'
+  pipelines: []
+- id: 3040
+  iid: 40
+  title: platform/global-ci-config
+  state: opened
+  sha: mr40-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  approved_at: '2024-03-11T11:35:00Z'
+  pipelines: []
+- id: 3041
+  iid: 41
+  title: identity/client-scope-migration
+  state: opened
+  sha: mr41-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-identity
+  approved_at: '2024-03-11T11:40:00Z'
+  pipelines: []
+- id: 3042
+  iid: 42
+  title: auth-service/token-rotation
+  state: opened
+  sha: mr42-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-auth-service
+  approved_at: '2024-03-11T11:45:00Z'
+  pipelines: []
+- id: 3043
+  iid: 43
+  title: installer/infra-env-v2
+  state: opened
+  sha: mr43-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-installer
+  approved_at: '2024-03-11T11:50:00Z'
+  pipelines: []
+- id: 3044
+  iid: 44
+  title: cluster-mgmt/service-quota
+  state: opened
+  sha: mr44-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T11:55:00Z'
+  pipelines: []
+- id: 3045
+  iid: 45
+  title: sre-infra/ci-pipeline-config
+  state: opened
+  sha: mr45-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-sre-infra
+  - tenant-platform
+  approved_at: '2024-03-11T12:00:00Z'
+  pipelines: []
+  push_tick: 180
+- id: 3046
+  iid: 46
+  title: registry/namespace-autoprune
+  state: opened
+  sha: mr46-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-registry
+  approved_at: '2024-03-11T12:05:00Z'
+  pipelines: []
+- id: 3047
+  iid: 47
+  title: provisioning/hibernate-schedule
+  state: opened
+  sha: mr47-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-provisioning
+  approved_at: '2024-03-11T12:10:00Z'
+  pipelines: []
+- id: 3048
+  iid: 48
+  title: hosting/must-gather-config
+  state: opened
+  sha: mr48-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-hosting
+  approved_at: '2024-03-11T12:15:00Z'
+  pipelines: []
+- id: 3049
+  iid: 49
+  title: monitoring/log-retention-policy
+  state: opened
+  sha: mr49-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-monitoring
+  - tenant-telemetry
+  approved_at: '2024-03-11T12:20:00Z'
+  pipelines: []
+- id: 3050
+  iid: 50
+  title: platform/dependency-audit-q1
+  state: opened
+  sha: mr50-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - lgtm
+  approved_at: '2024-03-11T12:25:00Z'
+  pipelines: []
+  force_merge_tick: 350
+- id: 3051
+  iid: 51
+  title: toggles/proxy-sidecar-config
+  state: opened
+  sha: mr51-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-toggles
+  approved_at: '2024-03-11T12:30:00Z'
+  pipelines: []
+- id: 3052
+  iid: 52
+  title: sre-infra/secrets-policy-update
+  state: opened
+  sha: mr52-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-sre-infra
+  - tenant-secrets-mgr
+  approved_at: '2024-03-11T12:35:00Z'
+  pipelines: []
+- id: 3053
+  iid: 53
+  title: cluster-mgmt/addon-lifecycle
+  state: opened
+  sha: mr53-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T12:40:00Z'
+  pipelines: []
+- id: 3054
+  iid: 54
+  title: registry/org-team-sync
+  state: opened
+  sha: mr54-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-registry
+  approved_at: '2024-03-11T12:45:00Z'
+  pipelines: []
+- id: 3055
+  iid: 55
+  title: provisioning/credentials-rotate
+  state: opened
+  sha: mr55-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T12:50:00Z'
+  pipelines: []
+  push_tick: 250
+- id: 3056
+  iid: 56
+  title: analytics/namespace-config
+  state: opened
+  sha: mr56-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-analytics
+  approved_at: '2024-03-11T12:55:00Z'
+  pipelines: []
+- id: 3057
+  iid: 57
+  title: gateway/console-plugin-deploy
+  state: opened
+  sha: mr57-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-gateway
+  approved_at: '2024-03-11T13:00:00Z'
+  pipelines: []
+- id: 3058
+  iid: 58
+  title: auth-service/dsn-rotation
+  state: opened
+  sha: mr58-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-auth-service
+  approved_at: '2024-03-11T13:05:00Z'
+  pipelines: []
+- id: 3059
+  iid: 59
+  title: platform/merge-queue-slo
+  state: opened
+  sha: mr59-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-platform
+  approved_at: '2024-03-11T13:10:00Z'
+  pipelines: []
+- id: 3060
+  iid: 60
+  title: telemetry/rules-storage-config
+  state: opened
+  sha: mr60-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-telemetry
+  approved_at: '2024-03-11T13:15:00Z'
+  pipelines: []
+- id: 3061
+  iid: 61
+  title: fleet-mgr/proxy-env-config
+  state: opened
+  sha: mr61-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-fleet-mgr
+  approved_at: '2024-03-11T13:20:00Z'
+  pipelines: []
+- id: 3062
+  iid: 62
+  title: cluster-mgmt/security-operator
+  state: opened
+  sha: mr62-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-cluster-mgmt
+  - tenant-scanner
+  approved_at: '2024-03-11T13:25:00Z'
+  pipelines: []
+- id: 3063
+  iid: 63
+  title: identity/idp-mapper-config
+  state: opened
+  sha: mr63-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-identity
+  approved_at: '2024-03-11T13:30:00Z'
+  pipelines: []
+- id: 3064
+  iid: 64
+  title: monitoring/pagerduty-service
+  state: opened
+  sha: mr64-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-monitoring
+  approved_at: '2024-03-11T13:35:00Z'
+  pipelines: []
+- id: 3065
+  iid: 65
+  title: sre-infra/github-repo-permission
+  state: opened
+  sha: mr65-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T13:40:00Z'
+  pipelines: []
+- id: 3066
+  iid: 66
+  title: registry/scanner-integration
+  state: opened
+  sha: mr66-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-registry
+  - tenant-scanner
+  approved_at: '2024-03-11T13:45:00Z'
+  pipelines: []
+- id: 3067
+  iid: 67
+  title: provisioning/selector-migrate
+  state: opened
+  sha: mr67-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-provisioning
+  approved_at: '2024-03-11T13:50:00Z'
+  pipelines: []
+- id: 3068
+  iid: 68
+  title: installer/day2-worker-config
+  state: opened
+  sha: mr68-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-installer
+  approved_at: '2024-03-11T13:55:00Z'
+  pipelines: []
+- id: 3069
+  iid: 69
+  title: platform/tooling-bump-v4.12
+  state: opened
+  sha: mr69-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-platform
+  - tenant-sre-infra
+  - tenant-cluster-mgmt
+  - tenant-registry
+  approved_at: '2024-03-11T14:00:00Z'
+  pipelines: []
+- id: 3070
+  iid: 70
+  title: gateway/audit-log-retention
+  state: opened
+  sha: mr70-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-gateway
+  approved_at: '2024-03-11T14:05:00Z'
+  pipelines: []
+  push_tick: 320
+- id: 3071
+  iid: 71
+  title: hosting/sre-access-policy
+  state: opened
+  sha: mr71-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-hosting
+  approved_at: '2024-03-11T14:10:00Z'
+  pipelines: []
+- id: 3072
+  iid: 72
+  title: cluster-mgmt/autoscaler-profile
+  state: opened
+  sha: mr72-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T14:15:00Z'
+  pipelines: []
+- id: 3073
+  iid: 73
+  title: telemetry/config-update
+  state: opened
+  sha: mr73-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-telemetry
+  approved_at: '2024-03-11T14:20:00Z'
+  pipelines: []
+- id: 3074
+  iid: 74
+  title: sre-infra/dns-config
+  state: opened
+  sha: mr74-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T14:25:00Z'
+  pipelines: []
+- id: 3075
+  iid: 75
+  title: registry/notification-webhook
+  state: opened
+  sha: mr75-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-registry
+  approved_at: '2024-03-11T14:30:00Z'
+  pipelines: []
+- id: 3076
+  iid: 76
+  title: analytics/compliance-ns-config
+  state: opened
+  sha: mr76-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-analytics
+  approved_at: '2024-03-11T14:35:00Z'
+  pipelines: []
+- id: 3077
+  iid: 77
+  title: provisioning/dns-zone-control
+  state: opened
+  sha: mr77-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T14:40:00Z'
+  pipelines: []
+- id: 3078
+  iid: 78
+  title: monitoring/deadman-switch-cfg
+  state: opened
+  sha: mr78-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-monitoring
+  - tenant-sre-infra
+  approved_at: '2024-03-11T14:45:00Z'
+  pipelines: []
+- id: 3079
+  iid: 79
+  title: cluster-mgmt/control-plane-mgmt
+  state: opened
+  sha: mr79-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T14:50:00Z'
+  pipelines: []
+- id: 3080
+  iid: 80
+  title: platform/global-rbac-refactor
+  state: opened
+  sha: mr80-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  approved_at: '2024-03-11T14:55:00Z'
+  pipelines: []
+- id: 3081
+  iid: 81
+  title: auth-service/rate-limit-config
+  state: opened
+  sha: mr81-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-auth-service
+  approved_at: '2024-03-11T15:00:00Z'
+  pipelines: []
+  arrival_tick: 12
+- id: 3082
+  iid: 82
+  title: fleet-mgr/node-drain-grace
+  state: opened
+  sha: mr82-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-fleet-mgr
+  approved_at: '2024-03-11T15:05:00Z'
+  pipelines: []
+  arrival_tick: 15
+- id: 3083
+  iid: 83
+  title: cluster-mgmt/transfer-policy
+  state: opened
+  sha: mr83-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T15:10:00Z'
+  pipelines: []
+  arrival_tick: 20
+- id: 3084
+  iid: 84
+  title: platform/user-access-request
+  state: opened
+  sha: mr84-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-platform
+  approved_at: '2024-03-11T15:15:00Z'
+  pipelines: []
+  arrival_tick: 25
+- id: 3085
+  iid: 85
+  title: provisioning/install-override
+  state: opened
+  sha: mr85-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T15:20:00Z'
+  pipelines: []
+  arrival_tick: 28
+  push_tick: 400
+- id: 3086
+  iid: 86
+  title: identity/session-timeout-tune
+  state: opened
+  sha: mr86-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-identity
+  approved_at: '2024-03-11T15:25:00Z'
+  pipelines: []
+  arrival_tick: 55
+- id: 3087
+  iid: 87
+  title: registry/geo-repl-storage
+  state: opened
+  sha: mr87-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-registry
+  approved_at: '2024-03-11T15:30:00Z'
+  pipelines: []
+  arrival_tick: 65
+- id: 3088
+  iid: 88
+  title: sre-infra/deploy-trigger-fix
+  state: opened
+  sha: mr88-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T15:35:00Z'
+  pipelines: []
+  arrival_tick: 75
+- id: 3089
+  iid: 89
+  title: monitoring/alert-routing-v3
+  state: opened
+  sha: mr89-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-monitoring
+  approved_at: '2024-03-11T15:40:00Z'
+  pipelines: []
+  arrival_tick: 105
+- id: 3090
+  iid: 90
+  title: cluster-mgmt/machine-type-catalog
+  state: opened
+  sha: mr90-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T15:45:00Z'
+  pipelines: []
+  arrival_tick: 110
+- id: 3091
+  iid: 91
+  title: installer/image-override
+  state: opened
+  sha: mr91-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-installer
+  approved_at: '2024-03-11T15:50:00Z'
+  pipelines: []
+  arrival_tick: 118
+- id: 3092
+  iid: 92
+  title: telemetry/ruler-remote-write
+  state: opened
+  sha: mr92-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-telemetry
+  approved_at: '2024-03-11T15:55:00Z'
+  pipelines: []
+  arrival_tick: 125
+- id: 3093
+  iid: 93
+  title: provisioning/relocate-config
+  state: opened
+  sha: mr93-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-provisioning
+  approved_at: '2024-03-11T16:00:00Z'
+  pipelines: []
+  arrival_tick: 132
+- id: 3094
+  iid: 94
+  title: gateway/vpn-endpoint-update
+  state: opened
+  sha: mr94-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-gateway
+  approved_at: '2024-03-11T16:05:00Z'
+  pipelines: []
+  arrival_tick: 140
+- id: 3095
+  iid: 95
+  title: registry/tag-expiration-policy
+  state: opened
+  sha: mr95-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-registry
+  approved_at: '2024-03-11T16:10:00Z'
+  pipelines: []
+  arrival_tick: 185
+- id: 3096
+  iid: 96
+  title: platform/notification-config
+  state: opened
+  sha: mr96-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-platform
+  approved_at: '2024-03-11T16:15:00Z'
+  pipelines: []
+  arrival_tick: 195
+- id: 3097
+  iid: 97
+  title: toggles/strategy-constraint-v2
+  state: opened
+  sha: mr97-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-toggles
+  approved_at: '2024-03-11T16:20:00Z'
+  pipelines: []
+  arrival_tick: 205
+- id: 3098
+  iid: 98
+  title: cluster-mgmt/network-verifier
+  state: opened
+  sha: mr98-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T16:25:00Z'
+  pipelines: []
+  arrival_tick: 212
+- id: 3099
+  iid: 99
+  title: hosting/upgrade-policy-sync
+  state: opened
+  sha: mr99-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-hosting
+  approved_at: '2024-03-11T16:30:00Z'
+  pipelines: []
+  arrival_tick: 220
+- id: 3100
+  iid: 100
+  title: sre-infra/health-check-config
+  state: opened
+  sha: mr100-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T16:35:00Z'
+  pipelines: []
+  arrival_tick: 252
+- id: 3101
+  iid: 101
+  title: provisioning/claim-timeout
+  state: opened
+  sha: mr101-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T16:40:00Z'
+  pipelines: []
+  arrival_tick: 258
+- id: 3102
+  iid: 102
+  title: analytics/host-staleness-cfg
+  state: opened
+  sha: mr102-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-analytics
+  approved_at: '2024-03-11T16:45:00Z'
+  pipelines: []
+  arrival_tick: 265
+- id: 3103
+  iid: 103
+  title: monitoring/log-agent-daemonset
+  state: opened
+  sha: mr103-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-monitoring
+  approved_at: '2024-03-11T16:50:00Z'
+  pipelines: []
+  arrival_tick: 270
+- id: 3104
+  iid: 104
+  title: fleet-mgr/oidc-provider-cfg
+  state: opened
+  sha: mr104-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-fleet-mgr
+  approved_at: '2024-03-11T16:55:00Z'
+  pipelines: []
+  arrival_tick: 278
+- id: 3105
+  iid: 105
+  title: registry/build-trigger-config
+  state: opened
+  sha: mr105-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-registry
+  approved_at: '2024-03-11T17:00:00Z'
+  pipelines: []
+  arrival_tick: 283
+- id: 3106
+  iid: 106
+  title: platform/cluster-onboarding
+  state: opened
+  sha: mr106-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-platform
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T17:05:00Z'
+  pipelines: []
+  arrival_tick: 290
+- id: 3107
+  iid: 107
+  title: auth-service/project-rate-limit
+  state: opened
+  sha: mr107-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-auth-service
+  approved_at: '2024-03-11T17:10:00Z'
+  pipelines: []
+  arrival_tick: 325
+- id: 3108
+  iid: 108
+  title: identity/theme-resource-update
+  state: opened
+  sha: mr108-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-identity
+  approved_at: '2024-03-11T17:15:00Z'
+  pipelines: []
+  arrival_tick: 332
+- id: 3109
+  iid: 109
+  title: cluster-mgmt/placement-policy-v2
+  state: opened
+  sha: mr109-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T17:20:00Z'
+  pipelines: []
+  arrival_tick: 340
+- id: 3110
+  iid: 110
+  title: provisioning/autoscale-config
+  state: opened
+  sha: mr110-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-provisioning
+  approved_at: '2024-03-11T17:25:00Z'
+  pipelines: []
+  arrival_tick: 345
+- id: 3111
+  iid: 111
+  title: sre-infra/rds-parameter-group
+  state: opened
+  sha: mr111-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T17:30:00Z'
+  pipelines: []
+  arrival_tick: 352
+- id: 3112
+  iid: 112
+  title: telemetry/receive-router-cfg
+  state: opened
+  sha: mr112-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-telemetry
+  approved_at: '2024-03-11T17:35:00Z'
+  pipelines: []
+  arrival_tick: 358
+- id: 3113
+  iid: 113
+  title: gateway/sar-proxy-config
+  state: opened
+  sha: mr113-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-gateway
+  approved_at: '2024-03-11T17:40:00Z'
+  pipelines: []
+  arrival_tick: 385
+- id: 3114
+  iid: 114
+  title: registry/admin-panel-access
+  state: opened
+  sha: mr114-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-registry
+  approved_at: '2024-03-11T17:45:00Z'
+  pipelines: []
+  arrival_tick: 395
+- id: 3115
+  iid: 115
+  title: monitoring/ruler-config
+  state: opened
+  sha: mr115-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-monitoring
+  approved_at: '2024-03-11T17:50:00Z'
+  pipelines: []
+  arrival_tick: 405
+- id: 3116
+  iid: 116
+  title: cluster-mgmt/iam-role-binding
+  state: opened
+  sha: mr116-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-cluster-mgmt
+  approved_at: '2024-03-11T17:55:00Z'
+  pipelines: []
+  arrival_tick: 412
+- id: 3117
+  iid: 117
+  title: platform/schema-migration-v5
+  state: opened
+  sha: mr117-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: critical'
+  - tenant-platform
+  approved_at: '2024-03-11T18:00:00Z'
+  pipelines: []
+  arrival_tick: 420
+- id: 3118
+  iid: 118
+  title: toggles/admin-token-rotate
+  state: opened
+  sha: mr118-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: medium'
+  - tenant-toggles
+  approved_at: '2024-03-11T18:05:00Z'
+  pipelines: []
+  arrival_tick: 435
+- id: 3119
+  iid: 119
+  title: provisioning/image-pin
+  state: opened
+  sha: mr119-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: low'
+  - tenant-provisioning
+  approved_at: '2024-03-11T18:10:00Z'
+  pipelines: []
+  arrival_tick: 442
+- id: 3120
+  iid: 120
+  title: sre-infra/ci-config-final-tune
+  state: opened
+  sha: mr120-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - 'bot/approved: high'
+  - tenant-sre-infra
+  approved_at: '2024-03-11T18:15:00Z'
+  pipelines: []
+  arrival_tick: 450
+pipeline_durations:
+  distribution: weighted
+  min_ticks: 5
+  max_ticks: 25
+  failure_rate: 0.05
+  weights:
+    5: 15
+    6: 20
+    7: 20
+    8: 18
+    9: 12
+    10: 8
+    11: 5
+    12: 4
+    13: 3
+    14: 3
+    15: 2
+    16: 2
+    17: 2
+    18: 2
+    19: 1
+    20: 1
+    21: 1
+    22: 1
+    23: 1
+    24: 1
+    25: 1
+sha_pools:
+  target_advances:
+    master:
+    - target-002
+    - target-003
+    - target-004
+    - target-005
+    - target-006
+    - target-007
+    - target-008
+    - target-009
+    - target-010
+    - target-011
+    - target-012
+    - target-013
+    - target-014
+    - target-015
+    - target-016
+    - target-017
+    - target-018
+    - target-019
+    - target-020
+    - target-021
+    - target-022
+    - target-023
+    - target-024
+    - target-025
+    - target-026
+    - target-027
+    - target-028
+    - target-029
+    - target-030
+    - target-031
+    - target-032
+    - target-033
+    - target-034
+    - target-035
+    - target-036
+    - target-037
+    - target-038
+    - target-039
+    - target-040
+    - target-041
+    - target-042
+    - target-043
+    - target-044
+    - target-045
+    - target-046
+    - target-047
+    - target-048
+    - target-049
+    - target-050
+    - target-051
+    - target-052
+    - target-053
+    - target-054
+    - target-055
+    - target-056
+    - target-057
+    - target-058
+    - target-059
+    - target-060
+    - target-061
+    - target-062
+    - target-063
+    - target-064
+    - target-065
+    - target-066
+    - target-067
+    - target-068
+    - target-069
+    - target-070
+    - target-071
+    - target-072
+    - target-073
+    - target-074
+    - target-075
+    - target-076
+    - target-077
+    - target-078
+    - target-079
+    - target-080
+    - target-081
+    - target-082
+    - target-083
+    - target-084
+    - target-085
+    - target-086
+    - target-087
+    - target-088
+    - target-089
+    - target-090
+    - target-091
+    - target-092
+    - target-093
+    - target-094
+    - target-095
+    - target-096
+    - target-097
+    - target-098
+    - target-099
+    - target-100
+    - target-101
+    - target-102
+    - target-103
+    - target-104
+    - target-105
+    - target-106
+    - target-107
+    - target-108
+    - target-109
+    - target-110
+    - target-111
+    - target-112
+    - target-113
+    - target-114
+    - target-115
+    - target-116
+    - target-117
+    - target-118
+    - target-119
+    - target-120
+    - target-121
+    - target-122
+    - target-123
+    - target-124
+    - target-125
+    - target-126
+    - target-127
+    - target-128
+    - target-129
+    - target-130
+    - target-131
+    - target-132
+    - target-133
+    - target-134
+    - target-135
+    - target-136
+    - target-137
+    - target-138
+    - target-139
+    - target-140
+    - target-141
+    - target-142
+    - target-143
+    - target-144
+    - target-145
+    - target-146
+    - target-147
+    - target-148
+    - target-149
+    - target-150
+    - target-151
+    - target-152
+    - target-153
+    - target-154
+    - target-155
+    - target-156
+    - target-157
+    - target-158
+    - target-159
+    - target-160

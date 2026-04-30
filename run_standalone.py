@@ -76,6 +76,7 @@ def parse_args() -> argparse.Namespace:
 # API helpers
 # ---------------------------------------------------------------------------
 
+
 def _mr_sort_key(mr: dict) -> tuple[int, str]:
     return (label_priority(mr.get("labels", [])), mr.get("approved_at", ""))
 
@@ -360,7 +361,6 @@ def get_tenant_domains(mr: dict) -> set[str]:
     return {lbl for lbl in labels if lbl.startswith(TENANT_LABEL_PREFIX)}
 
 
-
 def run_cycle_active_cap_phase1(
     sim_url: str, project_id: int, limit: int, log: logging.Logger
 ) -> None:
@@ -626,7 +626,9 @@ def run_comparison(args: argparse.Namespace) -> None:
 
         # Start server
         sim_dir = os.path.abspath(os.path.dirname(__file__) or ".")
-        server_log = open(os.path.join(reports_dir, f"{policy}-server.log"), "w")
+        server_log = open(  # noqa: SIM115
+            os.path.join(reports_dir, f"{policy}-server.log"), "w"
+        )
         server_proc = subprocess.Popen(
             [
                 venv_python,
@@ -759,7 +761,8 @@ def run_comparison(args: argparse.Namespace) -> None:
             + "|".join(f" {p:>{col_w - 2}} " for p in header_policies)
             + "|\n"
         )
-        f.write(f"|{'-' * 30}|" + "|".join("-" * col_w for _ in header_policies) + "|\n")
+        sep = "|".join("-" * col_w for _ in header_policies)
+        f.write(f"|{'-' * 30}|{sep}|\n")
         for key, label in metrics_keys:
             if key is None:
                 f.write(
@@ -775,7 +778,8 @@ def run_comparison(args: argparse.Namespace) -> None:
                         vals.append(f"{v:.3f}")
                     else:
                         vals.append(str(v))
-                f.write(f"| {label:<28} |" + "|".join(f" {v:>{col_w - 2}} " for v in vals) + "|\n")
+                cells = "|".join(f" {v:>{col_w - 2}} " for v in vals)
+                f.write(f"| {label:<28} |{cells}|\n")
         f.write("\nKey:\n")
         f.write("  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n")
         f.write("  throughput = MRs merged / total ticks elapsed\n")
@@ -783,7 +787,9 @@ def run_comparison(args: argparse.Namespace) -> None:
         f.write("Interpretation:\n")
         f.write("  - Higher throughput = faster queue processing\n")
         f.write("  - Lower time-to-first-merge = faster initial results\n")
-        f.write("  - Lower peak active = better concurrency control (limit respected)\n")
+        f.write(
+            "  - Lower peak active = better concurrency control (limit respected)\n"
+        )
         f.write("  - Lower duplicate rebases = less wasted CI\n")
         f.write("  - Higher same-root pool = more Phase 1 multi-merge candidates\n\n")
     log.info(f"Comparison saved to {comparison_file}")

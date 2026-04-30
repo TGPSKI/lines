@@ -36,7 +36,7 @@ def _make_mr(
     rebased_target_sha: str = "target-001",
     pipelines: list[Pipeline] | None = None,
     state: MRState = MRState.OPENED,
-    tenant_domains: list[str] | None = None,
+    labels: list[str] | None = None,
 ) -> MergeRequest:
     return MergeRequest(
         id=2000 + iid,
@@ -48,7 +48,7 @@ def _make_mr(
         source_project_id=1001,
         target_project_id=1001,
         pipelines=pipelines or [],
-        tenant_domains=tenant_domains or [],
+        labels=labels or [],
     )
 
 

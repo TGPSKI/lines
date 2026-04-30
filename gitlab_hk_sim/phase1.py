@@ -12,12 +12,18 @@ from typing import Any
 from .mutations import merge_mr
 from .state import MergeRequest, SimState, label_priority
 
+TENANT_LABEL_PREFIX = "tenant-"
+
+
+def get_tenant_domains(mr: MergeRequest) -> set[str]:
+    """Extract tenant domains from MR labels (tenant-* prefix)."""
+    return {lbl for lbl in mr.labels if lbl.startswith(TENANT_LABEL_PREFIX)}
+
 
 @dataclass
 class Phase1Config:
     enabled: bool = False
     merge_limit: int = 5
-    conflict_key: str = "tenant_domains"
 
 
 def select_merge_batch(
@@ -30,7 +36,7 @@ def select_merge_batch(
     1. MR must be open with a successful pipeline on current target_head.
     2. MR.rebased_target_sha == current target_head.
     3. Sorted by label priority (production MERGE_LABELS_PRIORITY), then approved_at.
-    4. Include MRs whose conflict_key domains don't overlap with batch.
+    4. Include MRs whose tenant-* label domains don't overlap with batch.
     5. Stop at merge_limit.
     """
     if not config.enabled:
@@ -46,7 +52,7 @@ def select_merge_batch(
         if len(batch) >= config.merge_limit:
             break
 
-        mr_domains = set(getattr(mr, config.conflict_key, []) or [])
+        mr_domains = get_tenant_domains(mr)
 
         if mr_domains & used_domains:
             continue
@@ -139,7 +145,7 @@ def compute_overlap_blocked(
     blocked = 0
 
     for mr in pool:
-        mr_domains = set(getattr(mr, config.conflict_key, []) or [])
+        mr_domains = get_tenant_domains(mr)
         if mr_domains & used_domains:
             blocked += 1
         else:

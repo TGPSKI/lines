@@ -1,9 +1,3 @@
-# Scenario 6: Clean Non-Overlap Phase 1
-# Shows why same-root success pool matters.
-# All MRs have successful pipelines on the same target_head
-# and non-overlapping tenant_domains.
-# Expected: Phase 1 merges multiple MRs per target advance.
-
 project:
   id: 1001
   name: sim-repo
@@ -11,77 +5,76 @@ project:
   path_with_namespace: app-sre/sim-repo
   default_branch: master
   target_head: target-001
-
 merge_requests:
-  - id: 2001
-    iid: 1
-    title: "MR 1 - tenant-a, success"
-    state: opened
+- id: 2001
+  iid: 1
+  title: MR 1 - tenant-a, success
+  state: opened
+  sha: mr1-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-a
+  priority: 1
+  pipelines:
+  - id: 5001
+    status: success
     sha: mr1-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-a"]
-    priority: 1
-    pipelines:
-      - id: 5001
-        status: success
-        sha: mr1-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2002
-    iid: 2
-    title: "MR 2 - tenant-b, success"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2002
+  iid: 2
+  title: MR 2 - tenant-b, success
+  state: opened
+  sha: mr2-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-b
+  priority: 2
+  pipelines:
+  - id: 5002
+    status: success
     sha: mr2-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-b"]
-    priority: 2
-    pipelines:
-      - id: 5002
-        status: success
-        sha: mr2-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2003
-    iid: 3
-    title: "MR 3 - tenant-c, success"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2003
+  iid: 3
+  title: MR 3 - tenant-c, success
+  state: opened
+  sha: mr3-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-c
+  priority: 3
+  pipelines:
+  - id: 5003
+    status: success
     sha: mr3-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-c"]
-    priority: 3
-    pipelines:
-      - id: 5003
-        status: success
-        sha: mr3-sha-001
-        root_sha: target-001
-        outcome: success
-
-  - id: 2004
-    iid: 4
-    title: "MR 4 - tenant-d, success"
-    state: opened
+    root_sha: target-001
+    outcome: success
+- id: 2004
+  iid: 4
+  title: MR 4 - tenant-d, success
+  state: opened
+  sha: mr4-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-d
+  priority: 4
+  pipelines:
+  - id: 5004
+    status: success
     sha: mr4-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-d"]
-    priority: 4
-    pipelines:
-      - id: 5004
-        status: success
-        sha: mr4-sha-001
-        root_sha: target-001
-        outcome: success
-
+    root_sha: target-001
+    outcome: success
 phase1:
   enabled: true
   merge_limit: 5
-  conflict_key: tenant_domains
-
 sha_pools:
   target_advances:
-    master: ["target-002", "target-003"]
+    master:
+    - target-002
+    - target-003

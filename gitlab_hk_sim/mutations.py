@@ -39,7 +39,11 @@ def rebase_mr(state: SimState, mr: MergeRequest) -> dict:
     mr.commits.append(commit)
 
     pipeline_id = state.next_pipeline_id()
-    duration = mr.ci_duration if mr.ci_duration is not None else state.pipeline_duration_config.sample_duration()
+    duration = (
+        mr.ci_duration
+        if mr.ci_duration is not None
+        else state.pipeline_duration_config.sample_duration()
+    )
     outcome = state.pipeline_duration_config.sample_outcome()
     pipeline = Pipeline(
         id=pipeline_id,
@@ -118,15 +122,17 @@ def tick(state: SimState) -> dict:
 
     Order of operations each tick:
     1. Activate MRs whose ``arrival_tick`` has been reached.
-    2. Force-merge MRs whose ``force_merge_tick`` has been reached — bypasses
+    2. Author pushes — new commit invalidates rebase state + cancels pipelines.
+    3. Force-merge MRs whose ``force_merge_tick`` has been reached — bypasses
        all queue logic (models a human clicking "Merge" in the GitLab UI).
-    3. Cancel/close MRs whose ``cancel_tick`` has been reached.
-    4. Apply scheduled external target_head advances.
-    5. Pipeline lifecycle: pending -> running -> outcome (success/failed).
+    4. Cancel/close MRs whose ``cancel_tick`` has been reached.
+    5. Apply scheduled external target_head advances.
+    6. Pipeline lifecycle: pending -> running -> outcome (success/failed).
     """
     state.tick_count += 1
     transitions: list[dict] = []
     arrivals: list[int] = []
+    pushes: list[int] = []
     force_merges: list[dict] = []
     cancellations: list[int] = []
     external_advance: dict | None = None
@@ -137,7 +143,18 @@ def tick(state: SimState) -> dict:
             mr.state = MRState.OPENED
             arrivals.append(mr.iid)
 
-    # 2. Force-merges — bypass queue, advance target, cancel nothing beforehand
+    # 2. Author pushes — new commit invalidates rebase + cancels active pipelines
+    for mr in state.merge_requests:
+        if mr.is_open and 0 < mr.push_tick <= state.tick_count:
+            mr.sha = f"mr{mr.iid}-push-{state.tick_count}"
+            mr.rebased_target_sha = ""
+            for p in mr.pipelines:
+                if p.is_active:
+                    p.status = PipelineStatus.CANCELED
+            pushes.append(mr.iid)
+            mr.push_tick = 0
+
+    # 3. Force-merges — bypass queue, advance target, cancel nothing beforehand
     for mr in state.merge_requests:
         if mr.is_open and 0 < mr.force_merge_tick <= state.tick_count:
             fm_event = merge_mr(state, mr)
@@ -196,6 +213,7 @@ def tick(state: SimState) -> dict:
         "tick": state.tick_count,
         "transitions": transitions,
         "arrivals": arrivals,
+        "pushes": pushes,
         "force_merges": force_merges,
         "cancellations": cancellations,
         "active_pipelines": len(state.active_pipelines()),

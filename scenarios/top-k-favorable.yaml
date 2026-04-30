@@ -1,8 +1,3 @@
-# Scenario 1: Top-K Favorable
-# Top K MRs are clean, fast, valid candidates.
-# No poisoned/flaky/blocked top window.
-# Expected: top-K looks good, active-cap similar, old may over-rebase.
-
 project:
   id: 1001
   name: sim-repo
@@ -10,119 +5,124 @@ project:
   path_with_namespace: app-sre/sim-repo
   default_branch: master
   target_head: target-001
-
 merge_requests:
-  - id: 2001
-    iid: 1
-    title: "MR 1 - clean fast candidate"
-    state: opened
+- id: 2001
+  iid: 1
+  title: MR 1 - clean fast candidate
+  state: opened
+  sha: mr1-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-a
+  priority: 1
+  pipelines:
+  - id: 5001
+    status: running
     sha: mr1-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-a"]
-    priority: 1
-    pipelines:
-      - id: 5001
-        status: running
-        sha: mr1-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 2
-        outcome: success
-
-  - id: 2002
-    iid: 2
-    title: "MR 2 - clean fast candidate"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 2
+    outcome: success
+- id: 2002
+  iid: 2
+  title: MR 2 - clean fast candidate
+  state: opened
+  sha: mr2-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-b
+  priority: 2
+  pipelines:
+  - id: 5002
+    status: running
     sha: mr2-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-b"]
-    priority: 2
-    pipelines:
-      - id: 5002
-        status: running
-        sha: mr2-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 2
-        outcome: success
-
-  - id: 2003
-    iid: 3
-    title: "MR 3 - clean fast candidate"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 2
+    outcome: success
+- id: 2003
+  iid: 3
+  title: MR 3 - clean fast candidate
+  state: opened
+  sha: mr3-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-c
+  priority: 3
+  pipelines:
+  - id: 5003
+    status: running
     sha: mr3-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-c"]
-    priority: 3
-    pipelines:
-      - id: 5003
-        status: running
-        sha: mr3-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 2
-        outcome: success
-
-  - id: 2004
-    iid: 4
-    title: "MR 4 - clean fast candidate"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 2
+    outcome: success
+- id: 2004
+  iid: 4
+  title: MR 4 - clean fast candidate
+  state: opened
+  sha: mr4-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-d
+  priority: 4
+  pipelines:
+  - id: 5004
+    status: running
     sha: mr4-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-d"]
-    priority: 4
-    pipelines:
-      - id: 5004
-        status: running
-        sha: mr4-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 2
-        outcome: success
-
-  - id: 2005
-    iid: 5
-    title: "MR 5 - clean fast candidate"
-    state: opened
+    root_sha: target-001
+    running_ticks_remaining: 2
+    outcome: success
+- id: 2005
+  iid: 5
+  title: MR 5 - clean fast candidate
+  state: opened
+  sha: mr5-sha-001
+  rebased_target_sha: target-001
+  labels:
+  - lgtm
+  - tenant-tenant-e
+  priority: 5
+  pipelines:
+  - id: 5005
+    status: running
     sha: mr5-sha-001
-    rebased_target_sha: target-001
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-e"]
-    priority: 5
-    pipelines:
-      - id: 5005
-        status: running
-        sha: mr5-sha-001
-        root_sha: target-001
-        running_ticks_remaining: 2
-        outcome: success
-
-  # Lower priority MRs outside top-K window
-  - id: 2006
-    iid: 6
-    title: "MR 6 - lower priority"
-    state: opened
-    sha: mr6-sha-001
-    rebased_target_sha: target-000
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-f"]
-    priority: 6
-    pipelines: []
-
-  - id: 2007
-    iid: 7
-    title: "MR 7 - lower priority"
-    state: opened
-    sha: mr7-sha-001
-    rebased_target_sha: target-000
-    labels: ["lgtm"]
-    tenant_domains: ["tenant-g"]
-    priority: 7
-    pipelines: []
-
+    root_sha: target-001
+    running_ticks_remaining: 2
+    outcome: success
+- id: 2006
+  iid: 6
+  title: MR 6 - lower priority
+  state: opened
+  sha: mr6-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - lgtm
+  - tenant-tenant-f
+  priority: 6
+  pipelines: []
+- id: 2007
+  iid: 7
+  title: MR 7 - lower priority
+  state: opened
+  sha: mr7-sha-001
+  rebased_target_sha: target-000
+  labels:
+  - lgtm
+  - tenant-tenant-g
+  priority: 7
+  pipelines: []
 sha_pools:
   mr_rebases:
-    "6": ["mr6-sha-rebased-001"]
-    "7": ["mr7-sha-rebased-001"]
+    '6':
+    - mr6-sha-rebased-001
+    '7':
+    - mr7-sha-rebased-001
   target_advances:
-    master: ["target-002", "target-003", "target-004", "target-005", "target-006"]
+    master:
+    - target-002
+    - target-003
+    - target-004
+    - target-005
+    - target-006

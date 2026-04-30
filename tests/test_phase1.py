@@ -36,9 +36,7 @@ def _make_state(mrs: list[MergeRequest]) -> SimState:
     )
 
 
-def _make_success_mr(
-    iid: int, tenant_domains: list[str], priority: int = 0
-) -> MergeRequest:
+def _make_success_mr(iid: int, labels: list[str]) -> MergeRequest:
     sha = f"mr{iid}-sha-001"
     pipeline = Pipeline(
         id=5000 + iid,
@@ -55,8 +53,7 @@ def _make_success_mr(
         rebased_target_sha="target-001",
         source_project_id=1001,
         target_project_id=1001,
-        tenant_domains=tenant_domains,
-        priority=priority,
+        labels=labels,
         pipelines=[pipeline],
     )
 
@@ -68,26 +65,22 @@ class TestSelectMergeBatch:
         assert select_merge_batch(state, config) == []
 
     def test_non_overlapping_all_selected(self):
-        config = Phase1Config(
-            enabled=True, merge_limit=5, conflict_key="tenant_domains"
-        )
+        config = Phase1Config(enabled=True, merge_limit=5)
         mrs = [
-            _make_success_mr(1, ["tenant-a"], priority=1),
-            _make_success_mr(2, ["tenant-b"], priority=2),
-            _make_success_mr(3, ["tenant-c"], priority=3),
+            _make_success_mr(1, ["tenant-a"]),
+            _make_success_mr(2, ["tenant-b"]),
+            _make_success_mr(3, ["tenant-c"]),
         ]
         state = _make_state(mrs)
         batch = select_merge_batch(state, config)
         assert len(batch) == 3
 
     def test_overlap_blocks_second(self):
-        config = Phase1Config(
-            enabled=True, merge_limit=5, conflict_key="tenant_domains"
-        )
+        config = Phase1Config(enabled=True, merge_limit=5)
         mrs = [
-            _make_success_mr(1, ["tenant-a"], priority=1),
-            _make_success_mr(2, ["tenant-a"], priority=2),
-            _make_success_mr(3, ["tenant-b"], priority=3),
+            _make_success_mr(1, ["tenant-a"]),
+            _make_success_mr(2, ["tenant-a"]),
+            _make_success_mr(3, ["tenant-b"]),
         ]
         state = _make_state(mrs)
         batch = select_merge_batch(state, config)
@@ -96,26 +89,22 @@ class TestSelectMergeBatch:
         assert batch[1].iid == 3
 
     def test_merge_limit_respected(self):
-        config = Phase1Config(
-            enabled=True, merge_limit=2, conflict_key="tenant_domains"
-        )
+        config = Phase1Config(enabled=True, merge_limit=2)
         mrs = [
-            _make_success_mr(1, ["a"], priority=1),
-            _make_success_mr(2, ["b"], priority=2),
-            _make_success_mr(3, ["c"], priority=3),
+            _make_success_mr(1, ["tenant-a"]),
+            _make_success_mr(2, ["tenant-b"]),
+            _make_success_mr(3, ["tenant-c"]),
         ]
         state = _make_state(mrs)
         batch = select_merge_batch(state, config)
         assert len(batch) == 2
 
     def test_priority_ordering(self):
-        config = Phase1Config(
-            enabled=True, merge_limit=5, conflict_key="tenant_domains"
-        )
+        config = Phase1Config(enabled=True, merge_limit=5)
         mrs = [
-            _make_success_mr(1, ["a"], priority=10),
-            _make_success_mr(2, ["b"], priority=1),
-            _make_success_mr(3, ["c"], priority=5),
+            _make_success_mr(1, ["bot/approved: low", "tenant-a"]),
+            _make_success_mr(2, ["bot/approved: critical", "tenant-b"]),
+            _make_success_mr(3, ["bot/approved: medium", "tenant-c"]),
         ]
         state = _make_state(mrs)
         batch = select_merge_batch(state, config)
@@ -127,8 +116,8 @@ class TestSelectMergeBatch:
 class TestExecuteBatchMerge:
     def test_batch_merge_advances_target(self):
         mrs = [
-            _make_success_mr(1, ["a"], priority=1),
-            _make_success_mr(2, ["b"], priority=2),
+            _make_success_mr(1, ["tenant-a"]),
+            _make_success_mr(2, ["tenant-b"]),
         ]
         state = _make_state(mrs)
 
@@ -147,15 +136,13 @@ class TestExecuteBatchMerge:
 
 class TestComputeOverlapBlocked:
     def test_overlap_counted(self):
-        config = Phase1Config(
-            enabled=True, merge_limit=5, conflict_key="tenant_domains"
-        )
+        config = Phase1Config(enabled=True, merge_limit=5)
         mrs = [
-            _make_success_mr(1, ["a"], priority=1),
-            _make_success_mr(2, ["a"], priority=2),
-            _make_success_mr(3, ["b"], priority=3),
-            _make_success_mr(4, ["a"], priority=4),
+            _make_success_mr(1, ["tenant-a"]),
+            _make_success_mr(2, ["tenant-a"]),
+            _make_success_mr(3, ["tenant-b"]),
+            _make_success_mr(4, ["tenant-a"]),
         ]
         state = _make_state(mrs)
         blocked = compute_overlap_blocked(state, config)
-        assert blocked == 2  # MR 2 and MR 4 blocked by MR 1's "a"
+        assert blocked == 2  # MR 2 and MR 4 blocked by MR 1's "tenant-a"

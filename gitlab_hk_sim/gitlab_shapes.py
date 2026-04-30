@@ -53,7 +53,7 @@ def mr_shape(mr: MergeRequest, project: Project, base_url: str) -> dict[str, Any
             "head_sha": mr.sha,
             "start_sha": mr.rebased_target_sha,
         },
-        "labels": mr.labels + [f"tenant-{d}" for d in (mr.tenant_domains or [])],
+        "labels": mr.labels,
         "web_url": web_url,
         "work_in_progress": mr.draft,
         "merge_when_pipeline_succeeds": False,

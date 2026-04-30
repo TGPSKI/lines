@@ -54,23 +54,30 @@ class MetricsCollector:
             for mr in state.merge_requests
             if mr.arrival_tick > 0
         ]
-        self.record({
-            "event": "scenario_meta",
-            "tick": 0,
-            "total_mrs": len(state.merge_requests),
-            "failure_rate": state.pipeline_duration_config.failure_rate,
-            "pipeline_duration": {
-                "min": state.pipeline_duration_config.min_ticks,
-                "max": state.pipeline_duration_config.max_ticks,
-            },
-            "force_merges": force_merges,
-            "cancellations": cancellations,
-            "arrivals": arrivals,
-            "scheduled_target_advances": {
-                str(k): v
-                for k, v in state.scheduled_target_advances.items()
-            },
-        })
+        pushes = [
+            {"iid": mr.iid, "tick": mr.push_tick}
+            for mr in state.merge_requests
+            if mr.push_tick > 0
+        ]
+        self.record(
+            {
+                "event": "scenario_meta",
+                "tick": 0,
+                "total_mrs": len(state.merge_requests),
+                "failure_rate": state.pipeline_duration_config.failure_rate,
+                "pipeline_duration": {
+                    "min": state.pipeline_duration_config.min_ticks,
+                    "max": state.pipeline_duration_config.max_ticks,
+                },
+                "force_merges": force_merges,
+                "cancellations": cancellations,
+                "arrivals": arrivals,
+                "pushes": pushes,
+                "scheduled_target_advances": {
+                    str(k): v for k, v in state.scheduled_target_advances.items()
+                },
+            }
+        )
 
     def record_snapshot(self, state: SimState) -> None:
         """Record a full state snapshot at current tick."""

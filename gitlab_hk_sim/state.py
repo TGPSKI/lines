@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
-
 MERGE_LABELS_PRIORITY = [
     "bot/approved: critical",
     "bot/approved: urgent",
@@ -101,7 +100,6 @@ class MergeRequest:
     sha: str = ""
     rebased_target_sha: str = ""
     labels: list[str] = field(default_factory=list)
-    tenant_domains: list[str] = field(default_factory=list)
     pipelines: list[Pipeline] = field(default_factory=list)
     commits: list[Commit] = field(default_factory=list)
     approved_at: str = ""
@@ -109,6 +107,7 @@ class MergeRequest:
     arrival_tick: int = 0
     cancel_tick: int = 0
     force_merge_tick: int = 0
+    push_tick: int = 0
     ci_duration: int | None = None
 
     @property
