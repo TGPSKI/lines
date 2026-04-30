@@ -146,13 +146,17 @@ def compare_shape(
 
 
 def label_event_shape(
-    event_id: int, label_name: str, action: str = "add"
+    event_id: int,
+    label_name: str,
+    action: str = "add",
+    created_at: str = "2024-01-01T00:00:00Z",
 ) -> dict[str, Any]:
     return {
         "id": event_id,
         "label": {"id": event_id, "name": label_name},
         "action": action,
-        "created_at": "2024-01-01T00:00:00Z",
+        "created_at": created_at,
+        "user": {"username": "sim-bot"},
     }
 
 

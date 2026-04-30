@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query, Request, Response
 from . import gitlab_shapes as shapes
 from .metrics import MetricsCollector
 from .mutations import cancel_pipeline, merge_mr, rebase_mr, tick
-from .state import Commit, MRState, PipelineStatus, SimState
+from .state import MERGE_LABELS_SET, Commit, MRState, PipelineStatus, SimState
 
 gitlab_router = APIRouter()
 sim_router = APIRouter(prefix="/__sim")
@@ -191,8 +191,16 @@ def get_mr_label_events(
     if mr is None:
         return []
 
+    default_ts = "2024-01-01T00:00:00Z"
     events = [
-        shapes.label_event_shape(i + 1, label) for i, label in enumerate(mr.labels)
+        shapes.label_event_shape(
+            i + 1,
+            label,
+            created_at=(
+                mr.approved_at if label in MERGE_LABELS_SET else default_ts
+            ),
+        )
+        for i, label in enumerate(mr.labels)
     ]
     return _paginate(events, page, per_page, response)
 

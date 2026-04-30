@@ -22,6 +22,8 @@ import os
 import subprocess
 import sys
 import time
+from datetime import datetime
+from functools import partial
 from typing import Any
 
 import requests
@@ -109,6 +111,76 @@ def is_mergeable(mr: dict) -> bool:
     return has_merge_label and not has_hold_label and not mr.get("draft", False)
 
 
+def preprocess_mrs(
+    sim_url: str, project_id: int, mrs: list[dict]
+) -> list[dict]:
+    """Model production's preprocess_merge_requests filtering and API overhead.
+
+    In production, preprocess_merge_requests:
+    1. Skips cannot_be_merged, draft, 0-commit MRs
+    2. Fetches label_events per MR to validate approval (authorized user added
+       a merge label). MRs without valid approval are excluded.
+    3. Extracts approved_at from the label event for sort tiebreaking.
+    4. Returns sorted by (label_priority, approved_at).
+    """
+    result = []
+    for mr in mrs:
+        if mr.get("merge_status") in ("cannot_be_merged", "cannot_be_merged_recheck"):
+            continue
+        if mr.get("draft", False):
+            continue
+
+        # mr.commits() — production checks len(mr.commits()) == 0
+        resp = requests.get(
+            f"{sim_url}/api/v4/projects/{project_id}"
+            f"/merge_requests/{mr['iid']}/commits",
+            params={"per_page": 1, "page": 1},
+        )
+        resp.raise_for_status()
+        if not resp.json():
+            continue
+
+        labels = set(mr.get("labels", []))
+        if not labels:
+            continue
+        has_merge_label = bool(labels & MERGE_LABELS_SET)
+        has_hold_label = bool(labels & HOLD_LABELS)
+        if not has_merge_label or has_hold_label:
+            continue
+
+        # gl.get_merge_request_label_events(mr) — find valid approval
+        resp = requests.get(
+            f"{sim_url}/api/v4/projects/{project_id}"
+            f"/merge_requests/{mr['iid']}/resource_label_events",
+            params={"per_page": 100, "page": 1},
+        )
+        resp.raise_for_status()
+        label_events = resp.json()
+
+        approval_found = False
+        approved_at = ""
+        for event in reversed(label_events):
+            if event.get("action") != "add":
+                continue
+            label_info = event.get("label", {})
+            if not label_info:
+                continue
+            label_name = label_info.get("name", "")
+            if label_name in MERGE_LABELS_SET and not approval_found:
+                approval_found = True
+                approved_at = event.get("created_at", "")
+
+        if not approval_found:
+            continue
+
+        mr_copy = dict(mr)
+        mr_copy["approved_at"] = approved_at
+        result.append(mr_copy)
+
+    result.sort(key=_mr_sort_key)
+    return result
+
+
 def needs_rebase(sim_url: str, project_id: int, mr_sha: str, target_head: str) -> bool:
     resp = requests.get(
         f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
@@ -138,6 +210,30 @@ def has_active_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
         p["status"] in ("pending", "running") and p["sha"] == mr["sha"]
         for p in pipelines
     )
+
+
+def is_consuming_slot(
+    sim_url: str, project_id: int, mr: dict, target_head: str
+) -> bool:
+    """Check if MR is consuming a CI concurrency slot.
+
+    Production active-cap logic (PR #5508):
+    - Rebased MR with running/pending/success pipeline = active
+      (success = green and waiting to merge, still occupying a slot)
+    - Non-rebased MR with running/pending pipeline = active
+      (previous rebase still in progress)
+    """
+    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+    if not pipelines:
+        return False
+
+    latest_status = pipelines[0]["status"]
+    is_rebased = not needs_rebase(sim_url, project_id, mr["sha"], target_head)
+
+    if is_rebased:
+        return latest_status in ("running", "pending", "success")
+    else:
+        return latest_status in ("running", "pending")
 
 
 def rebase_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
@@ -185,117 +281,154 @@ def reset_sim(sim_url: str) -> None:
 
 
 def run_cycle_top_k(
-    sim_url: str, project_id: int, limit: int, log: logging.Logger
+    sim_url: str,
+    project_id: int,
+    limit: int,
+    log: logging.Logger,
+    *,
+    insist: bool = True,
 ) -> None:
-    """Top-K policy: only consider the first K MRs by position.
+    """Top-K policy: only consider the first K MRs by priority.
 
-    Behavior:
-    - Sort MRs by position (as returned by API).
-    - Only the first `limit` MRs are eligible for any work.
-    - Merge eligible ready MRs.
-    - Rebase eligible non-rebased MRs.
-    - MRs below the top-K window are invisible.
+    Models hemslo's proposed design from PR #5508:
+    - merge_requests[:rebase_limit] — only the first K MRs are visible.
+    - Merge phase: single merge, rebase=True. If insist=True, block on
+      first rebased MR with running pipeline. If insist=False, skip it.
+    - Rebase phase: rebase non-rebased MRs in the window, skip active.
+    - MRs below the top-K window are completely invisible.
     """
     state = get_state(sim_url)
     target_head = state["target_head"]
 
     all_mrs = get_all_open_mrs(sim_url, project_id)
+    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
 
-    log.info(f"  Open MRs: {len(all_mrs)}, target_head: {target_head}")
+    log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
     # Top-K window: only first `limit` MRs are visible
-    eligible_mrs = all_mrs[:limit]
+    eligible_mrs = preprocessed[:limit]
     log.info(f"  Top-K window: MRs {[m['iid'] for m in eligible_mrs]}")
 
     merge_count = 0
     rebase_count = 0
 
-    # Merge ready MRs in the window
+    # Merge phase: single merge, rebase=True
     for mr in eligible_mrs:
-        if not is_mergeable(mr):
-            continue
         if needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if has_successful_pipeline(sim_url, project_id, mr):
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if not pipelines:
+            continue
+        latest_status = pipelines[0]["status"]
+        if latest_status in ("running", "pending"):
+            if insist:
+                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
+                break
+            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
+            continue
+        if latest_status == "success":
             log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
             merge_mr(sim_url, project_id, mr["iid"])
             merge_count += 1
-            state = get_state(sim_url)
-            target_head = state["target_head"]
+            break
+        continue
 
-    # Rebase non-rebased MRs in the window
+    # Rebase phase: rebase non-rebased MRs in the window (skip active)
+    if merge_count > 0:
+        state = get_state(sim_url)
+        target_head = state["target_head"]
     for mr in eligible_mrs:
         if mr["state"] != "opened":
             continue
-        if not is_mergeable(mr):
+        if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-            rebase_mr(sim_url, project_id, mr["iid"])
-            rebase_count += 1
+        if has_active_pipeline(sim_url, project_id, mr):
+            continue
+        log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
 
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
 
 def run_cycle_active_cap(
-    sim_url: str, project_id: int, limit: int, log: logging.Logger
+    sim_url: str,
+    project_id: int,
+    limit: int,
+    log: logging.Logger,
+    *,
+    insist: bool = True,
 ) -> None:
     """Active-cap policy: maintain steady-state CI concurrency budget.
 
-    Behavior:
-    - Count MRs with active (pending/running) pipelines = active_count.
-    - Budget = limit - active_count (remaining slots).
-    - Merge ready MRs first (frees slots on next cycle).
-    - Rebase up to `budget` MRs, by priority, to fill remaining CI slots.
-    - MRs below the budget are not starved — any open MR can fill a slot.
+    Models PR #5508 use_active_cap=True with production merge semantics:
+    - Merge phase (single merge, rebase=True): if insist=True, block on
+      first rebased MR with running pipeline. If insist=False, skip it.
+    - Rebase phase: classify all MRs for active slots, compute budget,
+      rebase up to budget MRs by priority.
     """
     state = get_state(sim_url)
     target_head = state["target_head"]
 
     all_mrs = get_all_open_mrs(sim_url, project_id)
+    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
 
-    log.info(f"  Open MRs: {len(all_mrs)}, target_head: {target_head}")
-
-    # Count active pipelines (the CI inventory currently in flight)
-    active_count = 0
-    for mr in all_mrs:
-        if has_active_pipeline(sim_url, project_id, mr):
-            active_count += 1
-
-    budget = max(0, limit - active_count)
-    log.info(f"  Active pipelines: {active_count}, budget: {budget} (limit={limit})")
+    log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
     merge_count = 0
     rebase_count = 0
 
-    # Merge ready MRs (no budget constraint on merging)
-    for mr in all_mrs:
-        if not is_mergeable(mr):
+    # Merge phase: single merge, rebase=True
+    for mr in preprocessed:
+        if mr["state"] != "opened":
             continue
         if needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if has_successful_pipeline(sim_url, project_id, mr):
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if not pipelines:
+            continue
+        latest_status = pipelines[0]["status"]
+        if latest_status in ("running", "pending"):
+            if insist:
+                log.info(
+                    f"  INSIST MR !{mr['iid']} (pipeline {latest_status})"
+                )
+                break
+            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
+            continue
+        if latest_status == "success":
             log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
             merge_mr(sim_url, project_id, mr["iid"])
             merge_count += 1
-            state = get_state(sim_url)
-            target_head = state["target_head"]
-
-    # Rebase to fill remaining budget (any open MR by priority)
-    for mr in all_mrs:
-        if rebase_count >= budget:
             break
+        continue
+
+    # Refresh state after potential merge
+    if merge_count > 0:
+        state = get_state(sim_url)
+        target_head = state["target_head"]
+
+    # Rebase phase: classify and fill budget
+    already_active = 0
+    needs_rebase_mrs: list[dict] = []
+
+    for mr in preprocessed:
         if mr["state"] != "opened":
             continue
-        if not is_mergeable(mr):
-            continue
-        # Skip if already has an active pipeline (already consuming a slot)
-        if has_active_pipeline(sim_url, project_id, mr):
-            continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-            rebase_mr(sim_url, project_id, mr["iid"])
-            rebase_count += 1
+        if is_consuming_slot(sim_url, project_id, mr, target_head):
+            already_active += 1
+        elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            needs_rebase_mrs.append(mr)
+
+    budget = max(0, limit - already_active)
+    log.info(f"  Already active: {already_active}, budget: {budget} (limit={limit})")
+
+    for mr in needs_rebase_mrs:
+        if rebase_count >= budget:
+            break
+        log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
 
     log.info(
         f"  Cycle result: {merge_count} merges,"
@@ -304,50 +437,76 @@ def run_cycle_active_cap(
 
 
 def run_cycle_old_burst(
-    sim_url: str, project_id: int, limit: int, log: logging.Logger
+    sim_url: str,
+    project_id: int,
+    limit: int,
+    log: logging.Logger,
+    *,
+    insist: bool = True,
 ) -> None:
-    """Old burst policy: rebase up to limit MRs per run, ignoring active state.
+    """Old burst policy: current production master behavior.
 
-    Behavior:
-    - Each reconcile run can rebase up to `limit` MRs.
-    - The limit resets every run (no awareness of already-active CI).
-    - Over time, active CI can exceed the intended cap.
+    Models reconcile/gitlab_housekeeping.py on master with rebase=True:
+    - Merge phase (single merge, rebase=True): if insist=True, block on
+      first rebased MR with running pipeline. If insist=False, skip it.
+    - Rebase phase: rebase up to `limit` non-rebased MRs per run.
+      Skips MRs with running pipelines (wait_for_pipeline=True).
+      The limit resets every run (no awareness of already-active CI).
     """
     state = get_state(sim_url)
     target_head = state["target_head"]
 
     all_mrs = get_all_open_mrs(sim_url, project_id)
+    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
 
-    log.info(f"  Open MRs: {len(all_mrs)}, target_head: {target_head}")
+    log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
     merge_count = 0
     rebase_count = 0
 
-    # Merge ready MRs (no cap — production old-burst only caps rebases)
-    for mr in all_mrs:
-        if not is_mergeable(mr):
+    # Merge phase: single merge, rebase=True
+    for mr in preprocessed:
+        if mr["state"] != "opened":
             continue
         if needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if has_successful_pipeline(sim_url, project_id, mr):
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if not pipelines:
+            continue
+        latest_status = pipelines[0]["status"]
+        if latest_status in ("running", "pending"):
+            if insist:
+                log.info(
+                    f"  INSIST MR !{mr['iid']} (pipeline {latest_status})"
+                )
+                break
+            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
+            continue
+        if latest_status == "success":
             log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
             merge_mr(sim_url, project_id, mr["iid"])
             merge_count += 1
-            state = get_state(sim_url)
-            target_head = state["target_head"]
+            break
+        continue
 
-    # Rebase up to limit (regardless of active pipelines)
-    for mr in all_mrs:
+    # Refresh state after potential merge
+    if merge_count > 0:
+        state = get_state(sim_url)
+        target_head = state["target_head"]
+
+    # Rebase phase: rebase up to limit (skip rebased, skip active pipelines)
+    for mr in preprocessed:
         if rebase_count >= limit:
             break
         if mr["state"] != "opened":
             continue
-        if not is_mergeable(mr):
+        if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-            rebase_mr(sim_url, project_id, mr["iid"])
-            rebase_count += 1
+        if has_active_pipeline(sim_url, project_id, mr):
+            continue
+        log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
 
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
@@ -366,47 +525,35 @@ def run_cycle_active_cap_phase1(
 ) -> None:
     """Active-cap + Phase 1 optimistic multi-merge.
 
-    Combines active-cap rebase concurrency control with Phase 1 optimistic
-    multi-merge. The key Phase 1 insight:
+    Combines active-cap rebase concurrency control with Phase 1 non-blocking
+    batch merge. Optimized for throughput over strict priority insist:
 
-    1. Build the "same-root success pool": all MRs that are rebased onto the
-       current target AND have a successful pipeline.
-    2. From that pool, select a non-overlapping batch (by tenant domains).
-    3. Merge the entire batch — each merge advances target, but because all
-       shared the same root, subsequent MRs in the batch use skip_ci rebase
-       (fast-forward) before merge.
+    Merge phase:
+    1. Build the "same-root success pool": all MRs rebased onto current
+       target with a successful pipeline.
+    2. If pool is non-empty: select non-overlapping batch, merge all.
+    3. If pool is empty: skip (no insist/block). Let pipelines finish
+       naturally; the next cycle will find them in the pool.
 
-    This models ADR-019 Phase 1:
-    - Active-cap maintains N useful pipeline slots (rebase phase)
-    - Phase 1 consumes same-root success pool via batch merge
-    - Result: >1 MR merged per target advance cycle
+    Rebase phase:
+    - Classify all MRs for active slots, compute budget.
+    - Rebase up to budget MRs by priority to feed the pool.
     """
     state = get_state(sim_url)
     target_head = state["target_head"]
 
     all_mrs = get_all_open_mrs(sim_url, project_id)
+    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
 
-    log.info(f"  Open MRs: {len(all_mrs)}, target_head: {target_head}")
-
-    # Count active pipelines for budget
-    active_count = 0
-    for mr in all_mrs:
-        if has_active_pipeline(sim_url, project_id, mr):
-            active_count += 1
-
-    budget = max(0, limit - active_count)
-    log.info(f"  Active pipelines: {active_count}, budget: {budget} (limit={limit})")
+    log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
     merge_count = 0
     rebase_count = 0
 
-    # Phase 1: Build same-root success pool BEFORE any merges
-    # These are MRs rebased onto current target with successful pipelines
+    # Phase 1: Build same-root success pool
     same_root_pool: list[dict] = []
-    for mr in all_mrs:
+    for mr in preprocessed:
         if mr["state"] != "opened":
-            continue
-        if not is_mergeable(mr):
             continue
         if needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
@@ -415,65 +562,73 @@ def run_cycle_active_cap_phase1(
 
     log.info(f"  Same-root success pool: {len(same_root_pool)} MRs")
 
-    # Select non-overlapping batch from pool (greedy by priority/position)
-    merge_batch: list[dict] = []
-    used_domains: set[str] = set()
-    merge_limit = limit  # use limit as merge_limit too
+    if same_root_pool:
+        # Select non-overlapping batch from pool (greedy by priority)
+        merge_batch: list[dict] = []
+        used_domains: set[str] = set()
+        merge_limit = limit
 
-    for mr in same_root_pool:
-        if len(merge_batch) >= merge_limit:
-            break
-        mr_domains = get_tenant_domains(mr)
+        for mr in same_root_pool:
+            if len(merge_batch) >= merge_limit:
+                break
+            mr_domains = get_tenant_domains(mr)
 
-        if not merge_batch:
-            # First MR always included (the "safe" first merge)
-            merge_batch.append(mr)
-            used_domains.update(mr_domains)
-        else:
-            # Subsequent MRs: must have tenant labels and no overlap
-            if not mr_domains:
-                continue
-            if mr_domains & used_domains:
-                log.debug(
-                    f"    SKIP MR !{mr['iid']} (overlap: {mr_domains & used_domains})"
-                )
-                continue
-            merge_batch.append(mr)
-            used_domains.update(mr_domains)
+            if not merge_batch:
+                merge_batch.append(mr)
+                used_domains.update(mr_domains)
+            else:
+                if not mr_domains:
+                    continue
+                if mr_domains & used_domains:
+                    log.debug(
+                        f"    SKIP MR !{mr['iid']}"
+                        f" (overlap: {mr_domains & used_domains})"
+                    )
+                    continue
+                merge_batch.append(mr)
+                used_domains.update(mr_domains)
 
-    # Execute the batch merge
-    if merge_batch:
+        # Execute the batch merge
         log.info(f"  Phase 1 batch: {len(merge_batch)} MRs selected for merge")
         for i, mr in enumerate(merge_batch):
             if i == 0:
                 log.info(f"  MERGE MR !{mr['iid']} ({mr['title']}) [first]")
             else:
                 log.info(
-                    f"  MULTI-MERGE MR !{mr['iid']} ({mr['title']}) [phase1-optimistic]"
+                    f"  MULTI-MERGE MR !{mr['iid']} ({mr['title']})"
+                    " [phase1-optimistic]"
                 )
             merge_mr(sim_url, project_id, mr["iid"])
             merge_count += 1
+    else:
+        log.info("  Pool empty — skipping merge, letting pipelines accumulate")
 
-        # Refresh state after batch
+    # Refresh state after merge(s)
+    if merge_count > 0:
         state = get_state(sim_url)
         target_head = state["target_head"]
 
-    # Rebase to fill remaining budget (active-cap logic)
-    # Re-fetch MRs since some were merged
-    all_mrs = get_all_open_mrs(sim_url, project_id)
-    for mr in all_mrs:
-        if rebase_count >= budget:
-            break
+    # Rebase phase: classify and fill budget
+    already_active = 0
+    needs_rebase_mrs: list[dict] = []
+
+    for mr in preprocessed:
         if mr["state"] != "opened":
             continue
-        if not is_mergeable(mr):
-            continue
-        if has_active_pipeline(sim_url, project_id, mr):
-            continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-            rebase_mr(sim_url, project_id, mr["iid"])
-            rebase_count += 1
+        if is_consuming_slot(sim_url, project_id, mr, target_head):
+            already_active += 1
+        elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            needs_rebase_mrs.append(mr)
+
+    budget = max(0, limit - already_active)
+    log.info(f"  Already active: {already_active}, budget: {budget} (limit={limit})")
+
+    for mr in needs_rebase_mrs:
+        if rebase_count >= budget:
+            break
+        log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
 
     optimistic = max(0, merge_count - 1) if merge_count > 0 else 0
     log.info(
@@ -487,9 +642,12 @@ def run_cycle_active_cap_phase1(
 # ---------------------------------------------------------------------------
 
 POLICY_RUNNERS = {
-    "top-k": run_cycle_top_k,
-    "active-cap": run_cycle_active_cap,
-    "old-burst": run_cycle_old_burst,
+    "top-k": partial(run_cycle_top_k, insist=True),
+    "top-k-no-insist": partial(run_cycle_top_k, insist=False),
+    "active-cap": partial(run_cycle_active_cap, insist=True),
+    "active-cap-no-insist": partial(run_cycle_active_cap, insist=False),
+    "old-burst": partial(run_cycle_old_burst, insist=True),
+    "old-burst-no-insist": partial(run_cycle_old_burst, insist=False),
     "active-cap+phase1": run_cycle_active_cap_phase1,
 }
 
@@ -608,12 +766,29 @@ def run_comparison(args: argparse.Namespace) -> None:
 
     results: dict[str, dict] = {}
 
-    policies = ["top-k", "active-cap", "old-burst", "active-cap+phase1"]
+    policies = [
+        "top-k",
+        "top-k-no-insist",
+        "active-cap",
+        "active-cap-no-insist",
+        "old-burst",
+        "old-burst-no-insist",
+        "active-cap+phase1",
+    ]
 
-    reports_dir = os.path.join(
-        os.path.abspath(os.path.dirname(__file__) or "."), "reports", "last-run"
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
+    base_reports = os.path.join(
+        os.path.abspath(os.path.dirname(__file__) or "."), "reports"
     )
+    reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
+
+    latest_link = os.path.join(base_reports, "latest")
+    if os.path.islink(latest_link):
+        os.unlink(latest_link)
+    os.symlink(timestamp, latest_link)
+
+    log.info(f"Reports directory: {reports_dir}")
 
     for policy in policies:
         log.info(f"\n{'#' * 60}")
@@ -674,10 +849,16 @@ def run_comparison(args: argparse.Namespace) -> None:
             time.sleep(1)
 
     # Print comparison table
+    col_w = 12
+    header_policies = [
+        "top-k", "top-k-NI", "act-cap", "act-cap-NI",
+        "burst", "burst-NI", "cap+ph1",
+    ]
+    table_width = 30 + col_w * len(header_policies) + len(header_policies) + 1
     print("\n")
-    print("=" * 90)
+    print("=" * table_width)
     print("POLICY COMPARISON")
-    print("=" * 90)
+    print("=" * table_width)
     print()
 
     metrics_keys = [
@@ -708,8 +889,6 @@ def run_comparison(args: argparse.Namespace) -> None:
     ]
 
     # Header
-    col_w = 14
-    header_policies = ["top-k", "active-cap", "old-burst", "cap+phase1"]
     print(
         f"| {'Metric':<28} |"
         + "|".join(f" {p:>{col_w - 2}} " for p in header_policies)
@@ -717,7 +896,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     )
     print(f"|{'-' * 30}|" + "|".join("-" * col_w for _ in header_policies) + "|")
 
-    policy_keys = ["top-k", "active-cap", "old-burst", "active-cap+phase1"]
+    policy_keys = policies
     for key, label in metrics_keys:
         if key is None:
             print(
@@ -733,10 +912,15 @@ def run_comparison(args: argparse.Namespace) -> None:
                 vals.append(f"{v:.3f}")
             else:
                 vals.append(str(v))
-        print(f"| {label:<28} |" + "|".join(f" {v:>{col_w - 2}} " for v in vals) + "|")
+        print(
+            f"| {label:<28} |"
+            + "|".join(f" {v:>{col_w - 2}} " for v in vals)
+            + "|"
+        )
 
     print()
     print("Key:")
+    print("  NI = no-insist (skip running MRs, merge first available green)")
     print("  tick ≈ 1 minute of CI time (when using pipeline_durations config)")
     print("  throughput = MRs merged / total ticks elapsed")
     print("  queue drain = % of initial open MRs that got merged")
@@ -747,15 +931,19 @@ def run_comparison(args: argparse.Namespace) -> None:
     print("  - Lower peak active = better concurrency control (limit respected)")
     print("  - Lower duplicate rebases = less wasted CI")
     print("  - Higher same-root pool = more Phase 1 multi-merge candidates")
+    print(
+        "  - insist vs NI: insist respects priority but may idle;"
+        " NI maximizes merges"
+    )
     print()
 
     # Save comparison table to file
     comparison_file = os.path.join(reports_dir, "8hour-comparison.txt")
     with open(comparison_file, "w") as f:
         f.write("\n\n")
-        f.write("=" * 90 + "\n")
+        f.write("=" * table_width + "\n")
         f.write("POLICY COMPARISON\n")
-        f.write("=" * 90 + "\n\n")
+        f.write("=" * table_width + "\n\n")
         f.write(
             f"| {'Metric':<28} |"
             + "|".join(f" {p:>{col_w - 2}} " for p in header_policies)
@@ -781,7 +969,10 @@ def run_comparison(args: argparse.Namespace) -> None:
                 cells = "|".join(f" {v:>{col_w - 2}} " for v in vals)
                 f.write(f"| {label:<28} |{cells}|\n")
         f.write("\nKey:\n")
-        f.write("  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n")
+        f.write("  NI = no-insist (skip running MRs, merge first available green)\n")
+        f.write(
+            "  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n"
+        )
         f.write("  throughput = MRs merged / total ticks elapsed\n")
         f.write("  queue drain = % of initial open MRs that got merged\n\n")
         f.write("Interpretation:\n")
@@ -791,7 +982,11 @@ def run_comparison(args: argparse.Namespace) -> None:
             "  - Lower peak active = better concurrency control (limit respected)\n"
         )
         f.write("  - Lower duplicate rebases = less wasted CI\n")
-        f.write("  - Higher same-root pool = more Phase 1 multi-merge candidates\n\n")
+        f.write("  - Higher same-root pool = more Phase 1 multi-merge candidates\n")
+        f.write(
+            "  - insist vs NI: insist respects priority but may idle;"
+            " NI maximizes merges\n\n"
+        )
     log.info(f"Comparison saved to {comparison_file}")
     log.info(f"Per-policy NDJSON files saved to {reports_dir}/")
 
