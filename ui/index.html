@@ -108,10 +108,21 @@
     .chart-policy-tabs { display: flex; gap: 0.3rem; margin-bottom: 0.6rem; }
     .cp-tab { padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.78rem; }
     .cp-tab.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
-    .chart-area { display: grid; gap: 0.8rem; }
-    @media (min-width: 1000px) { .chart-area { grid-template-columns: 1fr 1fr; } }
-    .chart-wrap { height: 300px; }
+    .chart-view-toggle { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
+    .chart-view-toggle button { padding: 0.25rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.72rem; }
+    .chart-view-toggle button.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
+    .chart-pickers { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
+    .chart-picker { display: flex; align-items: center; gap: 0.3rem; }
+    .cp-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
+    .chart-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; flex: 1; overflow: auto; }
+    .chart-pair.single-view { grid-template-columns: 1fr; }
+    .chart-pair.single-view .chart-col:nth-child(2) { display: none; }
+    .chart-col { min-width: 0; }
+    .chart-col-title { font-size: 0.78rem; margin-bottom: 0.3rem; color: var(--text); }
+    .chart-wrap { height: 260px; }
     .brush-wrap { height: 50px; margin: 0.3rem 0; }
+    .swim-legend { display: flex; gap: 1rem; font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; flex-wrap: wrap; justify-content: center; }
+    .swim-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 0.25rem; }
     .swim-controls { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-top: 0.4rem; flex-wrap: wrap; }
     .swim-controls input { width: 4.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 0.2rem 0.3rem; }
   </style>
@@ -165,22 +176,39 @@
 
   <!-- Tab: Composition + Swimlane -->
   <div class="tab-panel" id="panelCharts">
-    <div class="chart-policy-tabs" id="chartPolicyTabs"></div>
-    <div class="chart-area">
-      <div>
-        <h3 style="font-size:0.8rem;margin-bottom:0.4rem">Queue composition (stacked bar)</h3>
-        <div class="chart-wrap"><canvas id="chartCanvas"></canvas></div>
-        <div class="brush-wrap" id="brushArea"></div>
+    <div class="chart-view-toggle" id="chartViewToggle">
+      <button class="active" data-mode="single">Single</button>
+      <button data-mode="compare">Compare</button>
+    </div>
+    <div class="chart-pickers" id="chartPickers">
+      <div class="chart-picker" id="pickerL"><span class="cp-label">Policy:</span><div class="chart-policy-tabs" id="chartPolicyTabsL"></div></div>
+      <div class="chart-picker" id="pickerR"><span class="cp-label">Right:</span><div class="chart-policy-tabs" id="chartPolicyTabsR"></div></div>
+    </div>
+    <div class="chart-pair single-view" id="chartPair">
+      <div class="chart-col">
+        <h3 class="chart-col-title" id="chartTitleL"></h3>
+        <div class="chart-wrap"><canvas id="chartCanvasL"></canvas></div>
+        <div class="brush-wrap" id="brushAreaL"></div>
+        <div id="swimAreaL" style="overflow-x:auto;min-height:80px"></div>
       </div>
-      <div>
-        <h3 style="font-size:0.8rem;margin-bottom:0.4rem">Per-MR swimlane</h3>
-        <div id="swimArea" style="overflow-x:auto;min-height:100px"></div>
-        <div class="swim-controls">
-          <label>From <input type="number" id="rmin" value="0" min="0" /></label>
-          <label>To <input type="number" id="rmax" value="100" min="0" /></label>
-          <button class="pb-btn" id="fitBtn">Fit all</button>
-        </div>
+      <div class="chart-col">
+        <h3 class="chart-col-title" id="chartTitleR"></h3>
+        <div class="chart-wrap"><canvas id="chartCanvasR"></canvas></div>
+        <div class="brush-wrap" id="brushAreaR"></div>
+        <div id="swimAreaR" style="overflow-x:auto;min-height:80px"></div>
       </div>
+    </div>
+    <div class="swim-legend">
+      <span><i style="background:rgba(110,118,129,0.9)"></i>Pending</span>
+      <span><i style="background:rgba(163,113,247,0.9)"></i>CI Running</span>
+      <span><i style="background:rgba(46,160,67,0.9)"></i>Ready</span>
+      <span><i style="background:rgba(210,153,34,0.9)"></i>Stale</span>
+      <span><i style="background:#58a6ff; border-radius:50%"></i>Merged</span>
+    </div>
+    <div class="swim-controls">
+      <label>From <input type="number" id="rmin" value="0" min="0" /></label>
+      <label>To <input type="number" id="rmax" value="100" min="0" /></label>
+      <button class="pb-btn" id="fitBtn">Fit all</button>
     </div>
   </div>
 
@@ -188,7 +216,7 @@
   (function () {
     const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)" };
     const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
-    let playhead = 0, playTimer = null, xRange = [0, 100], chartInstance = null;
+    let playhead = 0, playTimer = null, xRange = [0, 100];
     let filesData = [], activeIndex = 0;
 
     // --- Parsing & Analysis ---
@@ -209,15 +237,37 @@
           else if (m === "running" && n === "success" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "running" }); p.succAt = e.tick; }
         });
       });
+      const allMergeTicks = evs.filter(e => e.event === "merge").map(e => e.tick).sort((a, b) => a - b);
       pipe.forEach((p, pid) => {
         if (p.succAt == null) return;
-        let t1 = maxT + 1;
-        evs.forEach(e => { if ((e.event === "merge" || e.event === "rebase") && e.mr_iid === p.mr && e.tick > p.succAt) t1 = Math.min(t1, e.tick); });
-        if (t1 > p.succAt) segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+        let nextMerge = null, nextRebase = null;
+        evs.forEach(e => {
+          if (String(e.mr_iid) !== String(p.mr) || e.tick < p.succAt) return;
+          if (e.event === "merge" && e.tick >= p.succAt && (!nextMerge || e.tick < nextMerge)) nextMerge = e.tick;
+          if (e.event === "rebase" && e.tick > p.succAt && (!nextRebase || e.tick < nextRebase)) nextRebase = e.tick;
+        });
+        const t1 = Math.min(nextMerge ?? maxT, nextRebase ?? maxT, maxT);
+        if (t1 <= p.succAt) return;
+        if (nextMerge != null && (nextRebase == null || nextMerge <= nextRebase)) {
+          segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+        } else if (nextRebase != null) {
+          segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "stale" });
+        } else {
+          const firstOtherMerge = allMergeTicks.find(mt => mt > p.succAt);
+          if (firstOtherMerge != null && firstOtherMerge < t1) {
+            segs.push({ mr: p.mr, start: p.succAt, end: firstOtherMerge, kind: "success" });
+            segs.push({ mr: p.mr, start: firstOtherMerge, end: t1, kind: "stale" });
+          } else {
+            segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+          }
+        }
       });
-      evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + 0.35, kind: "merged" }); });
+      const mergeTick = new Map();
+      evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) { mergeTick.set(e.mr_iid, e.tick); segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + Math.max(1, maxT * 0.006), kind: "merged" }); } });
+      // Trim all segments to not extend past the MR's merge tick
+      segs.forEach(s => { const mt = mergeTick.get(s.mr); if (mt != null && s.kind !== "merged" && s.end > mt) s.end = mt; });
       segs.forEach(s => { s.end = Math.max(s.end, s.start); });
-      return segs.sort((a, b) => a.mr - b.mr || a.start - b.start);
+      return segs.filter(s => s.end > s.start).sort((a, b) => a.mr - b.mr || a.start - b.start);
     }
 
     function analyze(raw) {
@@ -227,9 +277,9 @@
       const byT = new Map();
       evs.forEach(e => { if (e.event === "tick" && e.tick != null) byT.set(e.tick, { ...e }); else if (e.event === "snapshot" && e.tick != null && !byT.has(e.tick)) byT.set(e.tick, { ...e }); });
       evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; r.stale_successes = r.stale_successes ?? e.stale_successes; r.same_root_success_pool = r.same_root_success_pool ?? e.same_root_success_pool; r.active_pipelines = r.active_pipelines ?? e.active_pipelines; } } });
-      const series = { labels: [], stale: [], pool: [], active: [], other: [], open: [] };
-      for (let t = 0; t <= maxTick; t++) { const w = byT.get(t) || {}, o = w.open_mrs ?? 0, st = w.stale_successes ?? 0, p = w.same_root_success_pool ?? 0, ap = w.active_pipelines ?? 0;
-        series.labels.push(t); series.stale.push(st); series.pool.push(p); series.active.push(ap); series.other.push(Math.max(0, o - st - p - ap)); series.open.push(o); }
+      const series = { labels: [], pool: [], active: [], rest: [], open: [] };
+      for (let t = 0; t <= maxTick; t++) { const w = byT.get(t) || {}, o = w.open_mrs ?? 0, p = w.same_root_success_pool ?? 0, ap = w.active_pipelines ?? 0;
+        series.labels.push(t); series.pool.push(p); series.active.push(ap); series.rest.push(Math.max(0, o - p - ap)); series.open.push(o); }
       return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs: buildSwimlaneSegs(evs, maxTick) };
     }
 
@@ -307,7 +357,7 @@
       const a = Array.from(fl); if (!a.length) return;
       Promise.all(a.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
         filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
-        activeIndex = 0; stop();
+        activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); stop();
         filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
         const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
         document.getElementById("scrub").max = mx;
@@ -549,19 +599,42 @@
     }
 
     // --- Charts Tab ---
-    function renderChartPolicyTabs() {
-      const el = document.getElementById("chartPolicyTabs"); el.innerHTML = "";
-      filesData.forEach((d, i) => {
-        const b = document.createElement("button");
-        b.className = "cp-tab" + (i === activeIndex ? " active" : "");
-        b.textContent = d.name;
-        b.onclick = () => { activeIndex = i; renderChartPolicyTabs(); refreshCharts(); };
-        el.appendChild(b);
-      });
-    }
-    function refreshCharts() { const p = getPacked(); if (p) { doChart(p); setTimeout(() => d3brush(p), 30); dSwim(p); } }
+    let chartIdxL = 0, chartIdxR = 1, chartInstL = null, chartInstR = null;
+    let chartViewMode = "single";
 
-    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "merged" ? C0.merged : C0.other);
+    document.getElementById("chartViewToggle").addEventListener("click", e => {
+      const btn = e.target.closest("button"); if (!btn) return;
+      chartViewMode = btn.dataset.mode;
+      document.querySelectorAll("#chartViewToggle button").forEach(b => b.classList.toggle("active", b === btn));
+      const pair = document.getElementById("chartPair");
+      pair.classList.toggle("single-view", chartViewMode === "single");
+      document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
+      document.getElementById("pickerL").querySelector(".cp-label").textContent = chartViewMode === "single" ? "Policy:" : "Left:";
+      setTimeout(refreshCharts, 30);
+    });
+
+    function renderChartPolicyTabs() {
+      [["chartPolicyTabsL", chartIdxL, "L"], ["chartPolicyTabsR", chartIdxR, "R"]].forEach(([elId, sel, side]) => {
+        const el = document.getElementById(elId); el.innerHTML = "";
+        filesData.forEach((d, i) => {
+          const b = document.createElement("button");
+          b.className = "cp-tab" + (i === sel ? " active" : "");
+          b.textContent = d.name;
+          b.onclick = () => { if (side === "L") chartIdxL = i; else chartIdxR = i; renderChartPolicyTabs(); refreshCharts(); };
+          el.appendChild(b);
+        });
+      });
+      document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
+    }
+    function refreshCharts() {
+      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+      document.getElementById("chartTitleL").textContent = filesData[chartIdxL]?.name || "";
+      document.getElementById("chartTitleR").textContent = filesData[chartIdxR]?.name || "";
+      if (pL) { doChart(pL, "chartCanvasL", "L"); setTimeout(() => d3brush(pL, "brushAreaL", "L"), 30); dSwim(pL, "swimAreaL"); }
+      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R"); setTimeout(() => d3brush(pR, "brushAreaR", "R"), 30); dSwim(pR, "swimAreaR"); }
+    }
+
+    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "stale" ? C0.stale : k === "merged" ? C0.merged : C0.other);
 
     function plMergePlay(p) {
       return { id: "mp", afterDatasetsDraw(chart) {
@@ -572,46 +645,56 @@
         ctx.restore();
       }};
     }
-    function doChart(p) {
-      const cvs = document.getElementById("chartCanvas"); if (!cvs) return;
+    function doChart(p, canvasId, side) {
+      const cvs = document.getElementById(canvasId); if (!cvs) return;
       if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
-      chartInstance = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
-        { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 3, borderWidth: 0 },
+      const inst = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
         { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 2, borderWidth: 0 },
         { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 1, borderWidth: 0 },
-        { label: "Rest", data: p.series.other, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
+        { label: "Rest", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
         { label: "open", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
-      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index" }, plugins: { legend: { position: "bottom" } },
-        scales: { x: { title: { display: true, text: "Time step" } }, y: { stacked: true, beginAtZero: true } } }, plugins: [plMergePlay(p)] });
+      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index" }, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } },
+        scales: { x: { title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 10 } }, y: { stacked: true, beginAtZero: true } } }, plugins: [plMergePlay(p)] });
+      if (side === "L") chartInstL = inst; else chartInstR = inst;
     }
-    function d3brush(p) {
-      const el = document.getElementById("brushArea"); if (!el) return; el.innerHTML = "";
-      const maxT = Math.max(1, p.maxTick), w = el.clientWidth || 600, m = { l: 36, r: 8, t: 2, b: 20 }, h = 50;
+    function d3brush(p, elId, side) {
+      const el = document.getElementById(elId); if (!el) return; el.innerHTML = "";
+      const maxT = Math.max(1, p.maxTick), w = el.clientWidth || 400, m = { l: 30, r: 6, t: 2, b: 18 }, h = 36;
       const sc = d3.scaleLinear().domain([0, maxT]).range([m.l, w - m.r]);
-      const s = d3.select("#brushArea").append("svg").attr("width", w).attr("height", h);
-      s.append("g").attr("transform", `translate(0,${h - m.b})`).call(d3.axisBottom(sc).ticks(5));
+      const s = d3.select("#" + elId).append("svg").attr("width", w).attr("height", h);
+      s.append("g").attr("transform", `translate(0,${h - m.b})`).call(d3.axisBottom(sc).ticks(4));
       const b = d3.brushX().extent([[m.l, 0], [w - m.r, h - m.b - 1]]).on("end", e => { if (!e.selection) return; const lo = sc.invert(e.selection[0]), hi = sc.invert(e.selection[1]);
-        xRange = [lo, hi]; document.getElementById("rmin").value = Math.floor(lo); document.getElementById("rmax").value = Math.ceil(hi); dSwim(p); });
+        xRange = [lo, hi]; document.getElementById("rmin").value = Math.floor(lo); document.getElementById("rmax").value = Math.ceil(hi);
+        const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+        if (pL) dSwim(pL, "swimAreaL"); if (pR) dSwim(pR, "swimAreaR"); });
       s.append("g").call(b).call(b.move, [sc(xRange[0]), sc(Math.min(maxT, xRange[1]))]);
     }
-    function dSwim(pOverride) {
-      const p = pOverride || getPacked(); if (!p) return;
+    function dSwim(p, swimId) {
       const x0 = +document.getElementById("rmin").value || 0, x1 = +document.getElementById("rmax").value || p.maxTick;
-      const sw = d3.select("#swimArea").html(""); const t = playhead;
+      const sw = d3.select("#" + swimId).html(""); const t = playhead;
       const list = new Set(); p.segs.forEach(s => list.add(s.mr));
       const mrL = Array.from(list).sort((a, b) => a - b);
       if (!mrL.length) { sw.append("p").text("No segments."); return; }
-      const rowH = 16, pad = { t: 4, l: 44, b: 22, r: 4 }, w = Math.max(400, (document.getElementById("swimArea").clientWidth || 600) - 8);
+      const chartCol = document.getElementById(swimId).closest(".chart-col");
+      const chartWrap = chartCol ? chartCol.querySelector(".chart-wrap") : null;
+      const rowH = 14, pad = { t: 4, l: 36, b: 18, r: 4 }, w = Math.max(300, (chartWrap?.clientWidth || document.getElementById(swimId).clientWidth || 400) - 8);
       const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
       const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
       const g = sw.append("svg").attr("width", w).attr("height", H);
-      g.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(6));
+      g.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
       if (t >= x0 && t <= x1) g.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
-      p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
+      const visible = p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
         .map(s => { if (s.start > t) return null; if (s.kind === "merged") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
-        .filter(s => s && s.end > s.start)
-        .forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
-          .attr("width", Math.max(0, x(Math.min(s.end, x1)) - x(Math.max(s.start, x0)))).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2));
+        .filter(s => s && s.end > s.start);
+      visible.filter(s => s.kind !== "merged").forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
+        .attr("width", Math.max(0, x(Math.min(s.end, x1)) - x(Math.max(s.start, x0)))).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2));
+      visible.filter(s => s.kind === "merged").forEach(s => {
+        const mx = x(Math.max(s.start, x0)), bw = y.bandwidth(), yt = y(String(s.mr));
+        g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
+          .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
+        g.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.45))
+          .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1);
+      });
     }
 
     // --- Playback ---
@@ -626,16 +709,32 @@
     function onPlayheadChange() {
       const active = document.querySelector(".tab-panel.active");
       if (active.id === "panelKanban") { renderSnapshot(); renderTraces(); }
-      if (active.id === "panelCharts") { if (chartInstance) chartInstance.update("none"); const p = getPacked(); if (p) dSwim(p); }
+      if (active.id === "panelCharts") {
+        if (chartInstL) chartInstL.update("none");
+        if (chartViewMode === "compare" && chartInstR) chartInstR.update("none");
+        const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+        if (pL) dSwim(pL, "swimAreaL");
+        if (chartViewMode === "compare" && pR) dSwim(pR, "swimAreaR");
+      }
     }
 
     document.getElementById("btnPlay").addEventListener("click", play);
     document.getElementById("btnReset").addEventListener("click", resetP);
     document.getElementById("scrub").addEventListener("input", e => { stop(); playhead = +e.target.value; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick(); onPlayheadChange(); });
     document.getElementById("selSpeed").addEventListener("change", () => { if (!playTimer) return; const s = +document.getElementById("selSpeed").value || 1; clearInterval(playTimer); playTimer = setInterval(tick, BASE_MS / s); });
-    document.getElementById("rmin").addEventListener("change", () => { const p = getPacked(); if (p) dSwim(p); });
-    document.getElementById("rmax").addEventListener("change", () => { const p = getPacked(); if (p) dSwim(p); });
-    document.getElementById("fitBtn").addEventListener("click", () => { const p = getPacked(); if (p) { document.getElementById("rmin").value = 0; document.getElementById("rmax").value = p.maxTick; xRange = [0, p.maxTick]; d3brush(p); dSwim(p); } });
+    function refreshBothSwim() {
+      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+      if (pL) dSwim(pL, "swimAreaL");
+      if (chartViewMode === "compare" && pR) dSwim(pR, "swimAreaR");
+    }
+    document.getElementById("rmin").addEventListener("change", refreshBothSwim);
+    document.getElementById("rmax").addEventListener("change", refreshBothSwim);
+    document.getElementById("fitBtn").addEventListener("click", () => {
+      const mx = globalMaxTick(); document.getElementById("rmin").value = 0; document.getElementById("rmax").value = mx; xRange = [0, mx];
+      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+      if (pL) { d3brush(pL, "brushAreaL", "L"); dSwim(pL, "swimAreaL"); }
+      if (chartViewMode === "compare" && pR) { d3brush(pR, "brushAreaR", "R"); dSwim(pR, "swimAreaR"); }
+    });
   })();
   </script>
 </body>
