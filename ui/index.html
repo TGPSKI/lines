@@ -263,7 +263,7 @@
           <div style="height:280px"><canvas id="mcCIChart"></canvas></div>
         </div>
       </div>
-      <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem">
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:1rem;margin-bottom:1rem">
         <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.8rem;overflow-x:auto">
           <h3 style="font-size:0.82rem;margin-bottom:0.5rem;color:var(--text)">Statistical Summary</h3>
           <table class="cmp" id="mcStatsTable"></table>
@@ -271,6 +271,16 @@
         <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
           <h3 style="font-size:0.82rem;margin-bottom:0.5rem;color:var(--text)">Pairwise Comparison</h3>
           <div id="mcPairwise" style="font-size:0.78rem"></div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
+          <h3 style="font-size:0.82rem;margin-bottom:0.5rem;color:var(--text)">Rank Summary</h3>
+          <div style="height:180px"><canvas id="mcRankChart"></canvas></div>
+        </div>
+        <div style="background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:0.8rem">
+          <h3 style="font-size:0.82rem;margin-bottom:0.5rem;color:var(--text)">Winner Heatmap</h3>
+          <div id="mcHeatmap" style="overflow-x:auto"></div>
         </div>
       </div>
     </div>
@@ -897,13 +907,21 @@
     const MC_COLORS = ["#58a6ff", "#a371f7", "#2ea043", "#d29922", "#f85149", "#79c0ff", "#d2a8ff", "#56d364"];
     const MC_METRIC_LABELS = {
       total_time_ticks: "Total Time (ticks)", mrs_merged: "MRs Merged",
-      throughput_merges_per_tick: "Throughput (m/tick)", time_to_first_merge: "First Merge (ticks)",
-      time_to_merge_10: "Merge 10 (ticks)", avg_merge_interval_ticks: "Avg Interval",
+      throughput_merges_per_tick: "Throughput (merges/tick)", time_to_first_merge: "Time to First Merge",
+      time_to_merge_10: "Time to Merge 10 MRs", avg_merge_interval_ticks: "Avg Merge Interval",
       queue_drain_pct: "Queue Drain %", rebase_calls: "Rebases",
-      pipelines_created: "Pipelines", peak_active_pipelines: "Peak Active",
-      duplicate_rebase_total: "Dup Rebases", wait_p50: "Wait p50",
-      wait_p95: "Wait p95", wait_max: "Wait Max", starved_mrs: "Starved MRs"
+      pipelines_created: "Pipelines Created", peak_active_pipelines: "Peak Active Pipelines",
+      duplicate_rebase_total: "Duplicate Rebases", wait_p50: "Wait Time p50 (ticks)",
+      wait_p95: "Wait Time p95 (ticks)", wait_max: "Max Wait (ticks)",
+      starved_mrs: "Starved MRs (>100 ticks)"
     };
+    const MC_LOWER_BETTER = new Set([
+      "total_time_ticks", "time_to_first_merge", "time_to_merge_10",
+      "avg_merge_interval_ticks", "rebase_calls", "pipelines_created",
+      "peak_active_pipelines", "duplicate_rebase_total",
+      "wait_p50", "wait_p95", "wait_max", "starved_mrs"
+    ]);
+    const MC_SKIP_METRICS = new Set(["total_time_ticks"]);
 
     const mcDrop = document.getElementById("mcDropZone");
     const mcInput = document.getElementById("mcFileInput");
@@ -916,13 +934,13 @@
       const reader = new FileReader();
       reader.onload = () => {
         const lines = reader.result.trim().split("\n");
-        const headers = lines[0].split(",");
+        const headers = lines[0].split(",").map(h => h.trim());
         const metricCols = headers.slice(2);
         const policies = new Set();
         const trials = {};
 
         for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",");
+          const cols = lines[i].split(",").map(c => c.trim());
           const policy = cols[1];
           policies.add(policy);
           if (!trials[policy]) trials[policy] = {};
@@ -990,6 +1008,8 @@
       renderMcCIChart();
       renderMcStatsTable();
       renderMcPairwise();
+      renderMcRank();
+      renderMcHeatmap();
     }
 
     function renderMcBoxChart() {
@@ -1159,16 +1179,15 @@
       html += "</tr></thead><tbody>";
 
       mcData.metrics.forEach(metric => {
+        if (MC_SKIP_METRICS.has(metric)) return;
         const label = MC_METRIC_LABELS[metric] || metric;
         html += `<tr><td class="metric-name">${label}</td>`;
-        let bestVal = null, bestDir = null;
-        const isLowerBetter = ["total_time_ticks", "time_to_first_merge", "time_to_merge_10",
-          "avg_merge_interval_ticks", "rebase_calls", "duplicate_rebase_total",
-          "wait_p50", "wait_p95", "wait_max", "starved_mrs"].includes(metric);
+        let bestVal = null;
+        const lowerBetter = MC_LOWER_BETTER.has(metric);
 
         const statsArr = policies.map(p => mcStats(mcData.trials[p]?.[metric] || []));
         statsArr.forEach(s => {
-          if (bestVal === null || (isLowerBetter ? s.mean < bestVal : s.mean > bestVal)) bestVal = s.mean;
+          if (bestVal === null || (lowerBetter ? s.mean < bestVal : s.mean > bestVal)) bestVal = s.mean;
         });
 
         statsArr.forEach(s => {
@@ -1196,15 +1215,12 @@
       let html = "<table style='width:100%;font-size:0.75rem;border-collapse:collapse'>";
       html += `<tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem">Metric</th><th>Delta</th><th>Sig?</th></tr>`;
 
-      const isLowerBetter = m => ["total_time_ticks", "time_to_first_merge", "time_to_merge_10",
-        "avg_merge_interval_ticks", "rebase_calls", "duplicate_rebase_total",
-        "wait_p50", "wait_p95", "wait_max", "starved_mrs"].includes(m);
-
       mcData.metrics.forEach(metric => {
+        if (MC_SKIP_METRICS.has(metric)) return;
         const sA = mcStats(mcData.trials[pA]?.[metric] || []);
         const sB = mcStats(mcData.trials[pB]?.[metric] || []);
         const delta = sA.mean - sB.mean;
-        const lower = isLowerBetter(metric);
+        const lower = MC_LOWER_BETTER.has(metric);
         const ciOverlap = (sA.mean - sA.ci95) <= (sB.mean + sB.ci95) && (sB.mean - sB.ci95) <= (sA.mean + sA.ci95);
         const significant = !ciOverlap;
         const aWins = lower ? delta < 0 : delta > 0;
@@ -1224,6 +1240,126 @@
         html += `</tr>`;
       });
       html += "</table>";
+      container.innerHTML = html;
+    }
+
+    // --- Rank Summary Bar ---
+    let mcRankChart = null;
+
+    function mcIsLowerBetter(m) {
+      return MC_LOWER_BETTER.has(m);
+    }
+
+    function renderMcRank() {
+      if (!mcData) return;
+      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
+      const ctx = document.getElementById("mcRankChart").getContext("2d");
+      if (mcRankChart) mcRankChart.destroy();
+
+      const wins = {}, ties = {}, losses = {};
+      policies.forEach(p => { wins[p] = 0; ties[p] = 0; losses[p] = 0; });
+
+      mcData.metrics.forEach(metric => {
+        if (MC_SKIP_METRICS.has(metric)) return;
+        const statsMap = {};
+        policies.forEach(p => { statsMap[p] = mcStats(mcData.trials[p]?.[metric] || []); });
+        const lower = mcIsLowerBetter(metric);
+
+        policies.forEach(p => {
+          let isWinner = true, isTied = false;
+          policies.forEach(other => {
+            if (other === p) return;
+            const sP = statsMap[p], sO = statsMap[other];
+            const pBetter = lower ? sP.mean < sO.mean : sP.mean > sO.mean;
+            const overlap = (sP.mean - sP.ci95) <= (sO.mean + sO.ci95) && (sO.mean - sO.ci95) <= (sP.mean + sP.ci95);
+            if (overlap) isTied = true;
+            if (!pBetter && !overlap) isWinner = false;
+          });
+          if (isWinner && !isTied) wins[p]++;
+          else if (isTied) ties[p]++;
+          else losses[p]++;
+        });
+      });
+
+      mcRankChart = new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: policies,
+          datasets: [
+            { label: "Wins", data: policies.map(p => wins[p]), backgroundColor: "#2ea04399", borderColor: "#2ea043", borderWidth: 1 },
+            { label: "Ties", data: policies.map(p => ties[p]), backgroundColor: "#d2992244", borderColor: "#d29922", borderWidth: 1 },
+            { label: "Losses", data: policies.map(p => losses[p]), backgroundColor: "#f8514944", borderColor: "#f85149", borderWidth: 1 },
+          ]
+        },
+        options: {
+          indexAxis: "y",
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            x: { stacked: true, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
+            y: { stacked: true, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } }
+          },
+          plugins: {
+            legend: { position: "bottom", labels: { color: "#8b949e", font: { size: 10 }, boxWidth: 10 } }
+          }
+        }
+      });
+    }
+
+    // --- Winner Heatmap ---
+    function renderMcHeatmap() {
+      if (!mcData) return;
+      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
+      const container = document.getElementById("mcHeatmap");
+      if (policies.length < 2) { container.innerHTML = ""; return; }
+
+      const results = {};
+      policies.forEach(pA => {
+        results[pA] = {};
+        policies.forEach(pB => { results[pA][pB] = { wins: 0, losses: 0, ties: 0 }; });
+      });
+
+      mcData.metrics.forEach(metric => {
+        if (MC_SKIP_METRICS.has(metric)) return;
+        const lower = mcIsLowerBetter(metric);
+        policies.forEach(pA => {
+          policies.forEach(pB => {
+            if (pA === pB) return;
+            const sA = mcStats(mcData.trials[pA]?.[metric] || []);
+            const sB = mcStats(mcData.trials[pB]?.[metric] || []);
+            const overlap = (sA.mean - sA.ci95) <= (sB.mean + sB.ci95) && (sB.mean - sB.ci95) <= (sA.mean + sA.ci95);
+            if (overlap) { results[pA][pB].ties++; return; }
+            const aWins = lower ? sA.mean < sB.mean : sA.mean > sB.mean;
+            if (aWins) results[pA][pB].wins++;
+            else results[pA][pB].losses++;
+          });
+        });
+      });
+
+      let html = "<table style='width:100%;font-size:0.72rem;border-collapse:collapse;text-align:center'>";
+      html += "<tr><th style='padding:0.3rem;border:1px solid var(--border)'></th>";
+      policies.forEach(p => { html += `<th style="padding:0.3rem;border:1px solid var(--border);color:var(--text)">${p}</th>`; });
+      html += "</tr>";
+
+      policies.forEach(pA => {
+        html += `<tr><td style="padding:0.3rem;border:1px solid var(--border);color:var(--text);font-weight:600;text-align:left">${pA}</td>`;
+        policies.forEach(pB => {
+          if (pA === pB) {
+            html += `<td style="padding:0.3rem;border:1px solid var(--border);background:#161b22">—</td>`;
+            return;
+          }
+          const r = results[pA][pB];
+          const total = r.wins + r.losses + r.ties;
+          const ratio = total > 0 ? r.wins / total : 0;
+          let bg, color;
+          if (ratio > 0.6) { bg = `rgba(46,160,67,${0.15 + ratio * 0.3})`; color = "#3fb950"; }
+          else if (ratio < 0.4) { bg = `rgba(248,81,73,${0.15 + (1 - ratio) * 0.2})`; color = "#f85149"; }
+          else { bg = "rgba(210,153,34,0.1)"; color = "#d29922"; }
+          html += `<td style="padding:0.3rem;border:1px solid var(--border);background:${bg};color:${color};font-weight:600" title="${pA} vs ${pB}: ${r.wins}W/${r.ties}T/${r.losses}L">${r.wins}/${r.ties}/${r.losses}</td>`;
+        });
+        html += "</tr>";
+      });
+      html += "</table>";
+      html += `<div style="font-size:0.65rem;color:var(--muted);margin-top:0.3rem">Cells: Wins/Ties/Losses (row vs column). Green = row dominates.</div>`;
       container.innerHTML = html;
     }
 
