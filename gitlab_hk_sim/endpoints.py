@@ -394,6 +394,39 @@ def sim_state_endpoint(request: Request) -> dict:
     return sim_state.to_dict()
 
 
+@sim_router.get("/merged_mrs")
+def sim_merged_mrs(request: Request) -> list:
+    """Return merged MRs with wait-time data for starvation analysis."""
+    sim_state = _get_state(request)
+    metrics = _get_metrics(request)
+
+    merge_events = [e for e in metrics.events if e.get("event") == "merge"]
+    merge_tick_map = {e["mr_iid"]: e["tick"] for e in merge_events}
+
+    result = []
+    for mr in sim_state.merge_requests:
+        if mr.state != MRState.MERGED:
+            continue
+        merge_tick = merge_tick_map.get(mr.iid, 0)
+        arrival = max(0, mr.arrival_tick)
+        wait = merge_tick - arrival
+        labels = mr.labels
+        priority = "unknown"
+        for lbl in labels:
+            if lbl.startswith("bot/approved:"):
+                priority = lbl.split(":", 1)[1].strip()
+                break
+        result.append({
+            "iid": mr.iid,
+            "arrival_tick": arrival,
+            "merge_tick": merge_tick,
+            "wait_ticks": wait,
+            "priority": priority,
+            "title": mr.title,
+        })
+    return result
+
+
 @sim_router.post("/reset")
 def sim_reset(request: Request) -> dict:
     """Reset simulation to initial scenario state."""

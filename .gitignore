@@ -6,9 +6,11 @@ reports/**/*.md
 reports/**/*.log
 reports/**/*.pid
 reports/**/*.txt
+reports/**/*.csv
 reports/*.ndjson
 reports/*.md
 reports/*.log
 reports/*.pid
 reports/*.txt
+reports/*.csv
 !reports/.gitkeep

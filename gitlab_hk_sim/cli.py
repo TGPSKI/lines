@@ -27,11 +27,25 @@ def cli() -> None:
     type=click.Path(),
     help="Path for NDJSON metrics output",
 )
-def serve(scenario: str, host: str, port: int, metrics_out: str | None) -> None:
+@click.option(
+    "--seed",
+    default=None,
+    type=int,
+    help="Random seed for deterministic pipeline failures/durations",
+)
+def serve(
+    scenario: str, host: str, port: int, metrics_out: str | None, seed: int | None
+) -> None:
     """Start the fake GitLab server loaded with a scenario."""
+    import random
+
     import uvicorn
 
     from .server import create_app
+
+    if seed is not None:
+        random.seed(seed)
+        click.echo(f"Random seed: {seed}")
 
     app = create_app(scenario_path=scenario, metrics_out=metrics_out)
     click.echo(f"Starting sim server on {host}:{port}")

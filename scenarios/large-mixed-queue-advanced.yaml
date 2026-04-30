@@ -23,6 +23,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 15
     outcome: success
+  ci_duration: 25
+  arrival_tick: 0
 - id: 3002
   iid: 2
   title: registry/mirror-sync-config
@@ -40,6 +42,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 7
     outcome: success
+  ci_duration: 16
+  arrival_tick: 0
 - id: 3003
   iid: 3
   title: provisioning/deployment-template
@@ -57,6 +61,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 20
     outcome: success
+  ci_duration: 10
+  arrival_tick: 0
 - id: 3004
   iid: 4
   title: sre-infra/alertmanager-routing
@@ -75,6 +81,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 9
     outcome: success
+  ci_duration: 10
+  arrival_tick: 0
 - id: 3005
   iid: 5
   title: analytics/advisor-rule-update
@@ -93,6 +101,8 @@ merge_requests:
     running_ticks_remaining: 11
     outcome: success
   push_tick: 12
+  ci_duration: 7
+  arrival_tick: 0
 - id: 3006
   iid: 6
   title: telemetry/metric-rule-sync
@@ -110,6 +120,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 6
     outcome: success
+  ci_duration: 6
+  arrival_tick: 0
 - id: 3007
   iid: 7
   title: auth-service/project-quota-bump
@@ -127,6 +139,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 8
     outcome: success
+  ci_duration: 11
+  arrival_tick: 0
 - id: 3008
   iid: 8
   title: monitoring/grafana-datasource
@@ -144,6 +158,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 22
     outcome: success
+  ci_duration: 11
+  arrival_tick: 0
 - id: 3009
   iid: 9
   title: gateway/rbac-policy-change
@@ -161,6 +177,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 13
     outcome: success
+  ci_duration: 15
+  arrival_tick: 0
 - id: 3010
   iid: 10
   title: identity/realm-config-v2
@@ -178,6 +196,8 @@ merge_requests:
     root_sha: target-001
     running_ticks_remaining: 10
     outcome: success
+  ci_duration: 5
+  arrival_tick: 0
 - id: 3011
   iid: 11
   title: installer/agent-config
@@ -196,6 +216,8 @@ merge_requests:
     pending_ticks_remaining: 1
     running_ticks_remaining: 14
     outcome: success
+  ci_duration: 25
+  arrival_tick: 0
 - id: 3012
   iid: 12
   title: fleet-mgr/upgrade-policy
@@ -214,6 +236,8 @@ merge_requests:
     pending_ticks_remaining: 1
     running_ticks_remaining: 8
     outcome: success
+  ci_duration: 15
+  arrival_tick: 0
 - id: 3013
   iid: 13
   title: toggles/feature-flag-cleanup
@@ -232,6 +256,8 @@ merge_requests:
     pending_ticks_remaining: 1
     running_ticks_remaining: 5
     outcome: success
+  ci_duration: 9
+  arrival_tick: 0
 - id: 3014
   iid: 14
   title: platform/saas-deploy-config
@@ -250,6 +276,8 @@ merge_requests:
     pending_ticks_remaining: 1
     running_ticks_remaining: 18
     outcome: success
+  ci_duration: 5
+  arrival_tick: 0
 - id: 3015
   iid: 15
   title: cluster-mgmt/logging-forwarder
@@ -269,6 +297,8 @@ merge_requests:
     running_ticks_remaining: 9
     outcome: success
   push_tick: 35
+  ci_duration: 24
+  arrival_tick: 0
 - id: 3016
   iid: 16
   title: release-eng/graph-data-update
@@ -285,6 +315,8 @@ merge_requests:
     sha: mr16-sha-001
     root_sha: target-001
     outcome: success
+  ci_duration: 8
+  arrival_tick: 0
 - id: 3017
   iid: 17
   title: scanner/version-bump
@@ -301,6 +333,8 @@ merge_requests:
     sha: mr17-sha-001
     root_sha: target-001
     outcome: success
+  ci_duration: 5
+  arrival_tick: 0
 - id: 3018
   iid: 18
   title: secrets-mgr/rotation-schedule
@@ -317,6 +351,8 @@ merge_requests:
     sha: mr18-sha-001
     root_sha: target-001
     outcome: success
+  ci_duration: 5
+  arrival_tick: 0
 - id: 3019
   iid: 19
   title: ci-pipeline/template-v3
@@ -333,6 +369,8 @@ merge_requests:
     sha: mr19-sha-001
     root_sha: target-001
     outcome: success
+  ci_duration: 5
+  arrival_tick: 0
 - id: 3020
   iid: 20
   title: status-page/component-status
@@ -349,6 +387,8 @@ merge_requests:
     sha: mr20-sha-001
     root_sha: target-001
     outcome: success
+  ci_duration: 6
+  arrival_tick: 0
 - id: 3021
   iid: 21
   title: platform/namespace-quota-prod
@@ -360,6 +400,8 @@ merge_requests:
   - tenant-platform
   approved_at: '2024-03-11T10:00:00Z'
   pipelines: []
+  ci_duration: 6
+  arrival_tick: 3
 - id: 3022
   iid: 22
   title: provisioning/syncset-update
@@ -372,6 +414,8 @@ merge_requests:
   approved_at: '2024-03-11T10:05:00Z'
   pipelines: []
   push_tick: 60
+  ci_duration: 14
+  arrival_tick: 4
 - id: 3023
   iid: 23
   title: registry/robot-account-cleanup
@@ -383,6 +427,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T10:10:00Z'
   pipelines: []
+  ci_duration: 24
+  arrival_tick: 12
 - id: 3024
   iid: 24
   title: cluster-mgmt/addon-operator-params
@@ -395,6 +441,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T10:15:00Z'
   pipelines: []
+  ci_duration: 15
+  arrival_tick: 19
 - id: 3025
   iid: 25
   title: sre-infra/slo-document-update
@@ -406,6 +454,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T10:20:00Z'
   pipelines: []
+  ci_duration: 9
+  arrival_tick: 22
 - id: 3026
   iid: 26
   title: hosting/fleet-mgr-scaling
@@ -417,6 +467,8 @@ merge_requests:
   - tenant-hosting
   approved_at: '2024-03-11T10:25:00Z'
   pipelines: []
+  ci_duration: 6
+  arrival_tick: 27
 - id: 3027
   iid: 27
   title: analytics/ingress-controller-tune
@@ -428,6 +480,8 @@ merge_requests:
   - tenant-analytics
   approved_at: '2024-03-11T10:30:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 42
 - id: 3028
   iid: 28
   title: signing/transparency-log
@@ -439,6 +493,8 @@ merge_requests:
   - tenant-signing
   approved_at: '2024-03-11T10:35:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 42
 - id: 3029
   iid: 29
   title: platform/role-permission-fix
@@ -450,6 +506,8 @@ merge_requests:
   - tenant-platform
   approved_at: '2024-03-11T10:40:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 43
 - id: 3030
   iid: 30
   title: query-engine/config-update
@@ -462,6 +520,8 @@ merge_requests:
   approved_at: '2024-03-11T10:45:00Z'
   pipelines: []
   force_merge_tick: 80
+  ci_duration: 9
+  arrival_tick: 45
 - id: 3031
   iid: 31
   title: telemetry/compact-retention
@@ -473,6 +533,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T10:50:00Z'
   pipelines: []
+  ci_duration: 8
+  arrival_tick: 45
 - id: 3032
   iid: 32
   title: incident-mgr/template-v2
@@ -484,6 +546,8 @@ merge_requests:
   - tenant-incident-mgr
   approved_at: '2024-03-11T10:55:00Z'
   pipelines: []
+  ci_duration: 6
+  arrival_tick: 45
 - id: 3033
   iid: 33
   title: monitoring/alertmanager-silence
@@ -495,6 +559,8 @@ merge_requests:
   - tenant-monitoring
   approved_at: '2024-03-11T11:00:00Z'
   pipelines: []
+  ci_duration: 13
+  arrival_tick: 46
 - id: 3034
   iid: 34
   title: registry/security-scanner-policy
@@ -506,6 +572,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T11:05:00Z'
   pipelines: []
+  ci_duration: 24
+  arrival_tick: 57
 - id: 3035
   iid: 35
   title: gateway/proxy-timeout-tune
@@ -517,6 +585,8 @@ merge_requests:
   - tenant-gateway
   approved_at: '2024-03-11T11:10:00Z'
   pipelines: []
+  ci_duration: 12
+  arrival_tick: 67
 - id: 3036
   iid: 36
   title: sre-infra/jenkins-job-migration
@@ -528,6 +598,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T11:15:00Z'
   pipelines: []
+  ci_duration: 5
+  arrival_tick: 69
 - id: 3037
   iid: 37
   title: fleet-mgr/machine-pool-config
@@ -539,6 +611,8 @@ merge_requests:
   - tenant-fleet-mgr
   approved_at: '2024-03-11T11:20:00Z'
   pipelines: []
+  ci_duration: 11
+  arrival_tick: 70
 - id: 3038
   iid: 38
   title: provisioning/pool-scaling
@@ -551,6 +625,8 @@ merge_requests:
   approved_at: '2024-03-11T11:25:00Z'
   pipelines: []
   push_tick: 120
+  ci_duration: 15
+  arrival_tick: 74
 - id: 3039
   iid: 39
   title: cluster-mgmt/subscription-sync
@@ -562,6 +638,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T11:30:00Z'
   pipelines: []
+  ci_duration: 21
+  arrival_tick: 78
 - id: 3040
   iid: 40
   title: platform/global-ci-config
@@ -572,6 +650,8 @@ merge_requests:
   - 'bot/approved: medium'
   approved_at: '2024-03-11T11:35:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 83
 - id: 3041
   iid: 41
   title: identity/client-scope-migration
@@ -583,6 +663,8 @@ merge_requests:
   - tenant-identity
   approved_at: '2024-03-11T11:40:00Z'
   pipelines: []
+  ci_duration: 7
+  arrival_tick: 88
 - id: 3042
   iid: 42
   title: auth-service/token-rotation
@@ -594,6 +676,8 @@ merge_requests:
   - tenant-auth-service
   approved_at: '2024-03-11T11:45:00Z'
   pipelines: []
+  ci_duration: 11
+  arrival_tick: 91
 - id: 3043
   iid: 43
   title: installer/infra-env-v2
@@ -605,6 +689,8 @@ merge_requests:
   - tenant-installer
   approved_at: '2024-03-11T11:50:00Z'
   pipelines: []
+  ci_duration: 18
+  arrival_tick: 91
 - id: 3044
   iid: 44
   title: cluster-mgmt/service-quota
@@ -616,6 +702,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T11:55:00Z'
   pipelines: []
+  ci_duration: 20
+  arrival_tick: 92
 - id: 3045
   iid: 45
   title: sre-infra/ci-pipeline-config
@@ -629,6 +717,8 @@ merge_requests:
   approved_at: '2024-03-11T12:00:00Z'
   pipelines: []
   push_tick: 180
+  ci_duration: 5
+  arrival_tick: 92
 - id: 3046
   iid: 46
   title: registry/namespace-autoprune
@@ -640,6 +730,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T12:05:00Z'
   pipelines: []
+  ci_duration: 16
+  arrival_tick: 102
 - id: 3047
   iid: 47
   title: provisioning/hibernate-schedule
@@ -651,6 +743,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T12:10:00Z'
   pipelines: []
+  ci_duration: 13
+  arrival_tick: 103
 - id: 3048
   iid: 48
   title: hosting/must-gather-config
@@ -662,6 +756,8 @@ merge_requests:
   - tenant-hosting
   approved_at: '2024-03-11T12:15:00Z'
   pipelines: []
+  ci_duration: 5
+  arrival_tick: 103
 - id: 3049
   iid: 49
   title: monitoring/log-retention-policy
@@ -674,6 +770,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T12:20:00Z'
   pipelines: []
+  ci_duration: 12
+  arrival_tick: 103
 - id: 3050
   iid: 50
   title: platform/dependency-audit-q1
@@ -685,6 +783,8 @@ merge_requests:
   approved_at: '2024-03-11T12:25:00Z'
   pipelines: []
   force_merge_tick: 350
+  ci_duration: 10
+  arrival_tick: 105
 - id: 3051
   iid: 51
   title: toggles/proxy-sidecar-config
@@ -696,6 +796,8 @@ merge_requests:
   - tenant-toggles
   approved_at: '2024-03-11T12:30:00Z'
   pipelines: []
+  ci_duration: 9
+  arrival_tick: 109
 - id: 3052
   iid: 52
   title: sre-infra/secrets-policy-update
@@ -708,6 +810,8 @@ merge_requests:
   - tenant-secrets-mgr
   approved_at: '2024-03-11T12:35:00Z'
   pipelines: []
+  ci_duration: 7
+  arrival_tick: 111
 - id: 3053
   iid: 53
   title: cluster-mgmt/addon-lifecycle
@@ -719,6 +823,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T12:40:00Z'
   pipelines: []
+  ci_duration: 15
+  arrival_tick: 111
 - id: 3054
   iid: 54
   title: registry/org-team-sync
@@ -730,6 +836,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T12:45:00Z'
   pipelines: []
+  ci_duration: 22
+  arrival_tick: 118
 - id: 3055
   iid: 55
   title: provisioning/credentials-rotate
@@ -742,6 +850,8 @@ merge_requests:
   approved_at: '2024-03-11T12:50:00Z'
   pipelines: []
   push_tick: 250
+  ci_duration: 14
+  arrival_tick: 128
 - id: 3056
   iid: 56
   title: analytics/namespace-config
@@ -753,6 +863,8 @@ merge_requests:
   - tenant-analytics
   approved_at: '2024-03-11T12:55:00Z'
   pipelines: []
+  ci_duration: 5
+  arrival_tick: 129
 - id: 3057
   iid: 57
   title: gateway/console-plugin-deploy
@@ -764,6 +876,8 @@ merge_requests:
   - tenant-gateway
   approved_at: '2024-03-11T13:00:00Z'
   pipelines: []
+  ci_duration: 13
+  arrival_tick: 138
 - id: 3058
   iid: 58
   title: auth-service/dsn-rotation
@@ -775,6 +889,8 @@ merge_requests:
   - tenant-auth-service
   approved_at: '2024-03-11T13:05:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 159
 - id: 3059
   iid: 59
   title: platform/merge-queue-slo
@@ -786,6 +902,8 @@ merge_requests:
   - tenant-platform
   approved_at: '2024-03-11T13:10:00Z'
   pipelines: []
+  ci_duration: 9
+  arrival_tick: 162
 - id: 3060
   iid: 60
   title: telemetry/rules-storage-config
@@ -797,6 +915,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T13:15:00Z'
   pipelines: []
+  ci_duration: 7
+  arrival_tick: 169
 - id: 3061
   iid: 61
   title: fleet-mgr/proxy-env-config
@@ -808,6 +928,8 @@ merge_requests:
   - tenant-fleet-mgr
   approved_at: '2024-03-11T13:20:00Z'
   pipelines: []
+  ci_duration: 15
+  arrival_tick: 174
 - id: 3062
   iid: 62
   title: cluster-mgmt/security-operator
@@ -820,6 +942,8 @@ merge_requests:
   - tenant-scanner
   approved_at: '2024-03-11T13:25:00Z'
   pipelines: []
+  ci_duration: 24
+  arrival_tick: 184
 - id: 3063
   iid: 63
   title: identity/idp-mapper-config
@@ -831,6 +955,8 @@ merge_requests:
   - tenant-identity
   approved_at: '2024-03-11T13:30:00Z'
   pipelines: []
+  ci_duration: 7
+  arrival_tick: 186
 - id: 3064
   iid: 64
   title: monitoring/pagerduty-service
@@ -842,6 +968,8 @@ merge_requests:
   - tenant-monitoring
   approved_at: '2024-03-11T13:35:00Z'
   pipelines: []
+  ci_duration: 14
+  arrival_tick: 192
 - id: 3065
   iid: 65
   title: sre-infra/github-repo-permission
@@ -853,6 +981,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T13:40:00Z'
   pipelines: []
+  ci_duration: 6
+  arrival_tick: 195
 - id: 3066
   iid: 66
   title: registry/scanner-integration
@@ -865,6 +995,8 @@ merge_requests:
   - tenant-scanner
   approved_at: '2024-03-11T13:45:00Z'
   pipelines: []
+  ci_duration: 16
+  arrival_tick: 196
 - id: 3067
   iid: 67
   title: provisioning/selector-migrate
@@ -876,6 +1008,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T13:50:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 197
 - id: 3068
   iid: 68
   title: installer/day2-worker-config
@@ -887,6 +1021,8 @@ merge_requests:
   - tenant-installer
   approved_at: '2024-03-11T13:55:00Z'
   pipelines: []
+  ci_duration: 25
+  arrival_tick: 199
 - id: 3069
   iid: 69
   title: platform/tooling-bump-v4.12
@@ -901,6 +1037,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T14:00:00Z'
   pipelines: []
+  ci_duration: 6
+  arrival_tick: 207
 - id: 3070
   iid: 70
   title: gateway/audit-log-retention
@@ -913,6 +1051,8 @@ merge_requests:
   approved_at: '2024-03-11T14:05:00Z'
   pipelines: []
   push_tick: 320
+  ci_duration: 12
+  arrival_tick: 207
 - id: 3071
   iid: 71
   title: hosting/sre-access-policy
@@ -924,6 +1064,8 @@ merge_requests:
   - tenant-hosting
   approved_at: '2024-03-11T14:10:00Z'
   pipelines: []
+  ci_duration: 5
+  arrival_tick: 208
 - id: 3072
   iid: 72
   title: cluster-mgmt/autoscaler-profile
@@ -935,6 +1077,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T14:15:00Z'
   pipelines: []
+  ci_duration: 18
+  arrival_tick: 215
 - id: 3073
   iid: 73
   title: telemetry/config-update
@@ -946,6 +1090,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T14:20:00Z'
   pipelines: []
+  ci_duration: 5
+  arrival_tick: 216
 - id: 3074
   iid: 74
   title: sre-infra/dns-config
@@ -957,6 +1103,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T14:25:00Z'
   pipelines: []
+  ci_duration: 8
+  arrival_tick: 218
 - id: 3075
   iid: 75
   title: registry/notification-webhook
@@ -968,6 +1116,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T14:30:00Z'
   pipelines: []
+  ci_duration: 19
+  arrival_tick: 218
 - id: 3076
   iid: 76
   title: analytics/compliance-ns-config
@@ -979,6 +1129,8 @@ merge_requests:
   - tenant-analytics
   approved_at: '2024-03-11T14:35:00Z'
   pipelines: []
+  ci_duration: 8
+  arrival_tick: 227
 - id: 3077
   iid: 77
   title: provisioning/dns-zone-control
@@ -990,6 +1142,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T14:40:00Z'
   pipelines: []
+  ci_duration: 15
+  arrival_tick: 237
 - id: 3078
   iid: 78
   title: monitoring/deadman-switch-cfg
@@ -1002,6 +1156,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T14:45:00Z'
   pipelines: []
+  ci_duration: 12
+  arrival_tick: 237
 - id: 3079
   iid: 79
   title: cluster-mgmt/control-plane-mgmt
@@ -1013,6 +1169,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T14:50:00Z'
   pipelines: []
+  ci_duration: 17
+  arrival_tick: 237
 - id: 3080
   iid: 80
   title: platform/global-rbac-refactor
@@ -1023,6 +1181,8 @@ merge_requests:
   - 'bot/approved: high'
   approved_at: '2024-03-11T14:55:00Z'
   pipelines: []
+  ci_duration: 10
+  arrival_tick: 241
 - id: 3081
   iid: 81
   title: auth-service/rate-limit-config
@@ -1034,7 +1194,8 @@ merge_requests:
   - tenant-auth-service
   approved_at: '2024-03-11T15:00:00Z'
   pipelines: []
-  arrival_tick: 12
+  arrival_tick: 243
+  ci_duration: 12
 - id: 3082
   iid: 82
   title: fleet-mgr/node-drain-grace
@@ -1046,7 +1207,8 @@ merge_requests:
   - tenant-fleet-mgr
   approved_at: '2024-03-11T15:05:00Z'
   pipelines: []
-  arrival_tick: 15
+  arrival_tick: 251
+  ci_duration: 11
 - id: 3083
   iid: 83
   title: cluster-mgmt/transfer-policy
@@ -1058,7 +1220,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T15:10:00Z'
   pipelines: []
-  arrival_tick: 20
+  arrival_tick: 258
+  ci_duration: 25
 - id: 3084
   iid: 84
   title: platform/user-access-request
@@ -1070,7 +1233,8 @@ merge_requests:
   - tenant-platform
   approved_at: '2024-03-11T15:15:00Z'
   pipelines: []
-  arrival_tick: 25
+  arrival_tick: 266
+  ci_duration: 7
 - id: 3085
   iid: 85
   title: provisioning/install-override
@@ -1082,8 +1246,9 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T15:20:00Z'
   pipelines: []
-  arrival_tick: 28
+  arrival_tick: 268
   push_tick: 400
+  ci_duration: 15
 - id: 3086
   iid: 86
   title: identity/session-timeout-tune
@@ -1095,7 +1260,8 @@ merge_requests:
   - tenant-identity
   approved_at: '2024-03-11T15:25:00Z'
   pipelines: []
-  arrival_tick: 55
+  arrival_tick: 271
+  ci_duration: 10
 - id: 3087
   iid: 87
   title: registry/geo-repl-storage
@@ -1107,7 +1273,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T15:30:00Z'
   pipelines: []
-  arrival_tick: 65
+  arrival_tick: 272
+  ci_duration: 25
 - id: 3088
   iid: 88
   title: sre-infra/deploy-trigger-fix
@@ -1119,7 +1286,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T15:35:00Z'
   pipelines: []
-  arrival_tick: 75
+  arrival_tick: 274
+  ci_duration: 5
 - id: 3089
   iid: 89
   title: monitoring/alert-routing-v3
@@ -1131,7 +1299,8 @@ merge_requests:
   - tenant-monitoring
   approved_at: '2024-03-11T15:40:00Z'
   pipelines: []
-  arrival_tick: 105
+  arrival_tick: 276
+  ci_duration: 14
 - id: 3090
   iid: 90
   title: cluster-mgmt/machine-type-catalog
@@ -1143,7 +1312,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T15:45:00Z'
   pipelines: []
-  arrival_tick: 110
+  arrival_tick: 286
+  ci_duration: 25
 - id: 3091
   iid: 91
   title: installer/image-override
@@ -1155,7 +1325,8 @@ merge_requests:
   - tenant-installer
   approved_at: '2024-03-11T15:50:00Z'
   pipelines: []
-  arrival_tick: 118
+  arrival_tick: 291
+  ci_duration: 17
 - id: 3092
   iid: 92
   title: telemetry/ruler-remote-write
@@ -1167,7 +1338,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T15:55:00Z'
   pipelines: []
-  arrival_tick: 125
+  arrival_tick: 302
+  ci_duration: 9
 - id: 3093
   iid: 93
   title: provisioning/relocate-config
@@ -1179,7 +1351,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T16:00:00Z'
   pipelines: []
-  arrival_tick: 132
+  arrival_tick: 305
+  ci_duration: 15
 - id: 3094
   iid: 94
   title: gateway/vpn-endpoint-update
@@ -1191,7 +1364,8 @@ merge_requests:
   - tenant-gateway
   approved_at: '2024-03-11T16:05:00Z'
   pipelines: []
-  arrival_tick: 140
+  arrival_tick: 307
+  ci_duration: 11
 - id: 3095
   iid: 95
   title: registry/tag-expiration-policy
@@ -1203,7 +1377,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T16:10:00Z'
   pipelines: []
-  arrival_tick: 185
+  arrival_tick: 311
+  ci_duration: 17
 - id: 3096
   iid: 96
   title: platform/notification-config
@@ -1215,7 +1390,8 @@ merge_requests:
   - tenant-platform
   approved_at: '2024-03-11T16:15:00Z'
   pipelines: []
-  arrival_tick: 195
+  arrival_tick: 314
+  ci_duration: 8
 - id: 3097
   iid: 97
   title: toggles/strategy-constraint-v2
@@ -1227,7 +1403,8 @@ merge_requests:
   - tenant-toggles
   approved_at: '2024-03-11T16:20:00Z'
   pipelines: []
-  arrival_tick: 205
+  arrival_tick: 317
+  ci_duration: 8
 - id: 3098
   iid: 98
   title: cluster-mgmt/network-verifier
@@ -1239,7 +1416,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T16:25:00Z'
   pipelines: []
-  arrival_tick: 212
+  arrival_tick: 320
+  ci_duration: 19
 - id: 3099
   iid: 99
   title: hosting/upgrade-policy-sync
@@ -1251,7 +1429,8 @@ merge_requests:
   - tenant-hosting
   approved_at: '2024-03-11T16:30:00Z'
   pipelines: []
-  arrival_tick: 220
+  arrival_tick: 324
+  ci_duration: 10
 - id: 3100
   iid: 100
   title: sre-infra/health-check-config
@@ -1263,7 +1442,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T16:35:00Z'
   pipelines: []
-  arrival_tick: 252
+  arrival_tick: 339
+  ci_duration: 10
 - id: 3101
   iid: 101
   title: provisioning/claim-timeout
@@ -1275,7 +1455,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T16:40:00Z'
   pipelines: []
-  arrival_tick: 258
+  arrival_tick: 339
+  ci_duration: 14
 - id: 3102
   iid: 102
   title: analytics/host-staleness-cfg
@@ -1287,7 +1468,8 @@ merge_requests:
   - tenant-analytics
   approved_at: '2024-03-11T16:45:00Z'
   pipelines: []
-  arrival_tick: 265
+  arrival_tick: 347
+  ci_duration: 6
 - id: 3103
   iid: 103
   title: monitoring/log-agent-daemonset
@@ -1299,7 +1481,8 @@ merge_requests:
   - tenant-monitoring
   approved_at: '2024-03-11T16:50:00Z'
   pipelines: []
-  arrival_tick: 270
+  arrival_tick: 350
+  ci_duration: 15
 - id: 3104
   iid: 104
   title: fleet-mgr/oidc-provider-cfg
@@ -1311,7 +1494,8 @@ merge_requests:
   - tenant-fleet-mgr
   approved_at: '2024-03-11T16:55:00Z'
   pipelines: []
-  arrival_tick: 278
+  arrival_tick: 351
+  ci_duration: 12
 - id: 3105
   iid: 105
   title: registry/build-trigger-config
@@ -1323,7 +1507,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T17:00:00Z'
   pipelines: []
-  arrival_tick: 283
+  arrival_tick: 351
+  ci_duration: 15
 - id: 3106
   iid: 106
   title: platform/cluster-onboarding
@@ -1336,7 +1521,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T17:05:00Z'
   pipelines: []
-  arrival_tick: 290
+  arrival_tick: 359
+  ci_duration: 6
 - id: 3107
   iid: 107
   title: auth-service/project-rate-limit
@@ -1348,7 +1534,8 @@ merge_requests:
   - tenant-auth-service
   approved_at: '2024-03-11T17:10:00Z'
   pipelines: []
-  arrival_tick: 325
+  arrival_tick: 367
+  ci_duration: 10
 - id: 3108
   iid: 108
   title: identity/theme-resource-update
@@ -1360,7 +1547,8 @@ merge_requests:
   - tenant-identity
   approved_at: '2024-03-11T17:15:00Z'
   pipelines: []
-  arrival_tick: 332
+  arrival_tick: 367
+  ci_duration: 7
 - id: 3109
   iid: 109
   title: cluster-mgmt/placement-policy-v2
@@ -1372,7 +1560,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T17:20:00Z'
   pipelines: []
-  arrival_tick: 340
+  arrival_tick: 370
+  ci_duration: 21
 - id: 3110
   iid: 110
   title: provisioning/autoscale-config
@@ -1384,7 +1573,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T17:25:00Z'
   pipelines: []
-  arrival_tick: 345
+  arrival_tick: 374
+  ci_duration: 12
 - id: 3111
   iid: 111
   title: sre-infra/rds-parameter-group
@@ -1396,7 +1586,8 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T17:30:00Z'
   pipelines: []
-  arrival_tick: 352
+  arrival_tick: 383
+  ci_duration: 5
 - id: 3112
   iid: 112
   title: telemetry/receive-router-cfg
@@ -1408,7 +1599,8 @@ merge_requests:
   - tenant-telemetry
   approved_at: '2024-03-11T17:35:00Z'
   pipelines: []
-  arrival_tick: 358
+  arrival_tick: 390
+  ci_duration: 6
 - id: 3113
   iid: 113
   title: gateway/sar-proxy-config
@@ -1420,7 +1612,8 @@ merge_requests:
   - tenant-gateway
   approved_at: '2024-03-11T17:40:00Z'
   pipelines: []
-  arrival_tick: 385
+  arrival_tick: 397
+  ci_duration: 14
 - id: 3114
   iid: 114
   title: registry/admin-panel-access
@@ -1432,7 +1625,8 @@ merge_requests:
   - tenant-registry
   approved_at: '2024-03-11T17:45:00Z'
   pipelines: []
-  arrival_tick: 395
+  arrival_tick: 404
+  ci_duration: 20
 - id: 3115
   iid: 115
   title: monitoring/ruler-config
@@ -1444,7 +1638,8 @@ merge_requests:
   - tenant-monitoring
   approved_at: '2024-03-11T17:50:00Z'
   pipelines: []
-  arrival_tick: 405
+  arrival_tick: 406
+  ci_duration: 11
 - id: 3116
   iid: 116
   title: cluster-mgmt/iam-role-binding
@@ -1456,7 +1651,8 @@ merge_requests:
   - tenant-cluster-mgmt
   approved_at: '2024-03-11T17:55:00Z'
   pipelines: []
-  arrival_tick: 412
+  arrival_tick: 406
+  ci_duration: 25
 - id: 3117
   iid: 117
   title: platform/schema-migration-v5
@@ -1469,6 +1665,7 @@ merge_requests:
   approved_at: '2024-03-11T18:00:00Z'
   pipelines: []
   arrival_tick: 420
+  ci_duration: 8
 - id: 3118
   iid: 118
   title: toggles/admin-token-rotate
@@ -1480,7 +1677,8 @@ merge_requests:
   - tenant-toggles
   approved_at: '2024-03-11T18:05:00Z'
   pipelines: []
-  arrival_tick: 435
+  arrival_tick: 422
+  ci_duration: 8
 - id: 3119
   iid: 119
   title: provisioning/image-pin
@@ -1492,7 +1690,8 @@ merge_requests:
   - tenant-provisioning
   approved_at: '2024-03-11T18:10:00Z'
   pipelines: []
-  arrival_tick: 442
+  arrival_tick: 436
+  ci_duration: 15
 - id: 3120
   iid: 120
   title: sre-infra/ci-config-final-tune
@@ -1504,12 +1703,13 @@ merge_requests:
   - tenant-sre-infra
   approved_at: '2024-03-11T18:15:00Z'
   pipelines: []
-  arrival_tick: 450
+  arrival_tick: 442
+  ci_duration: 8
 pipeline_durations:
   distribution: weighted
   min_ticks: 5
   max_ticks: 25
-  failure_rate: 0.05
+  failure_rate: 0.1
   weights:
     5: 15
     6: 20

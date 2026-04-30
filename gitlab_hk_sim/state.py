@@ -278,6 +278,7 @@ class SimState:
         return {
             "tick_count": self.tick_count,
             "target_head": self.project.target_head,
+            "total_mrs": len(self.merge_requests),
             "open_mrs": len(self.open_mrs()),
             "active_pipelines": len(self.active_pipelines()),
             "same_root_success_pool": len(self.same_root_success_pool()),

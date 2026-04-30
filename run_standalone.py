@@ -17,11 +17,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import logging
+import math
 import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import partial
 from typing import Any
@@ -35,6 +38,33 @@ except ImportError:
     sys.exit(1)
 
 from gitlab_hk_sim.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
+
+# ---------------------------------------------------------------------------
+# Policy set presets for Monte Carlo and comparison runs
+# ---------------------------------------------------------------------------
+POLICY_SETS: dict[str, list[str]] = {
+    "phase0": ["top-k", "active-cap", "old-burst"],
+    "phase1": ["top-k", "active-cap", "old-burst", "cap+phase1"],
+    "all": [
+        "top-k",
+        "top-k-no-insist",
+        "active-cap",
+        "active-cap-no-insist",
+        "old-burst",
+        "old-burst-no-insist",
+        "cap+phase1",
+        "cap+phase1-NI",
+    ],
+}
+
+
+def _percentile(sorted_vals: list, pct: int) -> int:
+    """Compute percentile from a pre-sorted list of values."""
+    if not sorted_vals:
+        return 0
+    idx = int(len(sorted_vals) * pct / 100)
+    idx = min(idx, len(sorted_vals) - 1)
+    return sorted_vals[idx]
 
 
 def parse_args() -> argparse.Namespace:
@@ -70,6 +100,35 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--port", type=int, default=8080, help="Port for --compare mode"
+    )
+    parser.add_argument(
+        "--monte-carlo",
+        type=int,
+        default=0,
+        help="Number of Monte Carlo trials (0=disabled)",
+    )
+    parser.add_argument(
+        "--policy-set",
+        choices=["phase0", "phase1", "all"],
+        default="phase0",
+        help="Named policy preset for Monte Carlo / comparison",
+    )
+    parser.add_argument(
+        "--policies",
+        default=None,
+        help="Comma-separated policy list (overrides --policy-set)",
+    )
+    parser.add_argument(
+        "--base-seed",
+        type=int,
+        default=42,
+        help="Base random seed for Monte Carlo",
+    )
+    parser.add_argument(
+        "--base-port",
+        type=int,
+        default=9001,
+        help="Base port for parallel servers in Monte Carlo mode",
     )
     return parser.parse_args()
 
@@ -111,9 +170,7 @@ def is_mergeable(mr: dict) -> bool:
     return has_merge_label and not has_hold_label and not mr.get("draft", False)
 
 
-def preprocess_mrs(
-    sim_url: str, project_id: int, mrs: list[dict]
-) -> list[dict]:
+def preprocess_mrs(sim_url: str, project_id: int, mrs: list[dict]) -> list[dict]:
     """Model production's preprocess_merge_requests filtering and API overhead.
 
     In production, preprocess_merge_requests:
@@ -236,6 +293,14 @@ def is_consuming_slot(
         return latest_status in ("running", "pending")
 
 
+def has_failed_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
+    """Check if MR's latest pipeline has failed (needs retry rebase)."""
+    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+    if not pipelines:
+        return False
+    return pipelines[0]["status"] == "failed"
+
+
 def rebase_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
     resp = requests.put(
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/rebase"
@@ -348,6 +413,15 @@ def run_cycle_top_k(
         rebase_mr(sim_url, project_id, mr["iid"])
         rebase_count += 1
 
+    # Retry failed: re-rebase MRs whose pipeline failed
+    for mr in eligible_mrs:
+        if mr["state"] != "opened":
+            continue
+        if has_failed_pipeline(sim_url, project_id, mr):
+            log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
 
@@ -390,9 +464,7 @@ def run_cycle_active_cap(
         latest_status = pipelines[0]["status"]
         if latest_status in ("running", "pending"):
             if insist:
-                log.info(
-                    f"  INSIST MR !{mr['iid']} (pipeline {latest_status})"
-                )
+                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
                 break
             log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
             continue
@@ -411,12 +483,15 @@ def run_cycle_active_cap(
     # Rebase phase: classify and fill budget
     already_active = 0
     needs_rebase_mrs: list[dict] = []
+    failed_mrs: list[dict] = []
 
     for mr in preprocessed:
         if mr["state"] != "opened":
             continue
         if is_consuming_slot(sim_url, project_id, mr, target_head):
             already_active += 1
+        elif has_failed_pipeline(sim_url, project_id, mr):
+            failed_mrs.append(mr)
         elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
             needs_rebase_mrs.append(mr)
 
@@ -427,6 +502,14 @@ def run_cycle_active_cap(
         if rebase_count >= budget:
             break
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
+
+    # Retry failed pipelines within remaining budget
+    for mr in failed_mrs:
+        if rebase_count >= budget:
+            break
+        log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
         rebase_mr(sim_url, project_id, mr["iid"])
         rebase_count += 1
 
@@ -476,9 +559,7 @@ def run_cycle_old_burst(
         latest_status = pipelines[0]["status"]
         if latest_status in ("running", "pending"):
             if insist:
-                log.info(
-                    f"  INSIST MR !{mr['iid']} (pipeline {latest_status})"
-                )
+                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
                 break
             log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
             continue
@@ -508,6 +589,17 @@ def run_cycle_old_burst(
         rebase_mr(sim_url, project_id, mr["iid"])
         rebase_count += 1
 
+    # Retry failed pipelines within remaining limit
+    for mr in preprocessed:
+        if rebase_count >= limit:
+            break
+        if mr["state"] != "opened":
+            continue
+        if has_failed_pipeline(sim_url, project_id, mr):
+            log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
 
@@ -521,19 +613,25 @@ def get_tenant_domains(mr: dict) -> set[str]:
 
 
 def run_cycle_active_cap_phase1(
-    sim_url: str, project_id: int, limit: int, log: logging.Logger
+    sim_url: str,
+    project_id: int,
+    limit: int,
+    log: logging.Logger,
+    *,
+    insist: bool = False,
 ) -> None:
     """Active-cap + Phase 1 optimistic multi-merge.
 
     Combines active-cap rebase concurrency control with Phase 1 non-blocking
-    batch merge. Optimized for throughput over strict priority insist:
+    batch merge:
 
     Merge phase:
     1. Build the "same-root success pool": all MRs rebased onto current
        target with a successful pipeline.
     2. If pool is non-empty: select non-overlapping batch, merge all.
-    3. If pool is empty: skip (no insist/block). Let pipelines finish
-       naturally; the next cycle will find them in the pool.
+    3. If pool is empty, fallback to serial merge semantics:
+       - insist=True: block on first rebased MR with running pipeline.
+       - insist=False: skip running, merge first green MR.
 
     Rebase phase:
     - Classify all MRs for active slots, compute budget.
@@ -595,13 +693,38 @@ def run_cycle_active_cap_phase1(
                 log.info(f"  MERGE MR !{mr['iid']} ({mr['title']}) [first]")
             else:
                 log.info(
-                    f"  MULTI-MERGE MR !{mr['iid']} ({mr['title']})"
-                    " [phase1-optimistic]"
+                    f"  MULTI-MERGE MR !{mr['iid']} ({mr['title']}) [phase1-optimistic]"
                 )
             merge_mr(sim_url, project_id, mr["iid"])
             merge_count += 1
     else:
-        log.info("  Pool empty — skipping merge, letting pipelines accumulate")
+        # Fallback: no same-root pool — serial merge with insist control
+        for mr in preprocessed:
+            if mr["state"] != "opened":
+                continue
+            if needs_rebase(sim_url, project_id, mr["sha"], target_head):
+                continue
+            pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+            if not pipelines:
+                continue
+            latest_status = pipelines[0]["status"]
+            if latest_status in ("running", "pending"):
+                if insist:
+                    log.info(
+                        f"  INSIST MR !{mr['iid']}"
+                        f" (pipeline {latest_status}) [fallback]"
+                    )
+                    break
+                log.info(
+                    f"  SKIP MR !{mr['iid']} (pipeline {latest_status}) [fallback]"
+                )
+                continue
+            if latest_status == "success":
+                log.info(f"  MERGE MR !{mr['iid']} ({mr['title']}) [fallback-single]")
+                merge_mr(sim_url, project_id, mr["iid"])
+                merge_count += 1
+                break
+            continue
 
     # Refresh state after merge(s)
     if merge_count > 0:
@@ -611,12 +734,15 @@ def run_cycle_active_cap_phase1(
     # Rebase phase: classify and fill budget
     already_active = 0
     needs_rebase_mrs: list[dict] = []
+    failed_mrs: list[dict] = []
 
     for mr in preprocessed:
         if mr["state"] != "opened":
             continue
         if is_consuming_slot(sim_url, project_id, mr, target_head):
             already_active += 1
+        elif has_failed_pipeline(sim_url, project_id, mr):
+            failed_mrs.append(mr)
         elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
             needs_rebase_mrs.append(mr)
 
@@ -627,6 +753,14 @@ def run_cycle_active_cap_phase1(
         if rebase_count >= budget:
             break
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
+        rebase_mr(sim_url, project_id, mr["iid"])
+        rebase_count += 1
+
+    # Retry failed pipelines within remaining budget
+    for mr in failed_mrs:
+        if rebase_count >= budget:
+            break
+        log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
         rebase_mr(sim_url, project_id, mr["iid"])
         rebase_count += 1
 
@@ -648,7 +782,8 @@ POLICY_RUNNERS = {
     "active-cap-no-insist": partial(run_cycle_active_cap, insist=False),
     "old-burst": partial(run_cycle_old_burst, insist=True),
     "old-burst-no-insist": partial(run_cycle_old_burst, insist=False),
-    "active-cap+phase1": run_cycle_active_cap_phase1,
+    "cap+phase1": partial(run_cycle_active_cap_phase1, insist=True),
+    "cap+phase1-NI": partial(run_cycle_active_cap_phase1, insist=False),
 }
 
 
@@ -674,7 +809,7 @@ def run_policy(
     total_ticks = 0
     merge_ticks: list[int] = []  # tick at which each merge happened
     initial_state = get_state(sim_url)
-    initial_open = initial_state["open_mrs"]
+    total_mrs = initial_state.get("total_mrs", initial_state["open_mrs"])
 
     # Track merges-per-cycle for Phase 1 multi-merge metric
     # "target advance" in Phase 1 context = one reconcile cycle that produced merges
@@ -734,10 +869,27 @@ def run_policy(
     metrics["time_to_merge_10"] = time_to_merge_10
     metrics["avg_merge_interval_ticks"] = round(avg_merge_interval, 2)
     metrics["queue_drain_pct"] = (
-        round(mrs_merged / initial_open * 100, 1) if initial_open > 0 else 0
+        round(mrs_merged / total_mrs * 100, 1) if total_mrs > 0 else 0
     )
     metrics["merge_cycles"] = merge_cycles
     metrics["avg_mrs_per_merge_cycle"] = round(avg_mrs_per_merge_cycle, 2)
+
+    # Starvation tracking: fetch per-MR wait times
+    resp = requests.get(f"{sim_url}/__sim/merged_mrs")
+    resp.raise_for_status()
+    merged_mrs = resp.json()
+
+    wait_times = sorted(m["wait_ticks"] for m in merged_mrs)
+    if wait_times:
+        metrics["wait_p50"] = _percentile(wait_times, 50)
+        metrics["wait_p95"] = _percentile(wait_times, 95)
+        metrics["wait_max"] = wait_times[-1]
+        metrics["starved_mrs"] = sum(1 for w in wait_times if w > 100)
+    else:
+        metrics["wait_p50"] = 0
+        metrics["wait_p95"] = 0
+        metrics["wait_max"] = 0
+        metrics["starved_mrs"] = 0
 
     log.info("Final metrics:")
     log.info(f"  total_time: {total_time_ticks} ticks")
@@ -750,6 +902,11 @@ def run_policy(
     log.info(f"  peak_active_pipelines: {metrics.get('peak_active_pipelines')}")
     log.info(f"  duplicate_rebases: {metrics.get('duplicate_rebase_total')}")
     log.info(f"  remaining open MRs: {final_state['open_mrs']}")
+    log.info(
+        f"  wait times: p50={metrics['wait_p50']}"
+        f" p95={metrics['wait_p95']} max={metrics['wait_max']}"
+    )
+    log.info(f"  starved MRs (>100 ticks): {metrics['starved_mrs']}")
 
     return metrics
 
@@ -773,12 +930,13 @@ def run_comparison(args: argparse.Namespace) -> None:
         "active-cap-no-insist",
         "old-burst",
         "old-burst-no-insist",
-        "active-cap+phase1",
+        "cap+phase1",
+        "cap+phase1-NI",
     ]
 
     timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
     base_reports = os.path.join(
-        os.path.abspath(os.path.dirname(__file__) or "."), "reports"
+        os.path.abspath(os.path.dirname(__file__) or "."), "reports", "comparisons"
     )
     reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
@@ -851,8 +1009,14 @@ def run_comparison(args: argparse.Namespace) -> None:
     # Print comparison table
     col_w = 12
     header_policies = [
-        "top-k", "top-k-NI", "act-cap", "act-cap-NI",
-        "burst", "burst-NI", "cap+ph1",
+        "top-k",
+        "top-k-NI",
+        "act-cap",
+        "act-cap-NI",
+        "burst",
+        "burst-NI",
+        "cap+ph1",
+        "ph1-NI",
     ]
     table_width = 30 + col_w * len(header_policies) + len(header_policies) + 1
     print("\n")
@@ -886,6 +1050,12 @@ def run_comparison(args: argparse.Namespace) -> None:
         (None, "── Phase 1 Multi-Merge ──"),
         ("merge_cycles", "Merge Cycles"),
         ("avg_mrs_per_merge_cycle", "Avg MRs / Merge Cycle"),
+        # --- Priority Starvation ---
+        (None, "── Priority Starvation ──"),
+        ("wait_p50", "Wait Time p50 (ticks)"),
+        ("wait_p95", "Wait Time p95 (ticks)"),
+        ("wait_max", "Max Wait (ticks)"),
+        ("starved_mrs", "Starved MRs (>100 ticks)"),
     ]
 
     # Header
@@ -912,11 +1082,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                 vals.append(f"{v:.3f}")
             else:
                 vals.append(str(v))
-        print(
-            f"| {label:<28} |"
-            + "|".join(f" {v:>{col_w - 2}} " for v in vals)
-            + "|"
-        )
+        print(f"| {label:<28} |" + "|".join(f" {v:>{col_w - 2}} " for v in vals) + "|")
 
     print()
     print("Key:")
@@ -932,8 +1098,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     print("  - Lower duplicate rebases = less wasted CI")
     print("  - Higher same-root pool = more Phase 1 multi-merge candidates")
     print(
-        "  - insist vs NI: insist respects priority but may idle;"
-        " NI maximizes merges"
+        "  - insist vs NI: insist respects priority but may idle; NI maximizes merges"
     )
     print()
 
@@ -970,9 +1135,7 @@ def run_comparison(args: argparse.Namespace) -> None:
                 f.write(f"| {label:<28} |{cells}|\n")
         f.write("\nKey:\n")
         f.write("  NI = no-insist (skip running MRs, merge first available green)\n")
-        f.write(
-            "  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n"
-        )
+        f.write("  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n")
         f.write("  throughput = MRs merged / total ticks elapsed\n")
         f.write("  queue drain = % of initial open MRs that got merged\n\n")
         f.write("Interpretation:\n")
@@ -991,6 +1154,309 @@ def run_comparison(args: argparse.Namespace) -> None:
     log.info(f"Per-policy NDJSON files saved to {reports_dir}/")
 
 
+# ---------------------------------------------------------------------------
+# Monte Carlo runner
+# ---------------------------------------------------------------------------
+
+
+def _start_server(
+    venv_python: str,
+    sim_dir: str,
+    scenario: str,
+    port: int,
+    seed: int,
+    metrics_out: str,
+    log_path: str,
+) -> subprocess.Popen:
+    """Start a sim server and return the Popen handle."""
+    log_file = open(log_path, "w")  # noqa: SIM115
+    proc = subprocess.Popen(
+        [
+            venv_python,
+            "-m",
+            "gitlab_hk_sim.cli",
+            "serve",
+            "--scenario",
+            scenario,
+            "--port",
+            str(port),
+            "--host",
+            "127.0.0.1",
+            "--seed",
+            str(seed),
+            "--metrics-out",
+            metrics_out,
+        ],
+        stdout=log_file,
+        stderr=log_file,
+        cwd=sim_dir,
+        env={**os.environ, "PYTHONPATH": sim_dir},
+    )
+    return proc
+
+
+def _wait_for_server(url: str, retries: int = 10, delay: float = 0.5) -> bool:
+    """Poll until server responds or retries exhausted."""
+    for _ in range(retries):
+        try:
+            requests.get(f"{url}/api/v4/user", timeout=2).raise_for_status()
+            return True
+        except Exception:
+            time.sleep(delay)
+    return False
+
+
+def _kill_server(proc: subprocess.Popen) -> None:
+    """Terminate server process gracefully."""
+    proc.terminate()
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def run_monte_carlo(args: argparse.Namespace) -> None:
+    """Run N Monte Carlo trials with per-trial policy parallelism."""
+    if not args.scenario:
+        print("ERROR: --monte-carlo requires --scenario")
+        sys.exit(1)
+
+    log = logging.getLogger("monte-carlo")
+    n_trials = args.monte_carlo
+    base_seed = args.base_seed
+    base_port = args.base_port
+
+    if args.policies:
+        policies = [p.strip() for p in args.policies.split(",")]
+    else:
+        policies = POLICY_SETS[args.policy_set]
+
+    for p in policies:
+        if p not in POLICY_RUNNERS:
+            log.error(f"Unknown policy: {p}")
+            log.error(f"Available: {list(POLICY_RUNNERS.keys())}")
+            sys.exit(1)
+
+    venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
+    sim_dir = os.path.abspath(os.path.dirname(__file__) or ".")
+    scenario_path = os.path.abspath(args.scenario)
+
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
+    base_reports = os.path.join(sim_dir, "reports", "monte-carlo")
+    reports_dir = os.path.join(base_reports, timestamp)
+    os.makedirs(reports_dir, exist_ok=True)
+
+    latest_link = os.path.join(base_reports, "latest")
+    if os.path.islink(latest_link):
+        os.unlink(latest_link)
+    os.symlink(timestamp, latest_link)
+
+    log.info(f"Monte Carlo: {n_trials} trials, policies={policies}")
+    log.info(f"Base seed: {base_seed}, base port: {base_port}")
+    log.info(f"Reports: {reports_dir}")
+
+    all_results: dict[str, list[dict[str, Any]]] = {p: [] for p in policies}
+
+    for trial in range(n_trials):
+        trial_seed = base_seed + trial
+        trial_dir = os.path.join(reports_dir, f"trial-{trial:02d}")
+        os.makedirs(trial_dir, exist_ok=True)
+
+        log.info(f"\n{'=' * 60}")
+        log.info(f"TRIAL {trial + 1}/{n_trials} (seed={trial_seed})")
+        log.info(f"{'=' * 60}")
+
+        servers: list[tuple[str, subprocess.Popen, int]] = []
+        for i, policy in enumerate(policies):
+            port = base_port + i
+            metrics_out = os.path.join(trial_dir, f"{policy}-metrics.ndjson")
+            log_path = os.path.join(trial_dir, f"{policy}-server.log")
+            proc = _start_server(
+                venv_python,
+                sim_dir,
+                scenario_path,
+                port,
+                trial_seed,
+                metrics_out,
+                log_path,
+            )
+            servers.append((policy, proc, port))
+
+        time.sleep(2)
+
+        healthy_policies: list[tuple[str, int]] = []
+        for policy, proc, port in servers:
+            url = f"http://127.0.0.1:{port}"
+            if _wait_for_server(url):
+                healthy_policies.append((policy, port))
+            else:
+                log.error(f"  Server for {policy} on port {port} failed to start")
+                _kill_server(proc)
+
+        def _run_one(policy: str, port: int, _trial: int = trial) -> tuple[str, dict]:
+            url = f"http://127.0.0.1:{port}"
+            policy_log = logging.getLogger(f"mc.t{_trial}.{policy}")
+            result = run_policy(
+                url,
+                policy,
+                args.limit,
+                args.cycles,
+                args.ticks_per_cycle,
+                policy_log,
+            )
+            return policy, result
+
+        trial_results: dict[str, dict] = {}
+        with ThreadPoolExecutor(max_workers=len(healthy_policies)) as pool:
+            futures = {
+                pool.submit(_run_one, policy, port): policy
+                for policy, port in healthy_policies
+            }
+            for future in as_completed(futures):
+                policy_name = futures[future]
+                try:
+                    name, result = future.result()
+                    trial_results[name] = result
+                    log.info(f"  {name}: {result.get('mrs_merged', 0)} merged")
+                except Exception as e:
+                    log.error(f"  {policy_name} failed: {e}")
+
+        for _, proc, _ in servers:
+            _kill_server(proc)
+        time.sleep(0.5)
+
+        for policy in policies:
+            if policy in trial_results:
+                all_results[policy].append(trial_results[policy])
+
+    _write_monte_carlo_output(all_results, policies, n_trials, reports_dir, log)
+
+
+def _write_monte_carlo_output(
+    all_results: dict[str, list[dict[str, Any]]],
+    policies: list[str],
+    n_trials: int,
+    reports_dir: str,
+    log: logging.Logger,
+) -> None:
+    """Aggregate statistics and write CSV + comparison table."""
+    metrics_keys = [
+        ("total_time_ticks", "Total Time (ticks)"),
+        ("mrs_merged", "MRs Merged"),
+        ("throughput_merges_per_tick", "Throughput (m/tick)"),
+        ("time_to_first_merge", "First Merge (ticks)"),
+        ("time_to_merge_10", "Merge 10 (ticks)"),
+        ("avg_merge_interval_ticks", "Avg Interval"),
+        ("queue_drain_pct", "Queue Drain %"),
+        ("rebase_calls", "Rebases"),
+        ("pipelines_created", "Pipelines"),
+        ("peak_active_pipelines", "Peak Active"),
+        ("duplicate_rebase_total", "Dup Rebases"),
+        ("wait_p50", "Wait p50"),
+        ("wait_p95", "Wait p95"),
+        ("wait_max", "Wait Max"),
+        ("starved_mrs", "Starved MRs"),
+    ]
+
+    # --- CSV output ---
+    csv_path = os.path.join(reports_dir, "monte-carlo-summary.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        header = ["trial", "policy"] + [k for k, _ in metrics_keys]
+        writer.writerow(header)
+        for policy in policies:
+            for trial_idx, result in enumerate(all_results[policy]):
+                row = [trial_idx, policy]
+                for key, _ in metrics_keys:
+                    row.append(result.get(key, ""))
+                writer.writerow(row)
+    log.info(f"CSV written: {csv_path}")
+
+    # --- Aggregate stats ---
+    stats: dict[str, dict[str, dict[str, float]]] = {}
+    for policy in policies:
+        stats[policy] = {}
+        results = all_results[policy]
+        n = len(results)
+        if n == 0:
+            continue
+        for key, _ in metrics_keys:
+            values = [float(r[key]) for r in results if key in r and r[key] is not None]
+            if not values:
+                stats[policy][key] = {
+                    "mean": 0,
+                    "stddev": 0,
+                    "ci95": 0,
+                    "min": 0,
+                    "max": 0,
+                }
+                continue
+            mean = sum(values) / len(values)
+            variance = (
+                sum((v - mean) ** 2 for v in values) / (len(values) - 1)
+                if len(values) > 1
+                else 0
+            )
+            stddev = math.sqrt(variance)
+            ci95 = 1.96 * stddev / math.sqrt(len(values)) if len(values) > 1 else 0
+            stats[policy][key] = {
+                "mean": mean,
+                "stddev": stddev,
+                "ci95": ci95,
+                "min": min(values),
+                "max": max(values),
+            }
+
+    # --- Comparison table ---
+    col_w = 16
+    table_width = 24 + col_w * len(policies) + len(policies) + 1
+    lines: list[str] = []
+    lines.append("")
+    lines.append("=" * table_width)
+    lines.append(f"MONTE CARLO COMPARISON ({n_trials} trials, seed={policies})")
+    lines.append("=" * table_width)
+    lines.append("Format: mean +/- CI95")
+    lines.append("")
+
+    hdr = f"| {'Metric':<22} |"
+    hdr += "|".join(f" {p:^{col_w - 2}} " for p in policies) + "|"
+    lines.append(hdr)
+    lines.append(f"|{'-' * 24}|" + "|".join("-" * col_w for _ in policies) + "|")
+
+    for key, label in metrics_keys:
+        cells = []
+        for policy in policies:
+            s = stats[policy].get(key, {})
+            if not s:
+                cells.append("N/A")
+                continue
+            mean = s["mean"]
+            ci = s["ci95"]
+            if mean == int(mean) and ci == int(ci):
+                cells.append(f"{int(mean)}+/-{int(ci)}")
+            else:
+                cells.append(f"{mean:.2f}+/-{ci:.2f}")
+        line = f"| {label:<22} |"
+        line += "|".join(f" {c:^{col_w - 2}} " for c in cells) + "|"
+        lines.append(line)
+
+    lines.append("")
+    lines.append("Legend: mean +/- 95% confidence interval half-width")
+    lines.append("  Non-overlapping CIs → statistically significant difference")
+    lines.append("")
+
+    output = "\n".join(lines)
+    print(output)
+
+    comparison_file = os.path.join(reports_dir, "monte-carlo-comparison.txt")
+    with open(comparison_file, "w") as f:
+        f.write(output)
+    log.info(f"Comparison: {comparison_file}")
+    log.info(f"CSV: {csv_path}")
+    log.info(f"Trial data: {reports_dir}/trial-*/")
+
+
 def main() -> None:
     args = parse_args()
     logging.basicConfig(
@@ -998,6 +1464,10 @@ def main() -> None:
         format="%(asctime)s [%(levelname)s] %(message)s",
     )
     log = logging.getLogger("standalone")
+
+    if args.monte_carlo > 0:
+        run_monte_carlo(args)
+        return
 
     if args.compare:
         run_comparison(args)
