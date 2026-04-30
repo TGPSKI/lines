@@ -1,3 +1,35 @@
+metadata:
+  name: Large Mixed Queue (Advanced)
+  description: >
+    Simulates an 8-hour window of a busy monorepo merge queue with realistic
+    production conditions including staggered arrivals, variable CI, failures,
+    author pushes, and force-merges.
+  duration_ticks: 480
+  duration_real: 8 hours (1 tick ≈ 1 minute)
+  merge_requests:
+    total: 120
+    initial_open: 20
+    arrivals: staggered over 480 ticks (bursty)
+  priority_distribution:
+    critical: 23
+    high: 37
+    medium: 33
+    low: 24
+  tenant_domains: 23 distinct (top: cluster-mgmt=16, sre-infra=13, provisioning=13)
+  ci_durations:
+    per_mr_override: true (each MR has fixed ci_duration)
+    range: 5-25 ticks
+    mean: 12.1 ticks
+    distribution: right-skewed (most pipelines 5-9 ticks)
+  pipeline_failures:
+    rate: 10%
+    distribution: weighted (same shape as duration distribution)
+  disruptions:
+    author_pushes: 8 (invalidates rebase + cancels active pipeline)
+    force_merges: 2 (bypasses queue, advances target_head)
+    mr_cancellations: 0
+    external_target_advances: 0
+
 project:
   id: 1001
   name: config-repo

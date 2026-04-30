@@ -33,7 +33,7 @@ METRICS_FILE := $(METRICS_DIR)/metrics.ndjson
 REPORT_FILE := $(METRICS_DIR)/summary.md
 LIMIT ?= 8
 TICKS ?= 10
-CYCLES ?= 3
+CYCLES ?= 20
 TICKS_PER_CYCLE ?= 4
 POLICY ?= active-cap
 
@@ -139,7 +139,7 @@ compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 		--scenario $(ADV_SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit $(LIMIT) \
-		--cycles $(CYCLES) \
+		--cycles 120 \
 		--ticks-per-cycle $(TICKS_PER_CYCLE)
 
 compare-quick: ## Quick comparison (~2 min) - fewer cycles
@@ -155,31 +155,31 @@ compare-quick: ## Quick comparison (~2 min) - fewer cycles
 # Monte Carlo (parallel trials with statistical analysis)
 # ---------------------------------------------------------------------------
 
-monte-carlo-small: ## Monte Carlo: 10 trials (~10 min)
+monte-carlo-small: ## Monte Carlo: 10 trials (~30 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--monte-carlo 10 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles $(CYCLES) \
+		--cycles 120 \
 		--ticks-per-cycle $(TICKS_PER_CYCLE)
 
-monte-carlo-medium: ## Monte Carlo: 20 trials (~20 min)
+monte-carlo-medium: ## Monte Carlo: 20 trials (~60 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--monte-carlo 20 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles $(CYCLES) \
+		--cycles 120 \
 		--ticks-per-cycle $(TICKS_PER_CYCLE)
 
-monte-carlo-large: ## Monte Carlo: 30 trials (~30 min)
+monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--monte-carlo 30 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles $(CYCLES) \
+		--cycles 120 \
 		--ticks-per-cycle $(TICKS_PER_CYCLE)
 
 # ---------------------------------------------------------------------------
