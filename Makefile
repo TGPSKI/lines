@@ -41,7 +41,10 @@ PYTEST := cd ../.. && uv run pytest
 QR_ROOT := $(shell cd ../.. && pwd)
 
 .PHONY: test validate serve serve-bg kill-server run run-harness run-harness-dry \
-        compare tick ticks metrics state reset report full-cycle clean help
+        compare tick ticks metrics state reset report full-cycle clean ui help
+
+ui: ## Open the queue visualization (load NDJSON in the browser; requires network for CDN)
+	@python3 -c "import pathlib, webbrowser; p=pathlib.Path('$(CURDIR)/ui/index.html').resolve(); print(p); webbrowser.open(p.as_uri())"
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | \

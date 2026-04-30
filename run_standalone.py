@@ -617,12 +617,23 @@ def run_comparison(args: argparse.Namespace) -> None:
 
     policies = ["top-k", "active-cap", "old-burst", "active-cap+phase1"]
 
+    reports_dir = os.path.join(
+        os.path.abspath(os.path.dirname(__file__) or "."), "reports", "last-run"
+    )
+    os.makedirs(reports_dir, exist_ok=True)
+
     for policy in policies:
         log.info(f"\n{'#' * 60}")
         log.info(f"# POLICY: {policy}")
         log.info(f"{'#' * 60}\n")
 
+        metrics_out = os.path.abspath(
+            os.path.join(reports_dir, f"{policy}-metrics.ndjson")
+        )
+
         # Start server
+        sim_dir = os.path.abspath(os.path.dirname(__file__) or ".")
+        server_log = open(os.path.join(reports_dir, f"{policy}-server.log"), "w")
         server_proc = subprocess.Popen(
             [
                 venv_python,
@@ -630,15 +641,18 @@ def run_comparison(args: argparse.Namespace) -> None:
                 "gitlab_hk_sim.cli",
                 "serve",
                 "--scenario",
-                args.scenario,
+                os.path.abspath(args.scenario),
                 "--port",
                 str(args.port),
                 "--host",
                 "127.0.0.1",
+                "--metrics-out",
+                metrics_out,
             ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            env={**os.environ, "PYTHONPATH": os.path.dirname(__file__)},
+            stdout=server_log,
+            stderr=server_log,
+            cwd=sim_dir,
+            env={**os.environ, "PYTHONPATH": sim_dir},
         )
         time.sleep(2)
 
@@ -655,8 +669,13 @@ def run_comparison(args: argparse.Namespace) -> None:
                 sim_url, policy, args.limit, args.cycles, args.ticks_per_cycle, log
             )
         finally:
-            server_proc.kill()
-            server_proc.wait()
+            server_proc.terminate()
+            try:
+                server_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                server_proc.kill()
+                server_proc.wait()
+            server_log.close()
             time.sleep(1)
 
     # Print comparison table
@@ -734,6 +753,48 @@ def run_comparison(args: argparse.Namespace) -> None:
     print("  - Lower duplicate rebases = less wasted CI")
     print("  - Higher same-root pool = more Phase 1 multi-merge candidates")
     print()
+
+    # Save comparison table to file
+    comparison_file = os.path.join(reports_dir, "8hour-comparison.txt")
+    with open(comparison_file, "w") as f:
+        f.write("\n\n")
+        f.write("=" * 90 + "\n")
+        f.write("POLICY COMPARISON\n")
+        f.write("=" * 90 + "\n\n")
+        f.write(
+            f"| {'Metric':<28} |"
+            + "|".join(f" {p:>{col_w - 2}} " for p in header_policies)
+            + "|\n"
+        )
+        f.write(f"|{'-' * 30}|" + "|".join("-" * col_w for _ in header_policies) + "|\n")
+        for key, label in metrics_keys:
+            if key is None:
+                f.write(
+                    f"| {label:<28} |"
+                    + "|".join(f" {'':>{col_w - 2}} " for _ in header_policies)
+                    + "|\n"
+                )
+            else:
+                vals = []
+                for policy in policy_keys:
+                    v = results.get(policy, {}).get(key, "N/A")
+                    if isinstance(v, float):
+                        vals.append(f"{v:.3f}")
+                    else:
+                        vals.append(str(v))
+                f.write(f"| {label:<28} |" + "|".join(f" {v:>{col_w - 2}} " for v in vals) + "|\n")
+        f.write("\nKey:\n")
+        f.write("  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n")
+        f.write("  throughput = MRs merged / total ticks elapsed\n")
+        f.write("  queue drain = % of initial open MRs that got merged\n\n")
+        f.write("Interpretation:\n")
+        f.write("  - Higher throughput = faster queue processing\n")
+        f.write("  - Lower time-to-first-merge = faster initial results\n")
+        f.write("  - Lower peak active = better concurrency control (limit respected)\n")
+        f.write("  - Lower duplicate rebases = less wasted CI\n")
+        f.write("  - Higher same-root pool = more Phase 1 multi-merge candidates\n\n")
+    log.info(f"Comparison saved to {comparison_file}")
+    log.info(f"Per-policy NDJSON files saved to {reports_dir}/")
 
 
 def main() -> None:

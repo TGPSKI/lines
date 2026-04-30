@@ -140,6 +140,26 @@ commits == []  → housekeeping considers MR rebased
 commits != []  → housekeeping considers MR not rebased
 ```
 
+## Queue visualization (NDJSON)
+
+A single-page UI is meant for **walkthroughs in meetings**:
+- A **metrics comparison table** (throughput, CI waste, same-root pool, etc.) for every file you load, with the **active** column highlighted
+- A **kanban board**: one card per merge request, moving through **Waiting → Rebase / CI / Ready → Merged** as you scrub or play
+- **Playback** with **Play / Pause / Reset**, **speed (0.25×–4×)**, **Loop** (optional), and a **step scrubber**
+- A plain-language **“at this time step”** and **“what housekeeping did”** readout
+- **Optional (collapsed) detail** sections for the **stacked bar** chart and **swimlane** (brush and swim range controls only inside that section, so they stay tied to the swimlane)
+
+Durations in the main copy are **time steps** (simulator ticks), not raw log field names.
+
+```bash
+cd tools/gitlab_housekeeping_perf_sim
+make ui
+```
+
+In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js and D3 load from a CDN (first open needs network).
+
+- **File**: [ui/index.html](ui/index.html) (no build step)
+
 ## Running Tests
 
 ```bash

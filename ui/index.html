@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Merge Queue Simulator</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <style>
+    :root { --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #2ea043; --purple: #a371f7; --yellow: #d29922; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; }
+    body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 0.88rem; display: flex; flex-direction: column; overflow: hidden; }
+
+    /* Top nav */
+    .top-bar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .top-bar h1 { font-size: 1rem; font-weight: 600; white-space: nowrap; }
+    .nav-tabs { display: flex; gap: 2px; }
+    .nav-tab { padding: 0.4rem 0.85rem; border: 1px solid transparent; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.82rem; font-weight: 500; border-bottom: none; }
+    .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .nav-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg); position: relative; top: 1px; }
+
+    /* Playback bar */
+    .playback-bar { display: none; align-items: center; gap: 0.6rem; padding: 0.45rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+    .playback-bar.visible { display: flex; }
+    .pb-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.25rem 0.6rem; border-radius: 5px; cursor: pointer; font-size: 0.8rem; }
+    .pb-btn:hover { background: #30363d; }
+    .pb-btn.primary { background: #1f3d5c; border-color: #388bfd; }
+    .pb-label { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+    .pb-scrub { width: min(260px, 30vw); }
+    .pb-speed { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
+
+    /* Tab panels */
+    .tab-panel { display: none; flex: 1; overflow: auto; padding: 1rem 1.25rem; }
+    .tab-panel.active { display: flex; flex-direction: column; }
+    #panelKanban.active { overflow: hidden; }
+
+    /* Load tab */
+    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 2.5rem 1.5rem; text-align: center; color: var(--muted); background: var(--panel); cursor: pointer; max-width: 500px; margin: 2rem auto; }
+    .drop-zone:hover { border-color: var(--accent); }
+    .file-list { margin-top: 1rem; max-width: 500px; margin-left: auto; margin-right: auto; }
+    .file-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.3rem; background: var(--panel); font-size: 0.82rem; }
+    .file-item .rm { color: var(--muted); cursor: pointer; border: none; background: none; font-size: 1rem; }
+    .file-item .rm:hover { color: #f85149; }
+
+    /* Stats tab */
+    .hero-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; margin-bottom: 1.2rem; }
+    .hero-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; }
+    .hero-card .label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+    .hero-card .value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .hero-card .sub { font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; }
+    .hero-card .winner { font-size: 0.68rem; color: var(--accent); margin-top: 0.15rem; }
+    .cmp-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
+    .cmp { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; }
+    .cmp th, .cmp td { border: 1px solid var(--border); padding: 0.45rem 0.7rem; text-align: right; font-variant-numeric: tabular-nums; }
+    .cmp th:first-child, .cmp td:first-child { text-align: left; white-space: nowrap; color: #c9d1d9; font-weight: 500; }
+    .cmp th { background: var(--panel); color: var(--text); font-weight: 600; }
+    .cmp tr.section td { background: #141920; color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; }
+    .cmp td.best { background: rgba(46,160,67,0.08); color: #3fb950; }
+    .cmp td.metric-name { cursor: help; position: relative; }
+    .cmp td.metric-name[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; z-index: 50; background: #1c2128; border: 1px solid var(--border); color: #c9d1d9; padding: 0.4rem 0.6rem; border-radius: 6px; font-size: 0.72rem; font-weight: 400; white-space: normal; width: max-content; max-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); pointer-events: none; }
+    .cmp td.metric-name[data-tip=""]:hover::after { display: none; }
+
+    /* Series selector */
+    .series-selector { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.7rem; align-items: center; }
+    .series-selector label { font-size: 0.78rem; display: flex; align-items: center; gap: 0.3rem; padding: 0.25rem 0.55rem; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: var(--panel); color: var(--muted); transition: border-color 0.15s, color 0.15s; }
+    .series-selector label:has(input:checked) { border-color: var(--accent); color: var(--text); }
+    .series-selector input { accent-color: var(--accent); }
+    .series-selector .sel-hint { font-size: 0.7rem; color: var(--muted); margin-left: 0.5rem; }
+
+    /* Metric picker */
+    .metric-picker { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.7rem; align-items: center; }
+    .metric-picker .mp-label { font-size: 0.7rem; color: var(--muted); margin-right: 0.3rem; }
+    .metric-picker button { font-size: 0.72rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 5px; background: var(--panel); color: var(--muted); cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; }
+    .metric-picker button:hover { border-color: #484f58; color: var(--text); }
+    .metric-picker button.active { border-color: var(--accent); color: var(--accent); background: rgba(56,139,253,0.08); }
+
+    /* Kanban tab */
+    .kanban-snapshot { display: flex; align-items: center; gap: 1.2rem; padding: 0.5rem 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; flex-shrink: 0; font-size: 0.82rem; flex-wrap: wrap; }
+    .kanban-snapshot b { color: var(--text); }
+    .kanban-snapshot .story-tip { color: var(--muted); font-size: 0.75rem; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .traces-container { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; overflow: hidden; }
+    .trace { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; transition: flex 0.15s; }
+    .trace.collapsed { flex: 0 0 auto; }
+    .trace.expanded { flex: 1 1 0; min-height: 0; }
+    .trace-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.65rem; cursor: pointer; user-select: none; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+    .trace-header .caret { font-size: 0.7rem; transition: transform 0.15s; color: var(--muted); }
+    .trace-header.open .caret { transform: rotate(90deg); }
+    .trace-header .tname { font-size: 0.8rem; font-weight: 600; color: var(--accent); }
+    .trace-header .tcounts { font-size: 0.72rem; color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+    .trace-body { flex: 1; overflow: hidden; display: none; }
+    .trace.expanded .trace-body { display: flex; flex-direction: column; }
+    .trace-cols { display: flex; gap: 0; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+    .trace-cols .col-hd { flex: 1; text-align: center; font-size: 0.65rem; text-transform: uppercase; color: var(--muted); padding: 0.3rem 0.2rem; border-right: 1px solid var(--border); letter-spacing: 0.03em; }
+    .trace-cols .col-hd:last-child { border-right: none; }
+    .trace-cards { display: flex; flex: 1; overflow-y: auto; min-height: 0; }
+    .trace-cards .tcol { flex: 1; padding: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.25rem; align-content: flex-start; border-right: 1px solid var(--border); }
+    .trace-cards .tcol:last-child { border-right: none; }
+    .kcard { font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 4px; background: #21262d; border: 1px solid #30363d; transition: transform 0.2s, background 0.2s, opacity 0.2s, box-shadow 0.2s; }
+    .kcard.just-rebased { background: #2d1f6f; border-color: var(--purple); box-shadow: 0 0 7px 2px rgba(163,113,247,0.55); transform: scale(1.06); }
+    .kcard.just-merged { background: #0d3320; border-color: var(--green); box-shadow: 0 0 7px 2px rgba(46,160,67,0.55); transform: scale(1.06); }
+    .kcard.muted { opacity: 0.5; }
+    .merge-group { display: inline-flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.2rem 0.35rem; border: 1px solid #21262d; border-radius: 5px; background: #0d1117; margin-bottom: 0.2rem; }
+    .merge-group.recent { border-color: var(--green); background: #0a1f15; }
+    .mg-label { font-size: 0.58rem; color: var(--muted); width: 100%; }
+
+    /* Charts tab */
+    .chart-policy-tabs { display: flex; gap: 0.3rem; margin-bottom: 0.6rem; }
+    .cp-tab { padding: 0.3rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.78rem; }
+    .cp-tab.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
+    .chart-area { display: grid; gap: 0.8rem; }
+    @media (min-width: 1000px) { .chart-area { grid-template-columns: 1fr 1fr; } }
+    .chart-wrap { height: 300px; }
+    .brush-wrap { height: 50px; margin: 0.3rem 0; }
+    .swim-controls { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-top: 0.4rem; flex-wrap: wrap; }
+    .swim-controls input { width: 4.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 0.2rem 0.3rem; }
+  </style>
+</head>
+<body>
+  <div class="top-bar">
+    <h1>Merge Queue Sim</h1>
+    <nav class="nav-tabs" id="navTabs">
+      <button class="nav-tab active" data-tab="load">Load</button>
+      <button class="nav-tab" data-tab="stats">Statistics</button>
+      <button class="nav-tab" data-tab="kanban">Kanban</button>
+      <button class="nav-tab" data-tab="charts">Composition</button>
+    </nav>
+  </div>
+
+  <div class="playback-bar" id="playbackBar">
+    <button class="pb-btn primary" id="btnPlay">Play</button>
+    <button class="pb-btn" id="btnReset">Reset</button>
+    <label style="font-size:0.78rem;color:var(--muted)"><input type="checkbox" id="chkLoop" /> Loop</label>
+    <span class="pb-label" id="playLabel">Step 0 / 0</span>
+    <input type="range" class="pb-scrub" id="scrub" min="0" max="0" value="0" step="1" />
+    <select class="pb-speed" id="selSpeed">
+      <option value="0.25">0.25x</option>
+      <option value="0.5">0.5x</option>
+      <option value="1" selected>1x</option>
+      <option value="2">2x</option>
+      <option value="4">4x</option>
+    </select>
+  </div>
+
+  <!-- Tab: Load -->
+  <div class="tab-panel active" id="panelLoad">
+    <div class="drop-zone" id="dropZone">Drop <code>metrics.ndjson</code> files here or click to open</div>
+    <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl" multiple hidden />
+    <div class="file-list" id="fileList"></div>
+  </div>
+
+  <!-- Tab: Statistics -->
+  <div class="tab-panel" id="panelStats">
+    <div class="series-selector" id="seriesSelector"></div>
+    <div class="hero-cards" id="heroCards"></div>
+    <div class="metric-picker" id="metricPicker"></div>
+    <div class="cmp-wrap"><table class="cmp" id="cmpTable"></table></div>
+  </div>
+
+  <!-- Tab: Kanban -->
+  <div class="tab-panel" id="panelKanban">
+    <div class="kanban-snapshot" id="kSnap"></div>
+    <div class="traces-container" id="tracesContainer"></div>
+  </div>
+
+  <!-- Tab: Composition + Swimlane -->
+  <div class="tab-panel" id="panelCharts">
+    <div class="chart-policy-tabs" id="chartPolicyTabs"></div>
+    <div class="chart-area">
+      <div>
+        <h3 style="font-size:0.8rem;margin-bottom:0.4rem">Queue composition (stacked bar)</h3>
+        <div class="chart-wrap"><canvas id="chartCanvas"></canvas></div>
+        <div class="brush-wrap" id="brushArea"></div>
+      </div>
+      <div>
+        <h3 style="font-size:0.8rem;margin-bottom:0.4rem">Per-MR swimlane</h3>
+        <div id="swimArea" style="overflow-x:auto;min-height:100px"></div>
+        <div class="swim-controls">
+          <label>From <input type="number" id="rmin" value="0" min="0" /></label>
+          <label>To <input type="number" id="rmax" value="100" min="0" /></label>
+          <button class="pb-btn" id="fitBtn">Fit all</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)" };
+    const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
+    let playhead = 0, playTimer = null, xRange = [0, 100], chartInstance = null;
+    let filesData = [], activeIndex = 0;
+
+    // --- Parsing & Analysis ---
+    function parseNdjson(t) { return t.split("\n").map(l => l.trim()).filter(Boolean).map(j => { try { return JSON.parse(j); } catch { return null; } }).filter(Boolean); }
+    function filterE(arr) { return (Array.isArray(arr) ? arr : []).filter(e => e && e.event !== "api_call"); }
+    function pct(a, p) { if (!a.length) return 0; const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(s.length * p / 100))]; }
+
+    function buildSwimlaneSegs(evs, maxT) {
+      const segs = [], pipe = new Map();
+      evs.forEach(e => { if (e.event === "rebase" && e.pipeline_id != null) pipe.set(e.pipeline_id, { mr: e.mr_iid, rebaseTick: e.tick }); });
+      evs.forEach(e => {
+        if (e.event !== "tick" || !e.transitions) return;
+        e.transitions.forEach(tr => {
+          const p = pipe.get(tr.pipeline_id);
+          const m = (tr.from || "").toLowerCase(), n = (tr.to || "").toLowerCase();
+          if (tr.mr_iid == null) return;
+          if (m === "pending" && n === "running" && p) { segs.push({ mr: tr.mr_iid, start: p.rebaseTick, end: e.tick, kind: "pending" }); p.runAt = e.tick; }
+          else if (m === "running" && n === "success" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "running" }); p.succAt = e.tick; }
+        });
+      });
+      pipe.forEach((p, pid) => {
+        if (p.succAt == null) return;
+        let t1 = maxT + 1;
+        evs.forEach(e => { if ((e.event === "merge" || e.event === "rebase") && e.mr_iid === p.mr && e.tick > p.succAt) t1 = Math.min(t1, e.tick); });
+        if (t1 > p.succAt) segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+      });
+      evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + 0.35, kind: "merged" }); });
+      segs.forEach(s => { s.end = Math.max(s.end, s.start); });
+      return segs.sort((a, b) => a.mr - b.mr || a.start - b.start);
+    }
+
+    function analyze(raw) {
+      const evs = filterE([...raw]);
+      let maxTick = 0;
+      evs.forEach(e => { if (e.tick != null) maxTick = Math.max(maxTick, e.tick); });
+      const byT = new Map();
+      evs.forEach(e => { if (e.event === "tick" && e.tick != null) byT.set(e.tick, { ...e }); else if (e.event === "snapshot" && e.tick != null && !byT.has(e.tick)) byT.set(e.tick, { ...e }); });
+      evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; r.stale_successes = r.stale_successes ?? e.stale_successes; r.same_root_success_pool = r.same_root_success_pool ?? e.same_root_success_pool; r.active_pipelines = r.active_pipelines ?? e.active_pipelines; } } });
+      const series = { labels: [], stale: [], pool: [], active: [], other: [], open: [] };
+      for (let t = 0; t <= maxTick; t++) { const w = byT.get(t) || {}, o = w.open_mrs ?? 0, st = w.stale_successes ?? 0, p = w.same_root_success_pool ?? 0, ap = w.active_pipelines ?? 0;
+        series.labels.push(t); series.stale.push(st); series.pool.push(p); series.active.push(ap); series.other.push(Math.max(0, o - st - p - ap)); series.open.push(o); }
+      return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs: buildSwimlaneSegs(evs, maxTick) };
+    }
+
+    function rebaseSetAtTick(evs, t) { const s = new Set(); evs.forEach(e => { if (e.event === "rebase" && e.tick === t) s.add(e.mr_iid); }); return s; }
+    function mergeTickByMr(evs) { const m = new Map(); evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) { const x = m.get(e.mr_iid); if (x == null || e.tick < x) m.set(e.mr_iid, e.tick); } }); return m; }
+    function allIids(evs) { const s = new Set(); evs.forEach(e => { if (e.mr_iid != null) s.add(e.mr_iid); (e.transitions || []).forEach(tr => { if (tr.mr_iid != null) s.add(tr.mr_iid); }); }); return s; }
+    function colAtT(segs, t, m, mergeM, rebaseS) {
+      if (t >= (mergeM.get(m) ?? 1e9)) return "merged";
+      if (rebaseS.has(m)) return "rebase";
+      for (const s of segs) { if (s.mr !== m) continue; if (s.start > t || s.end <= t) continue; if (s.kind === "pending" || s.kind === "running") return "ci"; if (s.kind === "success") return "ready"; }
+      return "wait";
+    }
+    function buildKanbanState(packed, evs, t) {
+      const f = filterE(evs), mergeM = mergeTickByMr(f), rebaseS = rebaseSetAtTick(f, t), iids = Array.from(allIids(f));
+      const w = { wait: [], rebase: [], ci: [], ready: [], merged: [] };
+      for (const m of iids) { const c = colAtT(packed.segs, t, m, mergeM, rebaseS); w[c === "rebase" ? "rebase" : c].push(m); }
+      Object.values(w).forEach(a => a.sort((a, b) => a - b));
+      return w;
+    }
+    function storyAt(evs, t) {
+      const a = [];
+      evs.forEach(e => { if (e.tick === t) { if (e.event === "rebase") a.push("Rebased !" + e.mr_iid); if (e.event === "merge") a.push("Merged !" + e.mr_iid); } });
+      evs.forEach(e => { if (e.event === "tick" && e.tick === t) (e.transitions || []).forEach(tr => a.push("!" + tr.mr_iid + ": " + tr.from + " → " + tr.to)); });
+      return a.length ? a : ["Clock advanced."];
+    }
+
+    function computeFileMetrics(evs) {
+      const f = filterE(evs), packed = analyze(f);
+      const rebaseE = f.filter(e => e.event === "rebase"), mergeE = f.filter(e => e.event === "merge"), tickE = f.filter(e => e.event === "tick");
+      const srpL = tickE.map(e => e.same_root_success_pool || 0), stL = tickE.map(e => e.stale_successes || 0);
+      const peak = tickE.reduce((M, e) => Math.max(M, e.active_pipelines || 0), 0);
+      const mrc = {}; rebaseE.forEach(e => { mrc[e.mr_iid] = (mrc[e.mr_iid] || 0) + 1; });
+      const dup = Object.values(mrc).filter(n => n > 1).reduce((a, n) => a + n - 1, 0);
+      const totalT = packed.maxTick;
+      const mTicks = mergeE.map(e => e.tick).sort((a, b) => a - b);
+      const mergeRounds = new Set(mergeE.map(e => e.tick)).size;
+      const o0 = packed.series.open.find(v => v > 0) ?? 0;
+      // CI time per MR (from running segments)
+      const ciTimes = packed.segs.filter(s => s.kind === "running").map(s => s.end - s.start);
+      const ciMin = ciTimes.length ? Math.min(...ciTimes) : 0;
+      const ciMax = ciTimes.length ? Math.max(...ciTimes) : 0;
+      const ciAvg = ciTimes.length ? ciTimes.reduce((a, b) => a + b, 0) / ciTimes.length : 0;
+      return {
+        packed, total_time_ticks: totalT, mrs_merged: mergeE.length, throughput: mergeE.length / Math.max(1, totalT),
+        time_to_first: mTicks[0] ?? totalT, time_to_10: mTicks[9] ?? totalT, avg_int: totalT / Math.max(1, mergeE.length),
+        queue_drain: o0 ? (100 * mergeE.length) / o0 : 0, rebase_calls: rebaseE.length, pipelines: rebaseE.length,
+        peak, dup, stale_max: stL.length ? Math.max(...stL) : 0, srp_p95: pct(srpL, 95), srp_max: srpL.length ? Math.max(...srpL) : 0,
+        merge_rounds: mergeRounds, avg_mrs_per_round: mergeE.length / Math.max(1, mergeRounds),
+        ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: allIids(f).size
+      };
+    }
+
+    function getPacked() { return filesData[activeIndex]?.packed; }
+    function globalMaxTick() { let mx = 0; filesData.forEach(d => { if (d.packed) mx = Math.max(mx, d.packed.maxTick); }); return mx; }
+    function esc(s) { return (s + "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
+
+    // --- Tab Navigation ---
+    function switchTab(name) {
+      document.querySelectorAll(".nav-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel" + name.charAt(0).toUpperCase() + name.slice(1)));
+      if (name === "kanban") renderKanbanTab();
+      if (name === "charts") { renderChartPolicyTabs(); refreshCharts(); }
+      if (name === "stats") renderStats();
+    }
+    document.getElementById("navTabs").addEventListener("click", e => { if (e.target.dataset.tab) switchTab(e.target.dataset.tab); });
+
+    // --- Load Tab ---
+    const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
+    dropZone.addEventListener("click", () => fileInput.click());
+    dropZone.addEventListener("dragover", e => e.preventDefault());
+    dropZone.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
+    fileInput.addEventListener("change", () => { if (fileInput.files) loadFiles(fileInput.files); });
+
+    function loadFiles(fl) {
+      const a = Array.from(fl); if (!a.length) return;
+      Promise.all(a.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
+        filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
+        activeIndex = 0; stop();
+        filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
+        const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
+        document.getElementById("scrub").max = mx;
+        document.getElementById("playLabel").textContent = "Step 0 / " + mx;
+        document.getElementById("playbackBar").classList.add("visible");
+        renderFileList();
+        switchTab("stats");
+      });
+    }
+    function renderFileList() {
+      const el = document.getElementById("fileList"); el.innerHTML = "";
+      filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>${esc(d.name)}</span></div>`; });
+    }
+
+    // --- Statistics Tab ---
+    let selectedSeries = null; // null = all selected
+
+    const METRIC_TOOLTIPS = {
+      total_time_ticks: "Total simulation duration in discrete time steps",
+      mrs_merged: "Number of merge requests successfully merged during the simulation",
+      throughput: "Merge rate: MRs merged divided by total time steps",
+      time_to_first: "Steps elapsed before the first MR was merged",
+      time_to_10: "Steps elapsed before 10 MRs were merged",
+      avg_int: "Average number of steps between successive merges",
+      queue_drain: "Percentage of the initial open queue that was merged (can exceed 100% if new MRs arrive)",
+      rebase_calls: "Total number of rebase operations triggered by housekeeping",
+      peak: "Maximum number of CI pipelines running concurrently at any step",
+      dup: "Rebases that were wasted because the MR needed rebasing again before merge",
+      ci_min: "Shortest CI pipeline duration observed (in ticks)",
+      ci_avg: "Average CI pipeline duration across all runs (in ticks)",
+      ci_max: "Longest CI pipeline duration observed (in ticks)",
+      srp_p95: "95th percentile of same-root success pool size (MRs sharing a base SHA)",
+      srp_max: "Maximum same-root success pool size observed",
+      merge_rounds: "Number of distinct ticks where at least one merge occurred",
+      avg_mrs_per_round: "Average number of MRs merged per merge round (batch efficiency)",
+      mr_count: "Total unique MRs that appeared in the simulation"
+    };
+    const METRIC_HIGHER_IS_BETTER = {
+      mrs_merged: true, throughput: true, queue_drain: true, merge_rounds: true, avg_mrs_per_round: true,
+      total_time_ticks: null, time_to_first: false, time_to_10: false, avg_int: false,
+      rebase_calls: false, peak: false, dup: false, ci_min: null, ci_avg: null, ci_max: null,
+      srp_p95: false, srp_max: false, mr_count: true
+    };
+
+    function renderSeriesSelector() {
+      const el = document.getElementById("seriesSelector"); el.innerHTML = "";
+      if (!filesData.length) return;
+      const all = selectedSeries === null || (selectedSeries && selectedSeries.length === filesData.length);
+      filesData.forEach((d, i) => {
+        const chk = all || (selectedSeries && selectedSeries.includes(i));
+        el.innerHTML += `<label><input type="checkbox" data-idx="${i}" ${chk ? "checked" : ""} /> ${esc(d.name)}</label>`;
+      });
+      el.innerHTML += `<span class="sel-hint">Select policies to compare in hero cards</span>`;
+      el.addEventListener("change", onSeriesChange);
+    }
+    function onSeriesChange() {
+      const boxes = document.querySelectorAll("#seriesSelector input[type=checkbox]");
+      const sel = []; boxes.forEach((b, i) => { if (b.checked) sel.push(i); });
+      selectedSeries = sel.length === filesData.length ? null : sel;
+      renderStats();
+    }
+    function getSelectedIndices() {
+      if (!selectedSeries || selectedSeries.length === 0) return filesData.map((_, i) => i);
+      return selectedSeries;
+    }
+
+    const ALL_HERO_METRICS = [
+      { key: "mrs_merged", label: "MRs Merged", higher: true, fmt: v => Math.round(v) },
+      { key: "throughput", label: "Throughput", higher: true, fmt: v => v.toFixed(3) },
+      { key: "queue_drain", label: "Queue Drain %", higher: true, fmt: v => Math.round(v) + "%" },
+      { key: "ci_avg", label: "Avg CI Time", higher: false, fmt: v => v.toFixed(1) },
+      { key: "peak", label: "Peak Pipelines", higher: false, fmt: v => v },
+      { key: "dup", label: "Wasted Rebases", higher: false, fmt: v => v },
+      { key: "time_to_first", label: "Time to 1st Merge", higher: false, fmt: v => Math.round(v) },
+      { key: "time_to_10", label: "Time to 10 Merges", higher: false, fmt: v => Math.round(v) },
+      { key: "avg_int", label: "Avg Merge Interval", higher: false, fmt: v => v.toFixed(1) },
+      { key: "rebase_calls", label: "Total Rebases", higher: false, fmt: v => Math.round(v) },
+      { key: "srp_p95", label: "Same-root p95", higher: false, fmt: v => v },
+      { key: "srp_max", label: "Same-root max", higher: false, fmt: v => v },
+      { key: "merge_rounds", label: "Merge Rounds", higher: true, fmt: v => Math.round(v) },
+      { key: "avg_mrs_per_round", label: "MRs/Round", higher: true, fmt: v => v.toFixed(3) },
+    ];
+    let heroMetricKeys = ["mrs_merged", "throughput", "queue_drain", "dup", "time_to_10", "rebase_calls"];
+
+    function renderStats() {
+      if (!filesData.length) return;
+      renderSeriesSelector();
+      renderMetricPicker();
+      const metrics = filesData.map(d => d.metrics);
+      renderHeroCards(metrics);
+      renderCmpTable();
+    }
+    function renderMetricPicker() {
+      const el = document.getElementById("metricPicker"); el.innerHTML = "";
+      el.innerHTML = `<span class="mp-label">Hero cards:</span>`;
+      ALL_HERO_METRICS.forEach(m => {
+        const active = heroMetricKeys.includes(m.key) ? " active" : "";
+        el.innerHTML += `<button data-key="${m.key}" class="${active}" title="${esc(METRIC_TOOLTIPS[m.key] || m.label)}">${m.label}</button>`;
+      });
+    }
+    document.getElementById("metricPicker").addEventListener("click", e => {
+      const btn = e.target.closest("button[data-key]");
+      if (!btn) return;
+      const k = btn.dataset.key;
+      if (heroMetricKeys.includes(k)) { heroMetricKeys = heroMetricKeys.filter(x => x !== k); }
+      else { heroMetricKeys.push(k); }
+      renderStats();
+    });
+    function renderHeroCards(metrics) {
+      const cards = ALL_HERO_METRICS.filter(m => heroMetricKeys.includes(m.key));
+      const sel = getSelectedIndices();
+      const el = document.getElementById("heroCards"); el.innerHTML = "";
+      cards.forEach(c => {
+        let bestIdx = sel[0], bestVal = metrics[sel[0]][c.key];
+        sel.forEach(i => { const v = metrics[i][c.key]; if (c.higher ? v > bestVal : v < bestVal) { bestVal = v; bestIdx = i; } });
+        const worstVal = sel.reduce((w, i) => c.higher ? Math.min(w, metrics[i][c.key]) : Math.max(w, metrics[i][c.key]), bestVal);
+        el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">${c.fmt(bestVal)}</div><div class="winner">${esc(filesData[bestIdx].name)}</div><div class="sub">${c.higher ? "worst" : "max"}: ${c.fmt(worstVal)}</div></div>`;
+      });
+    }
+    function renderCmpTable() {
+      const sel = getSelectedIndices();
+      const heads = sel.map(i => filesData[i].name);
+      const metrics = sel.map(i => filesData[i].metrics);
+      const fmt = (x, f) => (f === "d3" ? (typeof x === "number" ? x.toFixed(3) : x) : f === "d1" ? (typeof x === "number" ? x.toFixed(1) : x) : f === "d0" ? String(Math.round(x)) : x);
+      const rows = [
+        ["s", "── Throughput & Time ──"], ["total_time_ticks", "Total time (steps)", "d0"], ["mrs_merged", "MRs merged", "d0"], ["throughput", "Throughput", "d3"],
+        ["time_to_first", "Time to first merge", "d0"], ["time_to_10", "Time to merge 10", "d0"], ["avg_int", "Avg merge interval", "d0"], ["queue_drain", "Queue drain %", "d0"],
+        ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"],
+        ["s", "── Pool ──"], ["srp_p95", "Same-root p95", "d0"], ["srp_max", "Same-root max", "d0"],
+        ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"], ["mr_count", "Total MRs seen", "d0"]
+      ];
+      let h = "<thead><tr><th>Metric</th>" + heads.map(n => `<th>${esc(n)}</th>`).join("") + "</tr></thead><tbody>";
+      rows.forEach(r => {
+        if (r[0] === "s") { h += `<tr class="section"><td colspan="${heads.length + 1}">${r[1]}</td></tr>`; return; }
+        const key = r[0], tip = METRIC_TOOLTIPS[key] || "", hib = METRIC_HIGHER_IS_BETTER[key];
+        const vals = metrics.map(M => M[key]);
+        const bestSet = new Set();
+        if (hib !== null && vals.some(v => typeof v === "number")) {
+          let bv = hib ? -Infinity : Infinity;
+          vals.forEach((v) => { if (typeof v !== "number") return; if (hib ? v > bv : v < bv) bv = v; });
+          vals.forEach((v, i) => { if (v === bv) bestSet.add(i); });
+          if (bestSet.size === vals.length) bestSet.clear();
+        }
+        h += `<tr><td class="metric-name" data-tip="${esc(tip)}">${r[1]}</td>` + metrics.map((M, i) => {
+          const v = M[key], cls = bestSet.has(i) ? ' class="best"' : "";
+          return `<td${cls}>${r[2] && v != null && typeof v === "number" ? fmt(v, r[2]) : (v == null ? "—" : v)}</td>`;
+        }).join("") + "</tr>";
+      });
+      h += "</tbody>";
+      document.getElementById("cmpTable").innerHTML = h;
+    }
+
+    // --- Kanban Tab ---
+    let traceStates = [];
+    function renderKanbanTab() {
+      if (!filesData.length) return;
+      if (traceStates.length !== filesData.length) traceStates = filesData.map((_, i) => i < 2);
+      renderSnapshot();
+      renderTraces();
+    }
+    function renderSnapshot() {
+      const el = document.getElementById("kSnap");
+      const t = playhead;
+      const parts = filesData.map(d => {
+        if (!d.packed) return "";
+        const i = Math.min(t, d.packed.series.open.length - 1);
+        return `<span><b>${d.packed.series.open[i] || 0}</b> open</span>`;
+      });
+      const f = filterE(filesData[0]?.events || []);
+      const story = storyAt(f, t);
+      el.innerHTML = `<span style="font-weight:600">Step ${t}</span> ` + parts.join(" ") + ` <span class="story-tip" title="${esc(story.join("; "))}">${esc(story[0] || "")}</span>`;
+    }
+    function renderTraces() {
+      const container = document.getElementById("tracesContainer");
+      container.innerHTML = "";
+      filesData.forEach((d, i) => {
+        if (!d.packed) return;
+        const expanded = traceStates[i];
+        const f = filterE(d.events), t = playhead;
+        const w = buildKanbanState(d.packed, f, t);
+        const trace = document.createElement("div");
+        trace.className = "trace " + (expanded ? "expanded" : "collapsed");
+
+        const hdr = document.createElement("div");
+        hdr.className = "trace-header" + (expanded ? " open" : "");
+        hdr.innerHTML = `<span class="caret">▶</span><span class="tname">${esc(d.name)}</span><span class="tcounts">W:${w.wait.length} R:${w.rebase.length} CI:${w.ci.length} Rdy:${w.ready.length} M:${w.merged.length}</span>`;
+        hdr.addEventListener("click", () => { traceStates[i] = !traceStates[i]; renderTraces(); });
+        trace.appendChild(hdr);
+
+        if (expanded) {
+          const body = document.createElement("div");
+          body.className = "trace-body";
+          const colHdr = document.createElement("div");
+          colHdr.className = "trace-cols";
+          ["Waiting", "Rebasing", "CI", "Ready", "Merged"].forEach(n => { colHdr.innerHTML += `<div class="col-hd">${n}</div>`; });
+          body.appendChild(colHdr);
+
+          const rebasedRecent = new Set(), mergedRecent = new Set();
+          for (let dt = 0; dt < HIGHLIGHT_TICKS; dt++) { const tt = t - dt; f.forEach(e => { if (e.tick === tt && e.mr_iid != null) { if (e.event === "rebase") rebasedRecent.add(e.mr_iid); if (e.event === "merge") mergedRecent.add(e.mr_iid); } }); }
+
+          const cards = document.createElement("div");
+          cards.className = "trace-cards";
+          const colData = [w.wait, w.rebase, w.ci, w.ready, w.merged];
+          const mTickMap = mergeTickByMr(f);
+          colData.forEach((arr, ci) => {
+            const col = document.createElement("div");
+            col.className = "tcol";
+            if (ci === 4) {
+              const byMT = new Map();
+              arr.forEach(m => { const mt = mTickMap.get(m) ?? 0; if (!byMT.has(mt)) byMT.set(mt, []); byMT.get(mt).push(m); });
+              Array.from(byMT.keys()).sort((a, b) => b - a).forEach(mt => {
+                const mrs = byMT.get(mt), isRecent = (t - mt) < HIGHLIGHT_TICKS;
+                if (mrs.length > 1) {
+                  const grp = document.createElement("div");
+                  grp.className = "merge-group" + (isRecent ? " recent" : "");
+                  grp.innerHTML = `<span class="mg-label">t=${mt} (${mrs.length})</span>`;
+                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
+                  col.appendChild(grp);
+                } else {
+                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; col.appendChild(c); });
+                }
+              });
+            } else {
+              arr.forEach(m => {
+                const c = document.createElement("div");
+                let cls = "kcard";
+                if (mergedRecent.has(m)) cls += " just-merged";
+                else if (rebasedRecent.has(m)) cls += " just-rebased";
+                c.className = cls; c.textContent = "!" + m; col.appendChild(c);
+              });
+            }
+            cards.appendChild(col);
+          });
+          body.appendChild(cards);
+          trace.appendChild(body);
+        }
+        container.appendChild(trace);
+      });
+    }
+
+    // --- Charts Tab ---
+    function renderChartPolicyTabs() {
+      const el = document.getElementById("chartPolicyTabs"); el.innerHTML = "";
+      filesData.forEach((d, i) => {
+        const b = document.createElement("button");
+        b.className = "cp-tab" + (i === activeIndex ? " active" : "");
+        b.textContent = d.name;
+        b.onclick = () => { activeIndex = i; renderChartPolicyTabs(); refreshCharts(); };
+        el.appendChild(b);
+      });
+    }
+    function refreshCharts() { const p = getPacked(); if (p) { doChart(p); setTimeout(() => d3brush(p), 30); dSwim(p); } }
+
+    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "merged" ? C0.merged : C0.other);
+
+    function plMergePlay(p) {
+      return { id: "mp", afterDatasetsDraw(chart) {
+        const s = chart.scales.x, ctx = chart.ctx, g = chart.chartArea; if (!s) return; ctx.save();
+        (p.merges || []).forEach(ev => { const px = s.getPixelForValue(ev.tick); if (g && px >= g.left && px <= g.right) { ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo(px, g.top); ctx.lineTo(px, g.bottom); ctx.stroke(); } });
+        const phx = s.getPixelForValue(playhead);
+        if (g) { ctx.strokeStyle = "rgba(80,200,255,0.9)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(phx, g.top); ctx.lineTo(phx, g.bottom); ctx.stroke(); }
+        ctx.restore();
+      }};
+    }
+    function doChart(p) {
+      const cvs = document.getElementById("chartCanvas"); if (!cvs) return;
+      if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
+      chartInstance = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
+        { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 3, borderWidth: 0 },
+        { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 2, borderWidth: 0 },
+        { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 1, borderWidth: 0 },
+        { label: "Rest", data: p.series.other, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
+        { label: "open", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
+      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index" }, plugins: { legend: { position: "bottom" } },
+        scales: { x: { title: { display: true, text: "Time step" } }, y: { stacked: true, beginAtZero: true } } }, plugins: [plMergePlay(p)] });
+    }
+    function d3brush(p) {
+      const el = document.getElementById("brushArea"); if (!el) return; el.innerHTML = "";
+      const maxT = Math.max(1, p.maxTick), w = el.clientWidth || 600, m = { l: 36, r: 8, t: 2, b: 20 }, h = 50;
+      const sc = d3.scaleLinear().domain([0, maxT]).range([m.l, w - m.r]);
+      const s = d3.select("#brushArea").append("svg").attr("width", w).attr("height", h);
+      s.append("g").attr("transform", `translate(0,${h - m.b})`).call(d3.axisBottom(sc).ticks(5));
+      const b = d3.brushX().extent([[m.l, 0], [w - m.r, h - m.b - 1]]).on("end", e => { if (!e.selection) return; const lo = sc.invert(e.selection[0]), hi = sc.invert(e.selection[1]);
+        xRange = [lo, hi]; document.getElementById("rmin").value = Math.floor(lo); document.getElementById("rmax").value = Math.ceil(hi); dSwim(p); });
+      s.append("g").call(b).call(b.move, [sc(xRange[0]), sc(Math.min(maxT, xRange[1]))]);
+    }
+    function dSwim(pOverride) {
+      const p = pOverride || getPacked(); if (!p) return;
+      const x0 = +document.getElementById("rmin").value || 0, x1 = +document.getElementById("rmax").value || p.maxTick;
+      const sw = d3.select("#swimArea").html(""); const t = playhead;
+      const list = new Set(); p.segs.forEach(s => list.add(s.mr));
+      const mrL = Array.from(list).sort((a, b) => a - b);
+      if (!mrL.length) { sw.append("p").text("No segments."); return; }
+      const rowH = 16, pad = { t: 4, l: 44, b: 22, r: 4 }, w = Math.max(400, (document.getElementById("swimArea").clientWidth || 600) - 8);
+      const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
+      const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
+      const g = sw.append("svg").attr("width", w).attr("height", H);
+      g.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(6));
+      if (t >= x0 && t <= x1) g.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
+      p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
+        .map(s => { if (s.start > t) return null; if (s.kind === "merged") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
+        .filter(s => s && s.end > s.start)
+        .forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
+          .attr("width", Math.max(0, x(Math.min(s.end, x1)) - x(Math.max(s.start, x0)))).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2));
+    }
+
+    // --- Playback ---
+    function stop() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.getElementById("btnPlay").textContent = "Play"; }
+    function tick() { const mx = globalMaxTick(); if (!mx) { stop(); return; } playhead++;
+      if (playhead > mx) { if (document.getElementById("chkLoop").checked) playhead = 0; else { playhead = mx; stop(); return; } }
+      document.getElementById("scrub").value = playhead; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + mx; onPlayheadChange(); }
+    function play() { if (playTimer) { stop(); return; } document.getElementById("btnPlay").textContent = "Pause";
+      const s = +document.getElementById("selSpeed").value || 1; playTimer = setInterval(tick, BASE_MS / s); }
+    function resetP() { stop(); playhead = 0; document.getElementById("scrub").value = 0; document.getElementById("playLabel").textContent = "Step 0 / " + globalMaxTick(); onPlayheadChange(); }
+
+    function onPlayheadChange() {
+      const active = document.querySelector(".tab-panel.active");
+      if (active.id === "panelKanban") { renderSnapshot(); renderTraces(); }
+      if (active.id === "panelCharts") { if (chartInstance) chartInstance.update("none"); const p = getPacked(); if (p) dSwim(p); }
+    }
+
+    document.getElementById("btnPlay").addEventListener("click", play);
+    document.getElementById("btnReset").addEventListener("click", resetP);
+    document.getElementById("scrub").addEventListener("input", e => { stop(); playhead = +e.target.value; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick(); onPlayheadChange(); });
+    document.getElementById("selSpeed").addEventListener("change", () => { if (!playTimer) return; const s = +document.getElementById("selSpeed").value || 1; clearInterval(playTimer); playTimer = setInterval(tick, BASE_MS / s); });
+    document.getElementById("rmin").addEventListener("change", () => { const p = getPacked(); if (p) dSwim(p); });
+    document.getElementById("rmax").addEventListener("change", () => { const p = getPacked(); if (p) dSwim(p); });
+    document.getElementById("fitBtn").addEventListener("click", () => { const p = getPacked(); if (p) { document.getElementById("rmin").value = 0; document.getElementById("rmax").value = p.maxTick; xRange = [0, p.maxTick]; d3brush(p); dSwim(p); } });
+  })();
+  </script>
+</body>
+</html>
