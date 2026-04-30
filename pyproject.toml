@@ -1,0 +1,39 @@
+[project]
+name = "gitlab-hk-sim"
+version = "0.1.0"
+description = "GitLab Housekeeping Policy Simulator – compare merge-queue policies under controlled GitLab-like conditions"
+requires-python = "==3.12.*"
+dependencies = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "pyyaml>=6.0",
+    "click>=7.0,<9.0",
+    "pydantic>=2.0",
+    "python-gitlab>=4.0",
+    "requests>=2.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "httpx>=0.24",
+    "pytest-asyncio>=1.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gitlab_hk_sim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "UP", "B", "SIM"]

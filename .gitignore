@@ -1,0 +1,14 @@
+__pycache__/
+*.egg-info/
+.pytest_cache/
+reports/**/*.ndjson
+reports/**/*.md
+reports/**/*.log
+reports/**/*.pid
+reports/**/*.txt
+reports/*.ndjson
+reports/*.md
+reports/*.log
+reports/*.pid
+reports/*.txt
+!reports/.gitkeep

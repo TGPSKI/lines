@@ -1,0 +1,165 @@
+# Scenario 2: Top-K Poisoned Window
+# Top-K can preserve queue purity while starving useful CI inventory.
+# limit = 5, top 5 are slow/stuck/failed, candidates 6-10 are clean.
+
+project:
+  id: 1001
+  name: sim-repo
+  path: sim-repo
+  path_with_namespace: app-sre/sim-repo
+  default_branch: master
+  target_head: target-001
+
+merge_requests:
+  # Top window: slow/stuck/failed
+  - id: 2001
+    iid: 1
+    title: "MR 1 - long running pipeline"
+    state: opened
+    sha: mr1-sha-001
+    rebased_target_sha: target-001
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-a"]
+    priority: 1
+    pipelines:
+      - id: 5001
+        status: running
+        sha: mr1-sha-001
+        root_sha: target-001
+        running_ticks_remaining: 20
+        outcome: success
+
+  - id: 2002
+    iid: 2
+    title: "MR 2 - long running pipeline"
+    state: opened
+    sha: mr2-sha-001
+    rebased_target_sha: target-001
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-b"]
+    priority: 2
+    pipelines:
+      - id: 5002
+        status: running
+        sha: mr2-sha-001
+        root_sha: target-001
+        running_ticks_remaining: 18
+        outcome: success
+
+  - id: 2003
+    iid: 3
+    title: "MR 3 - failed pipeline"
+    state: opened
+    sha: mr3-sha-001
+    rebased_target_sha: target-001
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-c"]
+    priority: 3
+    pipelines:
+      - id: 5003
+        status: failed
+        sha: mr3-sha-001
+        root_sha: target-001
+        outcome: failed
+
+  - id: 2004
+    iid: 4
+    title: "MR 4 - not rebased, stuck"
+    state: opened
+    sha: mr4-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-d"]
+    priority: 4
+    pipelines:
+      - id: 5004
+        status: running
+        sha: mr4-sha-001
+        root_sha: target-000
+        running_ticks_remaining: 15
+        outcome: success
+
+  - id: 2005
+    iid: 5
+    title: "MR 5 - pending stuck"
+    state: opened
+    sha: mr5-sha-001
+    rebased_target_sha: target-001
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-e"]
+    priority: 5
+    pipelines:
+      - id: 5005
+        status: pending
+        sha: mr5-sha-001
+        root_sha: target-001
+        pending_ticks_remaining: 10
+        outcome: success
+
+  # Clean candidates outside top-K
+  - id: 2006
+    iid: 6
+    title: "MR 6 - clean, needs rebase"
+    state: opened
+    sha: mr6-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-f"]
+    priority: 6
+    pipelines: []
+
+  - id: 2007
+    iid: 7
+    title: "MR 7 - clean, needs rebase"
+    state: opened
+    sha: mr7-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-g"]
+    priority: 7
+    pipelines: []
+
+  - id: 2008
+    iid: 8
+    title: "MR 8 - clean, needs rebase"
+    state: opened
+    sha: mr8-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-h"]
+    priority: 8
+    pipelines: []
+
+  - id: 2009
+    iid: 9
+    title: "MR 9 - clean, needs rebase"
+    state: opened
+    sha: mr9-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-i"]
+    priority: 9
+    pipelines: []
+
+  - id: 2010
+    iid: 10
+    title: "MR 10 - clean, needs rebase"
+    state: opened
+    sha: mr10-sha-001
+    rebased_target_sha: target-000
+    labels: ["lgtm"]
+    tenant_domains: ["tenant-j"]
+    priority: 10
+    pipelines: []
+
+sha_pools:
+  mr_rebases:
+    "3": ["mr3-sha-rebased-001"]
+    "4": ["mr4-sha-rebased-001"]
+    "6": ["mr6-sha-rebased-001"]
+    "7": ["mr7-sha-rebased-001"]
+    "8": ["mr8-sha-rebased-001"]
+    "9": ["mr9-sha-rebased-001"]
+    "10": ["mr10-sha-rebased-001"]
+  target_advances:
+    master: ["target-002", "target-003", "target-004", "target-005"]

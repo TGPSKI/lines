@@ -1,0 +1,181 @@
+# Scenario: Large Mixed Queue (100 MRs)
+# Simulates a realistic busy queue with:
+#   - 100 MRs with widely varying CI durations (5-25 ticks, avg ~8)
+#   - Mixed priorities (1-10)
+#   - Staggered arrival: some already running, some pending, some not yet rebased
+#   - Diverse tenant domains for Phase 1 testing
+#
+# One tick ≈ 1 minute of CI time.
+# Pipeline durations: 5-25 ticks (minutes), weighted toward 6-10.
+
+project:
+  id: 1001
+  name: sim-repo
+  path: sim-repo
+  path_with_namespace: app-sre/sim-repo
+  default_branch: master
+  target_head: target-001
+
+merge_requests:
+  # --- Wave 1: Already running (arrived early, running pipelines) ---
+  - {id: 2001, iid: 1, title: "infra/core-api-migration", state: opened, sha: mr1-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [core-api], priority: 1, pipelines: [{id: 5001, status: running, sha: mr1-sha-001, root_sha: target-001, running_ticks_remaining: 18, outcome: success}]}
+  - {id: 2002, iid: 2, title: "fix/auth-token-refresh", state: opened, sha: mr2-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [auth], priority: 1, pipelines: [{id: 5002, status: running, sha: mr2-sha-001, root_sha: target-001, running_ticks_remaining: 7, outcome: success}]}
+  - {id: 2003, iid: 3, title: "feat/user-preferences-v2", state: opened, sha: mr3-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [user-prefs], priority: 3, pipelines: [{id: 5003, status: running, sha: mr3-sha-001, root_sha: target-001, running_ticks_remaining: 12, outcome: success}]}
+  - {id: 2004, iid: 4, title: "perf/query-optimizer", state: opened, sha: mr4-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [database], priority: 2, pipelines: [{id: 5004, status: running, sha: mr4-sha-001, root_sha: target-001, running_ticks_remaining: 22, outcome: success}]}
+  - {id: 2005, iid: 5, title: "fix/cache-invalidation", state: opened, sha: mr5-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [cache], priority: 2, pipelines: [{id: 5005, status: running, sha: mr5-sha-001, root_sha: target-001, running_ticks_remaining: 6, outcome: success}]}
+  - {id: 2006, iid: 6, title: "feat/notification-service", state: opened, sha: mr6-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [notifications], priority: 4, pipelines: [{id: 5006, status: running, sha: mr6-sha-001, root_sha: target-001, running_ticks_remaining: 9, outcome: success}]}
+  - {id: 2007, iid: 7, title: "fix/rate-limiter-bypass", state: opened, sha: mr7-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [rate-limit], priority: 1, pipelines: [{id: 5007, status: running, sha: mr7-sha-001, root_sha: target-001, running_ticks_remaining: 5, outcome: success}]}
+  - {id: 2008, iid: 8, title: "chore/dep-update-march", state: opened, sha: mr8-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [deps], priority: 5, pipelines: [{id: 5008, status: running, sha: mr8-sha-001, root_sha: target-001, running_ticks_remaining: 25, outcome: success}]}
+  - {id: 2009, iid: 9, title: "feat/audit-log-retention", state: opened, sha: mr9-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [audit], priority: 3, pipelines: [{id: 5009, status: running, sha: mr9-sha-001, root_sha: target-001, running_ticks_remaining: 8, outcome: success}]}
+  - {id: 2010, iid: 10, title: "fix/webhook-retry-logic", state: opened, sha: mr10-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [webhooks], priority: 2, pipelines: [{id: 5010, status: running, sha: mr10-sha-001, root_sha: target-001, running_ticks_remaining: 11, outcome: success}]}
+
+  # --- Wave 2: Pending pipelines (just rebased, not yet running) ---
+  - {id: 2011, iid: 11, title: "feat/search-reindex", state: opened, sha: mr11-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [search], priority: 3, pipelines: [{id: 5011, status: pending, sha: mr11-sha-001, root_sha: target-001, pending_ticks_remaining: 1, running_ticks_remaining: 14, outcome: success}]}
+  - {id: 2012, iid: 12, title: "fix/email-template-escaping", state: opened, sha: mr12-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [email], priority: 4, pipelines: [{id: 5012, status: pending, sha: mr12-sha-001, root_sha: target-001, pending_ticks_remaining: 1, running_ticks_remaining: 6, outcome: success}]}
+  - {id: 2013, iid: 13, title: "feat/rbac-policy-engine", state: opened, sha: mr13-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [rbac], priority: 2, pipelines: [{id: 5013, status: pending, sha: mr13-sha-001, root_sha: target-001, pending_ticks_remaining: 1, running_ticks_remaining: 19, outcome: success}]}
+  - {id: 2014, iid: 14, title: "chore/lint-config-update", state: opened, sha: mr14-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [tooling], priority: 7, pipelines: [{id: 5014, status: pending, sha: mr14-sha-001, root_sha: target-001, pending_ticks_remaining: 1, running_ticks_remaining: 5, outcome: success}]}
+  - {id: 2015, iid: 15, title: "fix/session-expiry-race", state: opened, sha: mr15-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [session], priority: 1, pipelines: [{id: 5015, status: pending, sha: mr15-sha-001, root_sha: target-001, pending_ticks_remaining: 1, running_ticks_remaining: 8, outcome: success}]}
+
+  # --- Wave 3: Already succeeded (ready to merge if target hasn't moved) ---
+  - {id: 2016, iid: 16, title: "docs/api-v3-migration-guide", state: opened, sha: mr16-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [docs], priority: 6, pipelines: [{id: 5016, status: success, sha: mr16-sha-001, root_sha: target-001, outcome: success}]}
+  - {id: 2017, iid: 17, title: "fix/cors-preflight-headers", state: opened, sha: mr17-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [cors], priority: 3, pipelines: [{id: 5017, status: success, sha: mr17-sha-001, root_sha: target-001, outcome: success}]}
+  - {id: 2018, iid: 18, title: "feat/metric-dashboard-links", state: opened, sha: mr18-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [observability], priority: 5, pipelines: [{id: 5018, status: success, sha: mr18-sha-001, root_sha: target-001, outcome: success}]}
+  - {id: 2019, iid: 19, title: "fix/healthcheck-timeout", state: opened, sha: mr19-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [health], priority: 2, pipelines: [{id: 5019, status: success, sha: mr19-sha-001, root_sha: target-001, outcome: success}]}
+  - {id: 2020, iid: 20, title: "chore/remove-deprecated-flag", state: opened, sha: mr20-sha-001, rebased_target_sha: target-001, labels: [lgtm], tenant_domains: [cleanup], priority: 8, pipelines: [{id: 5020, status: success, sha: mr20-sha-001, root_sha: target-001, outcome: success}]}
+
+  # --- Wave 4: Needs rebase (behind target, various priorities) ---
+  - {id: 2021, iid: 21, title: "feat/graphql-subscriptions", state: opened, sha: mr21-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [graphql], priority: 3, pipelines: [{id: 5021, status: success, sha: mr21-sha-001, root_sha: target-000, outcome: success}]}
+  - {id: 2022, iid: 22, title: "fix/pagination-off-by-one", state: opened, sha: mr22-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [pagination], priority: 2, pipelines: [{id: 5022, status: success, sha: mr22-sha-001, root_sha: target-000, outcome: success}]}
+  - {id: 2023, iid: 23, title: "feat/bulk-import-csv", state: opened, sha: mr23-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [import], priority: 4, pipelines: []}
+  - {id: 2024, iid: 24, title: "fix/timezone-conversion", state: opened, sha: mr24-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [datetime], priority: 3, pipelines: []}
+  - {id: 2025, iid: 25, title: "feat/sso-saml-provider", state: opened, sha: mr25-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [sso], priority: 1, pipelines: []}
+  - {id: 2026, iid: 26, title: "chore/terraform-provider-bump", state: opened, sha: mr26-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [terraform], priority: 6, pipelines: []}
+  - {id: 2027, iid: 27, title: "fix/file-upload-size-limit", state: opened, sha: mr27-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [storage], priority: 4, pipelines: []}
+  - {id: 2028, iid: 28, title: "feat/api-versioning-headers", state: opened, sha: mr28-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [api-version], priority: 5, pipelines: []}
+  - {id: 2029, iid: 29, title: "fix/deadlock-connection-pool", state: opened, sha: mr29-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [database], priority: 1, pipelines: []}
+  - {id: 2030, iid: 30, title: "feat/feature-flag-rollout", state: opened, sha: mr30-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [feature-flags], priority: 3, pipelines: []}
+  - {id: 2031, iid: 31, title: "fix/retry-backoff-jitter", state: opened, sha: mr31-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [resilience], priority: 2, pipelines: []}
+  - {id: 2032, iid: 32, title: "feat/custom-domain-certs", state: opened, sha: mr32-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [tls], priority: 4, pipelines: []}
+  - {id: 2033, iid: 33, title: "chore/go-1.22-upgrade", state: opened, sha: mr33-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [runtime], priority: 5, pipelines: []}
+  - {id: 2034, iid: 34, title: "fix/grpc-deadline-propagation", state: opened, sha: mr34-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [grpc], priority: 2, pipelines: []}
+  - {id: 2035, iid: 35, title: "feat/scheduled-job-dashboard", state: opened, sha: mr35-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [scheduler], priority: 6, pipelines: []}
+
+  # --- Wave 5: More arrivals, varying CI durations ---
+  - {id: 2036, iid: 36, title: "fix/memory-leak-ws-handler", state: opened, sha: mr36-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [websocket], priority: 1, pipelines: []}
+  - {id: 2037, iid: 37, title: "feat/tenant-isolation-net", state: opened, sha: mr37-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [network], priority: 2, pipelines: []}
+  - {id: 2038, iid: 38, title: "fix/idempotency-key-collision", state: opened, sha: mr38-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [idempotency], priority: 3, pipelines: []}
+  - {id: 2039, iid: 39, title: "feat/config-hot-reload", state: opened, sha: mr39-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [config], priority: 4, pipelines: []}
+  - {id: 2040, iid: 40, title: "chore/ci-parallelism-tuning", state: opened, sha: mr40-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [ci], priority: 7, pipelines: []}
+  - {id: 2041, iid: 41, title: "fix/dns-resolution-timeout", state: opened, sha: mr41-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [dns], priority: 2, pipelines: []}
+  - {id: 2042, iid: 42, title: "feat/chaos-testing-framework", state: opened, sha: mr42-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [chaos], priority: 5, pipelines: []}
+  - {id: 2043, iid: 43, title: "fix/goroutine-leak-shutdown", state: opened, sha: mr43-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [runtime], priority: 1, pipelines: []}
+  - {id: 2044, iid: 44, title: "feat/dynamic-scaling-policy", state: opened, sha: mr44-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [autoscaling], priority: 3, pipelines: []}
+  - {id: 2045, iid: 45, title: "fix/log-rotation-disk-full", state: opened, sha: mr45-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [logging], priority: 2, pipelines: []}
+  - {id: 2046, iid: 46, title: "feat/cross-region-replication", state: opened, sha: mr46-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [replication], priority: 4, pipelines: []}
+  - {id: 2047, iid: 47, title: "chore/remove-legacy-endpoints", state: opened, sha: mr47-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [cleanup], priority: 8, pipelines: []}
+  - {id: 2048, iid: 48, title: "fix/oauth-scope-validation", state: opened, sha: mr48-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [oauth], priority: 1, pipelines: []}
+  - {id: 2049, iid: 49, title: "feat/request-tracing-propagation", state: opened, sha: mr49-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [tracing], priority: 3, pipelines: []}
+  - {id: 2050, iid: 50, title: "fix/circuit-breaker-reset", state: opened, sha: mr50-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [resilience], priority: 2, pipelines: []}
+
+  # --- Wave 6: More MRs (51-75) ---
+  - {id: 2051, iid: 51, title: "feat/api-key-rotation", state: opened, sha: mr51-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [secrets], priority: 1, pipelines: []}
+  - {id: 2052, iid: 52, title: "fix/race-condition-queue", state: opened, sha: mr52-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [queue], priority: 2, pipelines: []}
+  - {id: 2053, iid: 53, title: "feat/multi-region-failover", state: opened, sha: mr53-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [ha], priority: 1, pipelines: []}
+  - {id: 2054, iid: 54, title: "chore/python-3.12-migration", state: opened, sha: mr54-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [runtime], priority: 6, pipelines: []}
+  - {id: 2055, iid: 55, title: "fix/tls-cert-chain-validation", state: opened, sha: mr55-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [tls], priority: 2, pipelines: []}
+  - {id: 2056, iid: 56, title: "feat/compliance-audit-trail", state: opened, sha: mr56-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [compliance], priority: 3, pipelines: []}
+  - {id: 2057, iid: 57, title: "fix/resource-quota-enforcement", state: opened, sha: mr57-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [quotas], priority: 2, pipelines: []}
+  - {id: 2058, iid: 58, title: "feat/canary-deployment-strategy", state: opened, sha: mr58-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [deploy], priority: 4, pipelines: []}
+  - {id: 2059, iid: 59, title: "fix/pod-affinity-scheduling", state: opened, sha: mr59-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [scheduling], priority: 3, pipelines: []}
+  - {id: 2060, iid: 60, title: "feat/blue-green-switching", state: opened, sha: mr60-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [deploy], priority: 5, pipelines: []}
+  - {id: 2061, iid: 61, title: "chore/renovate-config-tune", state: opened, sha: mr61-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [tooling], priority: 9, pipelines: []}
+  - {id: 2062, iid: 62, title: "fix/etcd-compaction-backoff", state: opened, sha: mr62-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [etcd], priority: 1, pipelines: []}
+  - {id: 2063, iid: 63, title: "feat/service-mesh-mTLS", state: opened, sha: mr63-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [mesh], priority: 2, pipelines: []}
+  - {id: 2064, iid: 64, title: "fix/json-schema-validation", state: opened, sha: mr64-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [validation], priority: 4, pipelines: []}
+  - {id: 2065, iid: 65, title: "feat/progressive-rollout-ui", state: opened, sha: mr65-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [ui], priority: 5, pipelines: []}
+  - {id: 2066, iid: 66, title: "fix/container-image-scanning", state: opened, sha: mr66-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [security], priority: 1, pipelines: []}
+  - {id: 2067, iid: 67, title: "feat/cost-allocation-tags", state: opened, sha: mr67-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [billing], priority: 6, pipelines: []}
+  - {id: 2068, iid: 68, title: "fix/prometheus-cardinality", state: opened, sha: mr68-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [observability], priority: 2, pipelines: []}
+  - {id: 2069, iid: 69, title: "feat/gitops-drift-detection", state: opened, sha: mr69-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [gitops], priority: 3, pipelines: []}
+  - {id: 2070, iid: 70, title: "fix/kubelet-eviction-threshold", state: opened, sha: mr70-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [node], priority: 1, pipelines: []}
+  - {id: 2071, iid: 71, title: "feat/admission-webhook-v2", state: opened, sha: mr71-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [admission], priority: 4, pipelines: []}
+  - {id: 2072, iid: 72, title: "chore/helm-chart-v5", state: opened, sha: mr72-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [helm], priority: 7, pipelines: []}
+  - {id: 2073, iid: 73, title: "fix/pvc-resize-fsgroup", state: opened, sha: mr73-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [storage], priority: 2, pipelines: []}
+  - {id: 2074, iid: 74, title: "feat/network-policy-audit", state: opened, sha: mr74-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [network], priority: 3, pipelines: []}
+  - {id: 2075, iid: 75, title: "fix/ingress-path-priority", state: opened, sha: mr75-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [ingress], priority: 2, pipelines: []}
+
+  # --- Wave 7: More MRs (76-100) ---
+  - {id: 2076, iid: 76, title: "feat/pod-disruption-budget-auto", state: opened, sha: mr76-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [pdb], priority: 4, pipelines: []}
+  - {id: 2077, iid: 77, title: "fix/crd-version-migration", state: opened, sha: mr77-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [crd], priority: 1, pipelines: []}
+  - {id: 2078, iid: 78, title: "feat/operator-lifecycle-mgr", state: opened, sha: mr78-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [olm], priority: 3, pipelines: []}
+  - {id: 2079, iid: 79, title: "chore/trivy-version-bump", state: opened, sha: mr79-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [security], priority: 8, pipelines: []}
+  - {id: 2080, iid: 80, title: "fix/cluster-autoscaler-flap", state: opened, sha: mr80-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [autoscaling], priority: 1, pipelines: []}
+  - {id: 2081, iid: 81, title: "feat/velero-backup-schedule", state: opened, sha: mr81-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [backup], priority: 5, pipelines: []}
+  - {id: 2082, iid: 82, title: "fix/envoy-proxy-timeout", state: opened, sha: mr82-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [proxy], priority: 2, pipelines: []}
+  - {id: 2083, iid: 83, title: "feat/external-dns-sync", state: opened, sha: mr83-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [dns], priority: 4, pipelines: []}
+  - {id: 2084, iid: 84, title: "fix/cert-manager-issuer", state: opened, sha: mr84-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [tls], priority: 2, pipelines: []}
+  - {id: 2085, iid: 85, title: "feat/kyverno-policy-engine", state: opened, sha: mr85-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [policy], priority: 3, pipelines: []}
+  - {id: 2086, iid: 86, title: "chore/falco-rules-update", state: opened, sha: mr86-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [security], priority: 6, pipelines: []}
+  - {id: 2087, iid: 87, title: "fix/argo-workflow-gc", state: opened, sha: mr87-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [workflows], priority: 3, pipelines: []}
+  - {id: 2088, iid: 88, title: "feat/tekton-pipeline-templates", state: opened, sha: mr88-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [ci], priority: 5, pipelines: []}
+  - {id: 2089, iid: 89, title: "fix/vault-seal-recovery", state: opened, sha: mr89-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [secrets], priority: 1, pipelines: []}
+  - {id: 2090, iid: 90, title: "feat/crossplane-composition", state: opened, sha: mr90-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [crossplane], priority: 4, pipelines: []}
+  - {id: 2091, iid: 91, title: "fix/fluentd-buffer-overflow", state: opened, sha: mr91-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [logging], priority: 2, pipelines: []}
+  - {id: 2092, iid: 92, title: "feat/thanos-query-federation", state: opened, sha: mr92-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [observability], priority: 3, pipelines: []}
+  - {id: 2093, iid: 93, title: "chore/istio-sidecar-upgrade", state: opened, sha: mr93-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [mesh], priority: 7, pipelines: []}
+  - {id: 2094, iid: 94, title: "fix/kafka-consumer-lag", state: opened, sha: mr94-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [kafka], priority: 1, pipelines: []}
+  - {id: 2095, iid: 95, title: "feat/redis-cluster-sentinel", state: opened, sha: mr95-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [cache], priority: 4, pipelines: []}
+  - {id: 2096, iid: 96, title: "fix/postgres-vacuum-tuning", state: opened, sha: mr96-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [database], priority: 2, pipelines: []}
+  - {id: 2097, iid: 97, title: "feat/rabbitmq-quorum-queues", state: opened, sha: mr97-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [messaging], priority: 5, pipelines: []}
+  - {id: 2098, iid: 98, title: "fix/elasticsearch-shard-alloc", state: opened, sha: mr98-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [search], priority: 3, pipelines: []}
+  - {id: 2099, iid: 99, title: "feat/mongodb-change-streams", state: opened, sha: mr99-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [nosql], priority: 4, pipelines: []}
+  - {id: 2100, iid: 100, title: "chore/dependency-audit-q2", state: opened, sha: mr100-sha-001, rebased_target_sha: target-000, labels: [lgtm], tenant_domains: [deps], priority: 9, pipelines: []}
+
+# CI duration distribution (ticks = minutes):
+#   When rebased, pipelines get random-ish durations from this pool.
+#   Weighted toward 5-10 (common fast), with tail up to 25 (integration/e2e suites).
+# The sha_pools provide deterministic SHAs; pipeline durations are set by the
+# mutations module (default 3 ticks for running). We override via scenario config below.
+
+# Pipeline duration configuration (applied by sim when creating pipelines on rebase)
+pipeline_durations:
+  distribution: weighted
+  min_ticks: 5
+  max_ticks: 25
+  weights:
+    5: 15
+    6: 20
+    7: 20
+    8: 18
+    9: 12
+    10: 8
+    11: 5
+    12: 4
+    13: 3
+    14: 3
+    15: 2
+    16: 2
+    17: 2
+    18: 2
+    19: 1
+    20: 1
+    21: 1
+    22: 1
+    23: 1
+    24: 1
+    25: 1
+
+sha_pools:
+  target_advances:
+    master: [
+      target-002, target-003, target-004, target-005, target-006,
+      target-007, target-008, target-009, target-010, target-011,
+      target-012, target-013, target-014, target-015, target-016,
+      target-017, target-018, target-019, target-020, target-021,
+      target-022, target-023, target-024, target-025, target-026,
+      target-027, target-028, target-029, target-030, target-031,
+      target-032, target-033, target-034, target-035, target-036,
+      target-037, target-038, target-039, target-040, target-041,
+      target-042, target-043, target-044, target-045, target-046,
+      target-047, target-048, target-049, target-050, target-051,
+    ]
