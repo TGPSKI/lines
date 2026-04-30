@@ -13,7 +13,7 @@ from fastapi import APIRouter, Query, Request, Response
 from . import gitlab_shapes as shapes
 from .metrics import MetricsCollector
 from .mutations import cancel_pipeline, merge_mr, rebase_mr, tick
-from .state import MRState, PipelineStatus, SimState
+from .state import Commit, MRState, PipelineStatus, SimState
 
 gitlab_router = APIRouter()
 sim_router = APIRouter(prefix="/__sim")
@@ -228,8 +228,6 @@ def get_repository_commits(
 ) -> list:
     _record_api_call(request, "GET /projects/:id/repository/commits")
     sim_state = _get_state(request)
-
-    from .state import Commit
 
     target_commit = Commit(
         id=sim_state.project.target_head,

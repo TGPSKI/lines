@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from .mutations import merge_mr
-from .state import MergeRequest, SimState
+from .state import MergeRequest, SimState, label_priority
 
 
 @dataclass
@@ -29,7 +29,7 @@ def select_merge_batch(
     Rules:
     1. MR must be open with a successful pipeline on current target_head.
     2. MR.rebased_target_sha == current target_head.
-    3. Sorted by priority (lower number = higher priority).
+    3. Sorted by label priority (production MERGE_LABELS_PRIORITY), then approved_at.
     4. Include MRs whose conflict_key domains don't overlap with batch.
     5. Stop at merge_limit.
     """
@@ -37,7 +37,7 @@ def select_merge_batch(
         return []
 
     pool = state.same_root_success_pool()
-    pool.sort(key=lambda mr: mr.priority)
+    pool.sort(key=lambda mr: (label_priority(mr.labels), mr.approved_at))
 
     batch: list[MergeRequest] = []
     used_domains: set[str] = set()
@@ -64,22 +64,23 @@ def execute_batch_merge(
 ) -> dict:
     """Execute a Phase 1 batch merge.
 
-    Merges all MRs in the batch, but only the last one advances target_head.
-    In practice, we merge them sequentially, with target advancing after each.
+    Merges all MRs in the batch sequentially, advancing target_head after each.
     The key Phase 1 insight: all share the same root, so merging one doesn't
     invalidate the others' CI results within this batch.
 
-    For the simulator, we advance target once at the end, treating the batch
-    as an atomic multi-merge.
+    Each ``merge_mr`` call receives the IIDs of the remaining (not-yet-merged)
+    batch peers so their pipelines are not mis-counted as stale.
     """
     if not batch:
         return {"event": "phase1_batch", "batch_size": 0, "merged": []}
 
+    all_iids = {mr.iid for mr in batch}
     merged_iids: list[int] = []
     old_target = state.project.target_head
 
     for mr in batch:
-        event = merge_mr(state, mr)
+        peer_iids = all_iids - {mr.iid} - set(merged_iids)
+        event = merge_mr(state, mr, batch_peer_iids=peer_iids)
         merged_iids.append(mr.iid)
         if metrics_callback:
             metrics_callback(event)
@@ -132,7 +133,7 @@ def compute_overlap_blocked(
 ) -> int:
     """Count MRs in same-root success pool blocked by domain overlap."""
     pool = state.same_root_success_pool()
-    pool.sort(key=lambda mr: mr.priority)
+    pool.sort(key=lambda mr: (label_priority(mr.labels), mr.approved_at))
 
     used_domains: set[str] = set()
     blocked = 0

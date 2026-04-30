@@ -32,6 +32,8 @@ except ImportError:
     print("ERROR: python-gitlab not installed. Run: pip install python-gitlab")
     sys.exit(1)
 
+from gitlab_hk_sim.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -74,12 +76,12 @@ def parse_args() -> argparse.Namespace:
 # API helpers
 # ---------------------------------------------------------------------------
 
-MERGE_LABELS = {"approved", "auto-merge", "lgtm"}
-HOLD_LABELS = {"do-not-merge/hold", "needs-rebase", "blocked/bot-access"}
+def _mr_sort_key(mr: dict) -> tuple[int, str]:
+    return (label_priority(mr.get("labels", [])), mr.get("approved_at", ""))
 
 
 def get_all_open_mrs(sim_url: str, project_id: int) -> list[dict]:
-    """Fetch all open MRs, handling pagination."""
+    """Fetch all open MRs, handling pagination, sorted by label priority."""
     all_mrs: list[dict] = []
     page = 1
     while True:
@@ -96,12 +98,12 @@ def get_all_open_mrs(sim_url: str, project_id: int) -> list[dict]:
         if page >= total_pages:
             break
         page += 1
-    return all_mrs
+    return sorted(all_mrs, key=_mr_sort_key)
 
 
 def is_mergeable(mr: dict) -> bool:
     labels = set(mr.get("labels", []))
-    has_merge_label = bool(labels & MERGE_LABELS)
+    has_merge_label = bool(labels & MERGE_LABELS_SET)
     has_hold_label = bool(labels & HOLD_LABELS)
     return has_merge_label and not has_hold_label and not mr.get("draft", False)
 
@@ -320,10 +322,8 @@ def run_cycle_old_burst(
     merge_count = 0
     rebase_count = 0
 
-    # Merge ready MRs
+    # Merge ready MRs (no cap — production old-burst only caps rebases)
     for mr in all_mrs:
-        if merge_count >= limit:
-            break
         if not is_mergeable(mr):
             continue
         if needs_rebase(sim_url, project_id, mr["sha"], target_head):
@@ -359,13 +359,6 @@ def get_tenant_domains(mr: dict) -> set[str]:
     labels = mr.get("labels", [])
     return {lbl for lbl in labels if lbl.startswith(TENANT_LABEL_PREFIX)}
 
-
-def has_same_root_success(
-    sim_url: str, project_id: int, mr: dict, target_head: str
-) -> bool:
-    """Check if MR has a successful pipeline with root_sha == current target."""
-    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-    return any(p["status"] == "success" and p["sha"] == mr["sha"] for p in pipelines)
 
 
 def run_cycle_active_cap_phase1(

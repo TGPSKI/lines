@@ -13,6 +13,33 @@ from enum import StrEnum
 from typing import Any
 
 
+MERGE_LABELS_PRIORITY = [
+    "bot/approved: critical",
+    "bot/approved: urgent",
+    "bot/approved: high",
+    "bot/approved: progressive-delivery",
+    "bot/approved: medium",
+    "bot/approved: low",
+    "bot/approved",
+    "bot/automerge",
+    "auto-merge",
+    "lgtm",
+]
+MERGE_LABELS_SET = set(MERGE_LABELS_PRIORITY)
+HOLD_LABELS = {"do-not-merge/hold", "needs-rebase", "blocked/bot-access", "bot/hold"}
+
+
+def label_priority(labels: list[str]) -> int:
+    """Return priority index for a label list (lower = higher priority)."""
+    best = len(MERGE_LABELS_PRIORITY)
+    for lbl in labels:
+        if lbl in MERGE_LABELS_SET:
+            idx = MERGE_LABELS_PRIORITY.index(lbl)
+            if idx < best:
+                best = idx
+    return best
+
+
 class PipelineStatus(StrEnum):
     PENDING = "pending"
     RUNNING = "running"
@@ -77,12 +104,21 @@ class MergeRequest:
     tenant_domains: list[str] = field(default_factory=list)
     pipelines: list[Pipeline] = field(default_factory=list)
     commits: list[Commit] = field(default_factory=list)
-    priority: int = 0
+    approved_at: str = ""
     rebase_count: int = 0
+    arrival_tick: int = 0
+    cancel_tick: int = 0
+    force_merge_tick: int = 0
+    ci_duration: int | None = None
 
     @property
     def is_open(self) -> bool:
         return self.state == MRState.OPENED
+
+    @property
+    def has_arrived(self) -> bool:
+        """True if this MR has arrived (not waiting for a future tick)."""
+        return self.state != MRState.OPENED or self.arrival_tick <= 0
 
     def latest_pipeline(self) -> Pipeline | None:
         if not self.pipelines:
@@ -162,11 +198,12 @@ class LabelEvent:
 
 @dataclass
 class PipelineDurationConfig:
-    """Configuration for how long new pipelines take."""
+    """Configuration for how long new pipelines take and how often they fail."""
 
     min_ticks: int = 3
     max_ticks: int = 3
     weights: dict[int, int] = field(default_factory=dict)
+    failure_rate: float = 0.0
 
     def sample_duration(self) -> int:
         """Sample a pipeline running duration from the configured distribution."""
@@ -177,6 +214,12 @@ class PipelineDurationConfig:
         if self.min_ticks == self.max_ticks:
             return self.min_ticks
         return random.randint(self.min_ticks, self.max_ticks)
+
+    def sample_outcome(self) -> PipelineStatus:
+        """Sample pipeline outcome based on failure_rate (0.0–1.0)."""
+        if self.failure_rate > 0 and random.random() < self.failure_rate:
+            return PipelineStatus.FAILED
+        return PipelineStatus.SUCCESS
 
 
 @dataclass
@@ -189,6 +232,7 @@ class SimState:
     pipeline_duration_config: PipelineDurationConfig = field(
         default_factory=PipelineDurationConfig
     )
+    scheduled_target_advances: dict[int, str] = field(default_factory=dict)
     tick_count: int = 0
     _next_pipeline_id: int = field(default=9000)
 

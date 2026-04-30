@@ -36,6 +36,8 @@ def create_app(
     app.state.metrics = metrics
     app.state.scenario_path = str(scenario_path)
 
+    metrics.record_scenario_meta(state)
+
     app.include_router(gitlab_router)
     app.include_router(sim_router)
 

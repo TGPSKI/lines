@@ -37,6 +37,41 @@ class MetricsCollector:
             self._file.write(json.dumps(event) + "\n")
             self._file.flush()
 
+    def record_scenario_meta(self, state: SimState) -> None:
+        """Emit a scenario_meta event as the first line of the NDJSON stream."""
+        force_merges = [
+            {"iid": mr.iid, "tick": mr.force_merge_tick}
+            for mr in state.merge_requests
+            if mr.force_merge_tick > 0
+        ]
+        cancellations = [
+            {"iid": mr.iid, "tick": mr.cancel_tick}
+            for mr in state.merge_requests
+            if mr.cancel_tick > 0
+        ]
+        arrivals = [
+            {"iid": mr.iid, "tick": mr.arrival_tick}
+            for mr in state.merge_requests
+            if mr.arrival_tick > 0
+        ]
+        self.record({
+            "event": "scenario_meta",
+            "tick": 0,
+            "total_mrs": len(state.merge_requests),
+            "failure_rate": state.pipeline_duration_config.failure_rate,
+            "pipeline_duration": {
+                "min": state.pipeline_duration_config.min_ticks,
+                "max": state.pipeline_duration_config.max_ticks,
+            },
+            "force_merges": force_merges,
+            "cancellations": cancellations,
+            "arrivals": arrivals,
+            "scheduled_target_advances": {
+                str(k): v
+                for k, v in state.scheduled_target_advances.items()
+            },
+        })
+
     def record_snapshot(self, state: SimState) -> None:
         """Record a full state snapshot at current tick."""
         snapshot = {

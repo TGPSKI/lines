@@ -121,6 +121,99 @@ Equivalent framing:
 | `clean-nonoverlap-phase1.yaml` | Non-overlapping success pool | Phase 1 |
 | `overlap-conflict-phase1.yaml` | Shared tenant domains | Phase 1 limited |
 
+## Priority Model
+
+MR processing order mirrors production `gitlab-housekeeping`:
+
+```
+bot/approved: critical  (highest)
+bot/approved: urgent
+bot/approved: high
+bot/approved: progressive-delivery
+bot/approved: medium
+bot/approved: low
+bot/approved
+bot/automerge
+auto-merge
+lgtm                    (lowest)
+```
+
+Ties broken by `approved_at` timestamp (earliest first). All constants live in
+`gitlab_hk_sim/state.py` as the single source of truth, imported by both the
+server-side Phase 1 module and the driver.
+
+Hold labels (`do-not-merge/hold`, `needs-rebase`, `blocked/bot-access`, `bot/hold`)
+prevent merge regardless of priority.
+
+## Scenario Features
+
+### Pipeline Failure Rate
+
+Set `failure_rate` (0.0–1.0) in `pipeline_durations` to model CI flakiness:
+
+```yaml
+pipeline_durations:
+  min_ticks: 3
+  max_ticks: 5
+  failure_rate: 0.10   # 10% of pipelines will fail
+```
+
+### Per-MR CI Duration
+
+Override the global pipeline duration for individual MRs:
+
+```yaml
+merge_requests:
+  - id: 1
+    iid: 1
+    ci_duration: 10   # slow test suite, overrides global config
+```
+
+### Dynamic MR Arrivals
+
+MRs with `arrival_tick` start hidden and appear mid-simulation:
+
+```yaml
+merge_requests:
+  - id: 50
+    iid: 50
+    arrival_tick: 20   # appears at tick 20
+    labels: ["bot/approved: critical"]
+```
+
+### Force-Merge (Queue Bypass)
+
+Model a human clicking "Merge" in the GitLab UI — bypasses all queue logic,
+pipeline checks, and priority. Immediately merges the MR and advances target:
+
+```yaml
+merge_requests:
+  - id: 99
+    iid: 99
+    force_merge_tick: 15   # force-merged at tick 15, invalidates all in-flight CI
+```
+
+### MR Cancellation
+
+Model an author closing their MR mid-simulation:
+
+```yaml
+merge_requests:
+  - id: 42
+    iid: 42
+    cancel_tick: 30   # closed at tick 30, active pipelines cancelled
+```
+
+### External Target Advances
+
+Model external pushes to the target branch (e.g., merges from other projects):
+
+```yaml
+scheduled_target_advances:
+  10: "external-push-sha-1"   # target advances at tick 10
+  25: "external-push-sha-2"   # and again at tick 25
+```
+
 ## Key Metrics
 
 - **peak_active_pipelines**: Maximum concurrent CI at any tick

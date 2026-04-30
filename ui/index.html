@@ -7,7 +7,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
   <style>
-    :root { --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #2ea043; --purple: #a371f7; --yellow: #d29922; }
+    :root { --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #2ea043; --purple: #a371f7; --yellow: #d29922; --red: #f85149; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; }
     body { font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 0.88rem; display: flex; flex-direction: column; overflow: hidden; }
@@ -99,7 +99,15 @@
     .kcard { font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 4px; background: #21262d; border: 1px solid #30363d; transition: transform 0.2s, background 0.2s, opacity 0.2s, box-shadow 0.2s; }
     .kcard.just-rebased { background: #2d1f6f; border-color: var(--purple); box-shadow: 0 0 7px 2px rgba(163,113,247,0.55); transform: scale(1.06); }
     .kcard.just-merged { background: #0d3320; border-color: var(--green); box-shadow: 0 0 7px 2px rgba(46,160,67,0.55); transform: scale(1.06); }
+    .kcard.force-merged { background: #3d1418; border-color: var(--red); box-shadow: 0 0 7px 2px rgba(248,81,73,0.55); transform: scale(1.06); color: var(--red); }
+    .kcard.ci-failed { background: #2d1418; border-color: var(--red); box-shadow: 0 0 5px 1px rgba(248,81,73,0.35); color: var(--red); }
     .kcard.muted { opacity: 0.5; }
+    .scenario-info { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.7rem; font-size: 0.78rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; }
+    .scenario-info .si-item { display: flex; gap: 0.3rem; align-items: center; }
+    .scenario-info .si-label { color: var(--muted); }
+    .scenario-info .si-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
+    .scenario-info .si-val.danger { color: var(--red); }
+    .scenario-info .si-title { color: var(--accent); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
     .merge-group { display: inline-flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.2rem 0.35rem; border: 1px solid #21262d; border-radius: 5px; background: #0d1117; margin-bottom: 0.2rem; }
     .merge-group.recent { border-color: var(--green); background: #0a1f15; }
     .mg-label { font-size: 0.58rem; color: var(--muted); width: 100%; }
@@ -162,6 +170,7 @@
 
   <!-- Tab: Statistics -->
   <div class="tab-panel" id="panelStats">
+    <div id="scenarioInfoCard"></div>
     <div class="series-selector" id="seriesSelector"></div>
     <div class="hero-cards" id="heroCards"></div>
     <div class="metric-picker" id="metricPicker"></div>
@@ -203,7 +212,9 @@
       <span><i style="background:rgba(163,113,247,0.9)"></i>CI Running</span>
       <span><i style="background:rgba(46,160,67,0.9)"></i>Ready</span>
       <span><i style="background:rgba(210,153,34,0.9)"></i>Stale</span>
+      <span><i style="background:#f85149"></i>CI Failed</span>
       <span><i style="background:#58a6ff; border-radius:50%"></i>Merged</span>
+      <span><i style="background:#f85149; clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%); width:12px;height:12px"></i>Force-merge</span>
     </div>
     <div class="swim-controls">
       <label>From <input type="number" id="rmin" value="0" min="0" /></label>
@@ -214,19 +225,24 @@
 
   <script>
   (function () {
-    const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)" };
+    const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)", failed: "#f85149", force_merge: "#f85149" };
     const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
     let playhead = 0, playTimer = null, xRange = [0, 100];
     let filesData = [], activeIndex = 0;
 
     // --- Parsing & Analysis ---
     function parseNdjson(t) { return t.split("\n").map(l => l.trim()).filter(Boolean).map(j => { try { return JSON.parse(j); } catch { return null; } }).filter(Boolean); }
-    function filterE(arr) { return (Array.isArray(arr) ? arr : []).filter(e => e && e.event !== "api_call"); }
+    function filterE(arr) {
+      const base = (Array.isArray(arr) ? arr : []).filter(e => e && e.event !== "api_call");
+      const extra = [];
+      base.forEach(e => { if (e.event === "tick" && Array.isArray(e.force_merges)) e.force_merges.forEach(fm => extra.push(fm)); });
+      return base.concat(extra);
+    }
     function pct(a, p) { if (!a.length) return 0; const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(s.length * p / 100))]; }
 
     function buildSwimlaneSegs(evs, maxT) {
       const segs = [], pipe = new Map();
-      evs.forEach(e => { if (e.event === "rebase" && e.pipeline_id != null) pipe.set(e.pipeline_id, { mr: e.mr_iid, rebaseTick: e.tick }); });
+      evs.forEach(e => { if (e.event === "rebase" && e.pipeline_id != null) pipe.set(e.pipeline_id, { mr: e.mr_iid, rebaseTick: e.tick, outcome: e.pipeline_outcome || null }); });
       evs.forEach(e => {
         if (e.event !== "tick" || !e.transitions) return;
         e.transitions.forEach(tr => {
@@ -235,6 +251,7 @@
           if (tr.mr_iid == null) return;
           if (m === "pending" && n === "running" && p) { segs.push({ mr: tr.mr_iid, start: p.rebaseTick, end: e.tick, kind: "pending" }); p.runAt = e.tick; }
           else if (m === "running" && n === "success" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "running" }); p.succAt = e.tick; }
+          else if (m === "running" && n === "failed" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "failed" }); p.failedAt = e.tick; }
         });
       });
       const allMergeTicks = evs.filter(e => e.event === "merge").map(e => e.tick).sort((a, b) => a - b);
@@ -262,12 +279,20 @@
           }
         }
       });
-      const mergeTick = new Map();
-      evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) { mergeTick.set(e.mr_iid, e.tick); segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + Math.max(1, maxT * 0.006), kind: "merged" }); } });
-      // Trim all segments to not extend past the MR's merge tick
-      segs.forEach(s => { const mt = mergeTick.get(s.mr); if (mt != null && s.kind !== "merged" && s.end > mt) s.end = mt; });
+      const mergeTick = new Map(), forceMergeTicks = [];
+      evs.forEach(e => {
+        if (e.event === "merge" && e.mr_iid != null) {
+          mergeTick.set(e.mr_iid, e.tick);
+          const kind = e.force_merge ? "force_merge" : "merged";
+          segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + Math.max(1, maxT * 0.006), kind });
+          if (e.force_merge) forceMergeTicks.push(e.tick);
+        }
+      });
+      segs.forEach(s => { const mt = mergeTick.get(s.mr); if (mt != null && s.kind !== "merged" && s.kind !== "force_merge" && s.end > mt) s.end = mt; });
       segs.forEach(s => { s.end = Math.max(s.end, s.start); });
-      return segs.filter(s => s.end > s.start).sort((a, b) => a.mr - b.mr || a.start - b.start);
+      const result = segs.filter(s => s.end > s.start).sort((a, b) => a.mr - b.mr || a.start - b.start);
+      result._forceMergeTicks = forceMergeTicks;
+      return result;
     }
 
     function analyze(raw) {
@@ -301,8 +326,20 @@
     }
     function storyAt(evs, t) {
       const a = [];
-      evs.forEach(e => { if (e.tick === t) { if (e.event === "rebase") a.push("Rebased !" + e.mr_iid); if (e.event === "merge") a.push("Merged !" + e.mr_iid); } });
-      evs.forEach(e => { if (e.event === "tick" && e.tick === t) (e.transitions || []).forEach(tr => a.push("!" + tr.mr_iid + ": " + tr.from + " → " + tr.to)); });
+      evs.forEach(e => {
+        if (e.tick === t) {
+          if (e.event === "rebase") a.push("Rebased !" + e.mr_iid);
+          if (e.event === "merge" && e.force_merge) a.push("FORCE-MERGED !" + e.mr_iid + " (bypassed queue)");
+          else if (e.event === "merge") a.push("Merged !" + e.mr_iid);
+        }
+      });
+      evs.forEach(e => {
+        if (e.event === "tick" && e.tick === t) (e.transitions || []).forEach(tr => {
+          const to = (tr.to || "").toLowerCase();
+          if (to === "failed") a.push("!" + tr.mr_iid + ": CI failed");
+          else a.push("!" + tr.mr_iid + ": " + tr.from + " → " + tr.to);
+        });
+      });
       return a.length ? a : ["Clock advanced."];
     }
 
@@ -317,18 +354,21 @@
       const mTicks = mergeE.map(e => e.tick).sort((a, b) => a - b);
       const mergeRounds = new Set(mergeE.map(e => e.tick)).size;
       const o0 = packed.series.open.find(v => v > 0) ?? 0;
-      // CI time per MR (from running segments)
       const ciTimes = packed.segs.filter(s => s.kind === "running").map(s => s.end - s.start);
       const ciMin = ciTimes.length ? Math.min(...ciTimes) : 0;
       const ciMax = ciTimes.length ? Math.max(...ciTimes) : 0;
       const ciAvg = ciTimes.length ? ciTimes.reduce((a, b) => a + b, 0) / ciTimes.length : 0;
+      const forceMergeCount = mergeE.filter(e => e.force_merge).length;
+      let ciFailures = 0;
+      tickE.forEach(e => { (e.transitions || []).forEach(tr => { if ((tr.to || "").toLowerCase() === "failed") ciFailures++; }); });
       return {
         packed, total_time_ticks: totalT, mrs_merged: mergeE.length, throughput: mergeE.length / Math.max(1, totalT),
         time_to_first: mTicks[0] ?? totalT, time_to_10: mTicks[9] ?? totalT, avg_int: totalT / Math.max(1, mergeE.length),
         queue_drain: o0 ? (100 * mergeE.length) / o0 : 0, rebase_calls: rebaseE.length, pipelines: rebaseE.length,
         peak, dup, stale_max: stL.length ? Math.max(...stL) : 0, srp_p95: pct(srpL, 95), srp_max: srpL.length ? Math.max(...srpL) : 0,
         merge_rounds: mergeRounds, avg_mrs_per_round: mergeE.length / Math.max(1, mergeRounds),
-        ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: allIids(f).size
+        ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: allIids(f).size,
+        force_merges: forceMergeCount, ci_failures: ciFailures
       };
     }
 
@@ -393,13 +433,16 @@
       srp_max: "Maximum same-root success pool size observed",
       merge_rounds: "Number of distinct ticks where at least one merge occurred",
       avg_mrs_per_round: "Average number of MRs merged per merge round (batch efficiency)",
-      mr_count: "Total unique MRs that appeared in the simulation"
+      mr_count: "Total unique MRs that appeared in the simulation",
+      force_merges: "Number of MRs that bypassed the queue via operator force-merge",
+      ci_failures: "Total pipeline failures observed during the simulation"
     };
     const METRIC_HIGHER_IS_BETTER = {
       mrs_merged: true, throughput: true, queue_drain: true, merge_rounds: true, avg_mrs_per_round: true,
       total_time_ticks: null, time_to_first: false, time_to_10: false, avg_int: false,
       rebase_calls: false, peak: false, dup: false, ci_min: null, ci_avg: null, ci_max: null,
-      srp_p95: false, srp_max: false, mr_count: true
+      srp_p95: false, srp_max: false, mr_count: true,
+      force_merges: null, ci_failures: false
     };
 
     function renderSeriesSelector() {
@@ -442,8 +485,35 @@
     ];
     let heroMetricKeys = ["mrs_merged", "throughput", "queue_drain", "dup", "time_to_10", "rebase_calls"];
 
+    function renderScenarioInfoCard() {
+      const el = document.getElementById("scenarioInfoCard");
+      const meta = filesData.map(d => (d.events || []).find(e => e.event === "scenario_meta")).filter(Boolean);
+      if (!meta.length) { el.innerHTML = ""; return; }
+      const m = meta[0];
+      let html = `<div class="scenario-info"><span class="si-title">Scenario</span>`;
+      html += `<span class="si-item"><span class="si-label">MRs:</span><span class="si-val">${m.total_mrs}</span></span>`;
+      if (m.pipeline_duration) html += `<span class="si-item"><span class="si-label">CI Duration:</span><span class="si-val">${m.pipeline_duration.min}–${m.pipeline_duration.max} ticks</span></span>`;
+      html += `<span class="si-item"><span class="si-label">Failure Rate:</span><span class="si-val${m.failure_rate > 0 ? ' danger' : ''}">${(m.failure_rate * 100).toFixed(1)}%</span></span>`;
+      if (m.force_merges && m.force_merges.length) {
+        const fmStr = m.force_merges.map(f => `!${f.iid} @t${f.tick}`).join(", ");
+        html += `<span class="si-item"><span class="si-label">Force-merges:</span><span class="si-val danger">${fmStr}</span></span>`;
+      }
+      if (m.cancellations && m.cancellations.length) {
+        const cStr = m.cancellations.map(c => `!${c.iid} @t${c.tick}`).join(", ");
+        html += `<span class="si-item"><span class="si-label">Cancellations:</span><span class="si-val">${cStr}</span></span>`;
+      }
+      if (m.arrivals && m.arrivals.length) {
+        html += `<span class="si-item"><span class="si-label">Arrivals:</span><span class="si-val">${m.arrivals.length}</span></span>`;
+      }
+      if (m.scheduled_target_advances && Object.keys(m.scheduled_target_advances).length) {
+        html += `<span class="si-item"><span class="si-label">External advances:</span><span class="si-val">${Object.keys(m.scheduled_target_advances).length}</span></span>`;
+      }
+      html += `</div>`;
+      el.innerHTML = html;
+    }
     function renderStats() {
       if (!filesData.length) return;
+      renderScenarioInfoCard();
       renderSeriesSelector();
       renderMetricPicker();
       const metrics = filesData.map(d => d.metrics);
@@ -485,7 +555,8 @@
       const rows = [
         ["s", "── Throughput & Time ──"], ["total_time_ticks", "Total time (steps)", "d0"], ["mrs_merged", "MRs merged", "d0"], ["throughput", "Throughput", "d3"],
         ["time_to_first", "Time to first merge", "d0"], ["time_to_10", "Time to merge 10", "d0"], ["avg_int", "Avg merge interval", "d0"], ["queue_drain", "Queue drain %", "d0"],
-        ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"],
+        ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"], ["ci_failures", "CI Failures", "d0"],
+        ["s", "── Events ──"], ["force_merges", "Force-merges", "d0"],
         ["s", "── Pool ──"], ["srp_p95", "Same-root p95", "d0"], ["srp_max", "Same-root max", "d0"],
         ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"], ["mr_count", "Total MRs seen", "d0"]
       ];
@@ -555,8 +626,15 @@
           ["Waiting", "Rebasing", "CI", "Ready", "Merged"].forEach(n => { colHdr.innerHTML += `<div class="col-hd">${n}</div>`; });
           body.appendChild(colHdr);
 
-          const rebasedRecent = new Set(), mergedRecent = new Set();
-          for (let dt = 0; dt < HIGHLIGHT_TICKS; dt++) { const tt = t - dt; f.forEach(e => { if (e.tick === tt && e.mr_iid != null) { if (e.event === "rebase") rebasedRecent.add(e.mr_iid); if (e.event === "merge") mergedRecent.add(e.mr_iid); } }); }
+          const rebasedRecent = new Set(), mergedRecent = new Set(), forceMergedRecent = new Set(), ciFailedRecent = new Set();
+          for (let dt = 0; dt < HIGHLIGHT_TICKS; dt++) { const tt = t - dt; f.forEach(e => {
+            if (e.tick === tt && e.mr_iid != null) {
+              if (e.event === "rebase") rebasedRecent.add(e.mr_iid);
+              if (e.event === "merge" && e.force_merge) forceMergedRecent.add(e.mr_iid);
+              else if (e.event === "merge") mergedRecent.add(e.mr_iid);
+            }
+            if (e.event === "tick" && e.tick === tt) (e.transitions || []).forEach(tr => { if ((tr.to || "").toLowerCase() === "failed") ciFailedRecent.add(tr.mr_iid); });
+          }); }
 
           const cards = document.createElement("div");
           cards.className = "trace-cards";
@@ -574,17 +652,19 @@
                   const grp = document.createElement("div");
                   grp.className = "merge-group" + (isRecent ? " recent" : "");
                   grp.innerHTML = `<span class="mg-label">t=${mt} (${mrs.length})</span>`;
-                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
+                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
                   col.appendChild(grp);
                 } else {
-                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; col.appendChild(c); });
+                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; col.appendChild(c); });
                 }
               });
             } else {
               arr.forEach(m => {
                 const c = document.createElement("div");
                 let cls = "kcard";
-                if (mergedRecent.has(m)) cls += " just-merged";
+                if (forceMergedRecent.has(m)) cls += " force-merged";
+                else if (mergedRecent.has(m)) cls += " just-merged";
+                else if (ciFailedRecent.has(m)) cls += " ci-failed";
                 else if (rebasedRecent.has(m)) cls += " just-rebased";
                 c.className = cls; c.textContent = "!" + m; col.appendChild(c);
               });
@@ -634,7 +714,7 @@
       if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R"); setTimeout(() => d3brush(pR, "brushAreaR", "R"), 30); dSwim(pR, "swimAreaR"); }
     }
 
-    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "stale" ? C0.stale : k === "merged" ? C0.merged : C0.other);
+    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "stale" ? C0.stale : k === "merged" ? C0.merged : k === "failed" ? C0.failed : k === "force_merge" ? C0.force_merge : C0.other);
 
     function plMergePlay(p) {
       return { id: "mp", afterDatasetsDraw(chart) {
@@ -682,18 +762,35 @@
       const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
       const g = sw.append("svg").attr("width", w).attr("height", H);
       g.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
+      // Force-merge vertical dashed lines (behind everything)
+      const fmTicks = p.segs._forceMergeTicks || [];
+      fmTicks.forEach(ft => {
+        if (ft >= x0 && ft <= x1 && ft <= t) {
+          g.append("line").attr("x1", x(ft)).attr("x2", x(ft)).attr("y1", pad.t).attr("y2", H - pad.b)
+            .attr("stroke", C0.force_merge).attr("stroke-width", 1.5).attr("stroke-dasharray", "4,3").attr("opacity", 0.7);
+        }
+      });
       if (t >= x0 && t <= x1) g.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
       const visible = p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
-        .map(s => { if (s.start > t) return null; if (s.kind === "merged") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
+        .map(s => { if (s.start > t) return null; if (s.kind === "merged" || s.kind === "force_merge") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
         .filter(s => s && s.end > s.start);
-      visible.filter(s => s.kind !== "merged").forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
+      visible.filter(s => s.kind !== "merged" && s.kind !== "force_merge").forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
         .attr("width", Math.max(0, x(Math.min(s.end, x1)) - x(Math.max(s.start, x0)))).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2));
+      // Normal merged markers (blue circle)
       visible.filter(s => s.kind === "merged").forEach(s => {
         const mx = x(Math.max(s.start, x0)), bw = y.bandwidth(), yt = y(String(s.mr));
         g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
           .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
         g.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.45))
           .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1);
+      });
+      // Force-merge markers (red diamond)
+      visible.filter(s => s.kind === "force_merge").forEach(s => {
+        const mx = x(Math.max(s.start, x0)), bw = y.bandwidth(), yt = y(String(s.mr)), cy = yt + bw / 2;
+        const r = Math.max(4, bw * 0.55);
+        g.append("polygon")
+          .attr("points", `${mx},${cy - r} ${mx + r},${cy} ${mx},${cy + r} ${mx - r},${cy}`)
+          .attr("fill", C0.force_merge).attr("stroke", "#0d1117").attr("stroke-width", 1);
       });
     }
 

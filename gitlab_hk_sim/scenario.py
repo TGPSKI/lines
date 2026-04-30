@@ -41,11 +41,17 @@ def _build_state(raw: dict[str, Any]) -> SimState:
             if p.id >= max_pipeline_id:
                 max_pipeline_id = p.id + 1
 
+    scheduled_target_advances = {
+        int(k): str(v)
+        for k, v in raw.get("scheduled_target_advances", {}).items()
+    }
+
     return SimState(
         project=project,
         merge_requests=mrs,
         sha_pools=sha_pools,
         pipeline_duration_config=pipeline_duration_config,
+        scheduled_target_advances=scheduled_target_advances,
         _next_pipeline_id=max_pipeline_id,
     )
 
@@ -76,11 +82,18 @@ def _build_mr(raw: dict[str, Any], project_id: int) -> MergeRequest:
             )
         ]
 
+    arrival_tick = int(raw.get("arrival_tick", 0))
+    explicit_state = raw.get("state", "opened")
+    if arrival_tick > 0 and explicit_state == "opened":
+        effective_state = MRState.CLOSED
+    else:
+        effective_state = MRState(explicit_state)
+
     return MergeRequest(
         id=raw["id"],
         iid=raw["iid"],
         title=raw.get("title", f"MR {raw['iid']}"),
-        state=MRState(raw.get("state", "opened")),
+        state=effective_state,
         draft=raw.get("draft", False),
         merge_status=raw.get("merge_status", "can_be_merged"),
         target_branch=raw.get("target_branch", "master"),
@@ -93,7 +106,11 @@ def _build_mr(raw: dict[str, Any], project_id: int) -> MergeRequest:
         tenant_domains=raw.get("tenant_domains", []),
         pipelines=pipelines,
         commits=commits,
-        priority=raw.get("priority", 0),
+        approved_at=raw.get("approved_at", ""),
+        arrival_tick=arrival_tick,
+        cancel_tick=int(raw.get("cancel_tick", 0)),
+        force_merge_tick=int(raw.get("force_merge_tick", 0)),
+        ci_duration=int(raw["ci_duration"]) if "ci_duration" in raw else None,
     )
 
 
@@ -133,4 +150,5 @@ def _build_pipeline_duration_config(raw: dict[str, Any]) -> PipelineDurationConf
         min_ticks=raw.get("min_ticks", 3),
         max_ticks=raw.get("max_ticks", 3),
         weights=weights,
+        failure_rate=float(raw.get("failure_rate", 0.0)),
     )
