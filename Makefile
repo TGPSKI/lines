@@ -37,12 +37,10 @@ CYCLES ?= 20
 TICKS_PER_CYCLE ?= 4
 POLICY ?= active-cap
 
-# Use uv run from the repo root to get the full dependency set
-UV_RUN := cd ../.. && uv run --directory tools/gitlab_housekeeping_perf_sim
-
-# For direct python invocations within this directory
-PYTHON := cd ../.. && uv run python
-PYTEST := cd ../.. && uv run pytest
+# Use the venv python directly (avoids uv version mismatch)
+VENV_PYTHON := .venv/bin/python
+PYTHON := $(VENV_PYTHON)
+PYTEST := $(VENV_PYTHON) -m pytest
 
 # Path to qontract-reconcile root (two levels up from this tool)
 QR_ROOT := $(shell cd ../.. && pwd)
@@ -139,8 +137,9 @@ compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 		--scenario $(ADV_SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit $(LIMIT) \
-		--cycles 120 \
-		--ticks-per-cycle $(TICKS_PER_CYCLE)
+		--cycles 480 \
+		--ticks-per-cycle 1 \
+		--log-level WARNING
 
 compare-quick: ## Quick comparison (~2 min) - fewer cycles
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
@@ -161,8 +160,9 @@ monte-carlo-small: ## Monte Carlo: 10 trials (~30 min)
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles 120 \
-		--ticks-per-cycle $(TICKS_PER_CYCLE)
+		--cycles 480 \
+		--ticks-per-cycle 1 \
+		--log-level WARNING
 
 monte-carlo-medium: ## Monte Carlo: 20 trials (~60 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
@@ -170,8 +170,9 @@ monte-carlo-medium: ## Monte Carlo: 20 trials (~60 min)
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles 120 \
-		--ticks-per-cycle $(TICKS_PER_CYCLE)
+		--cycles 480 \
+		--ticks-per-cycle 1 \
+		--log-level WARNING
 
 monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
@@ -179,8 +180,9 @@ monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--limit $(LIMIT) \
-		--cycles 120 \
-		--ticks-per-cycle $(TICKS_PER_CYCLE)
+		--cycles 480 \
+		--ticks-per-cycle 1 \
+		--log-level WARNING
 
 # ---------------------------------------------------------------------------
 # Harness (real gitlab-housekeeping code)

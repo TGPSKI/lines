@@ -14,3 +14,4 @@ reports/*.pid
 reports/*.txt
 reports/*.csv
 !reports/.gitkeep
+sessions/

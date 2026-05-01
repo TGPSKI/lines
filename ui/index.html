@@ -19,6 +19,7 @@
     .nav-tab { padding: 0.4rem 0.85rem; border: 1px solid transparent; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.82rem; font-weight: 500; border-bottom: none; }
     .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
     .nav-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg); position: relative; top: 1px; }
+    .nav-tab.disabled { opacity: 0.35; pointer-events: none; cursor: default; }
 
     /* Playback bar */
     .playback-bar { display: none; align-items: center; gap: 0.6rem; padding: 0.45rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
@@ -127,7 +128,7 @@
     .chart-pair.single-view .chart-col:nth-child(2) { display: none; }
     .chart-col { min-width: 0; }
     .chart-col-title { font-size: 0.78rem; margin-bottom: 0.3rem; color: var(--text); }
-    .chart-wrap { height: 260px; }
+    .chart-wrap { height: 520px; }
     .brush-wrap { height: 50px; margin: 0.3rem 0; }
     .swim-legend { display: flex; gap: 1rem; font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; flex-wrap: wrap; justify-content: center; }
     .swim-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 0.25rem; }
@@ -147,10 +148,10 @@
     <h1>Merge Queue Sim</h1>
     <nav class="nav-tabs" id="navTabs">
       <button class="nav-tab active" data-tab="load">Load</button>
-      <button class="nav-tab" data-tab="stats">Statistics</button>
-      <button class="nav-tab" data-tab="kanban">Kanban</button>
-      <button class="nav-tab" data-tab="charts">Composition</button>
-      <button class="nav-tab" data-tab="monteCarlo">Monte Carlo</button>
+      <button class="nav-tab disabled" data-tab="stats">Statistics</button>
+      <button class="nav-tab disabled" data-tab="kanban">Kanban</button>
+      <button class="nav-tab disabled" data-tab="charts">Composition</button>
+      <button class="nav-tab disabled" data-tab="monteCarlo">Monte Carlo</button>
     </nav>
   </div>
 
@@ -171,8 +172,8 @@
 
   <!-- Tab: Load -->
   <div class="tab-panel active" id="panelLoad">
-    <div class="drop-zone" id="dropZone">Drop <code>metrics.ndjson</code> files here or click to open</div>
-    <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl" multiple hidden />
+    <div class="drop-zone" id="dropZone">Drop <code>.ndjson</code> and/or <code>.csv</code> files here or click to open<br><span style="font-size:0.72rem;margin-top:0.4rem;display:inline-block;color:var(--muted)">NDJSON → Statistics, Kanban, Composition &nbsp;|&nbsp; CSV → Monte Carlo</span></div>
+    <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl,.csv" multiple hidden />
     <div class="file-list" id="fileList"></div>
   </div>
 
@@ -228,17 +229,12 @@
       <label>From <input type="number" id="rmin" value="0" min="0" /></label>
       <label>To <input type="number" id="rmax" value="100" min="0" /></label>
       <button class="pb-btn" id="fitBtn">Fit all</button>
+      <label style="margin-left:1rem;font-size:0.75rem;display:flex;align-items:center;gap:0.3rem;color:var(--muted)"><input type="checkbox" id="chkMergeLines" checked /> Merge lines</label>
     </div>
   </div>
 
   <!-- Tab: Monte Carlo -->
   <div class="tab-panel" id="panelMonteCarlo">
-    <div class="mc-load-section">
-      <div class="drop-zone" id="mcDropZone" style="max-width:500px;margin:1rem auto">
-        Drop <code>monte-carlo-summary.csv</code> here or click to open
-      </div>
-      <input type="file" id="mcFileInput" accept=".csv" hidden />
-    </div>
     <div id="mcContent" style="display:none">
       <div class="mc-controls" style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:1rem">
         <div>
@@ -362,13 +358,26 @@
       const evs = filterE([...raw]);
       let maxTick = 0;
       evs.forEach(e => { if (e.tick != null) maxTick = Math.max(maxTick, e.tick); });
+      const segs = buildSwimlaneSegs(evs, maxTick);
       const byT = new Map();
       evs.forEach(e => { if (e.event === "tick" && e.tick != null) byT.set(e.tick, { ...e }); else if (e.event === "snapshot" && e.tick != null && !byT.has(e.tick)) byT.set(e.tick, { ...e }); });
-      evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; r.stale_successes = r.stale_successes ?? e.stale_successes; r.same_root_success_pool = r.same_root_success_pool ?? e.same_root_success_pool; r.active_pipelines = r.active_pipelines ?? e.active_pipelines; } } });
-      const series = { labels: [], pool: [], active: [], rest: [], open: [] };
-      for (let t = 0; t <= maxTick; t++) { const w = byT.get(t) || {}, o = w.open_mrs ?? 0, p = w.same_root_success_pool ?? 0, ap = w.active_pipelines ?? 0;
-        series.labels.push(t); series.pool.push(p); series.active.push(ap); series.rest.push(Math.max(0, o - p - ap)); series.open.push(o); }
-      return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs: buildSwimlaneSegs(evs, maxTick) };
+      evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; } } });
+      const series = { labels: [], pool: [], active: [], stale: [], rest: [], open: [] };
+      for (let t = 0; t <= maxTick; t++) {
+        const w = byT.get(t) || {}, o = w.open_mrs ?? 0;
+        const ciMrs = new Set(), readyMrs = new Set(), staleMrs = new Set();
+        for (const s of segs) {
+          if (s.start > t || s.end <= t) continue;
+          if (s.kind === "running") ciMrs.add(s.mr);
+          else if (s.kind === "success") readyMrs.add(s.mr);
+          else if (s.kind === "stale") staleMrs.add(s.mr);
+        }
+        readyMrs.forEach(mr => { ciMrs.delete(mr); staleMrs.delete(mr); });
+        ciMrs.forEach(mr => staleMrs.delete(mr));
+        const ci = ciMrs.size, ready = readyMrs.size, stale = staleMrs.size;
+        series.labels.push(t); series.pool.push(ready); series.active.push(ci); series.stale.push(stale); series.rest.push(Math.max(0, o - ready - ci - stale)); series.open.push(o);
+      }
+      return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs };
     }
 
     function rebaseSetAtTick(evs, t) { const s = new Set(); evs.forEach(e => { if (e.event === "rebase" && e.tick === t) s.add(e.mr_iid); }); return s; }
@@ -448,7 +457,7 @@
       if (name === "stats") renderStats();
       if (name === "monteCarlo") renderMonteCarlo();
     }
-    document.getElementById("navTabs").addEventListener("click", e => { if (e.target.dataset.tab) switchTab(e.target.dataset.tab); });
+    document.getElementById("navTabs").addEventListener("click", e => { if (e.target.dataset.tab && !e.target.classList.contains("disabled")) switchTab(e.target.dataset.tab); });
 
     // --- Load Tab ---
     const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
@@ -457,23 +466,51 @@
     dropZone.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
     fileInput.addEventListener("change", () => { if (fileInput.files) loadFiles(fileInput.files); });
 
+    function enableTabs(tabNames) {
+      tabNames.forEach(name => {
+        const btn = document.querySelector(`.nav-tab[data-tab="${name}"]`);
+        if (btn) btn.classList.remove("disabled");
+      });
+    }
+
     function loadFiles(fl) {
       const a = Array.from(fl); if (!a.length) return;
-      Promise.all(a.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
-        filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
-        activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); stop();
-        filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
-        const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
-        document.getElementById("scrub").max = mx;
-        document.getElementById("playLabel").textContent = "Step 0 / " + mx;
-        document.getElementById("playbackBar").classList.add("visible");
+      const ndjsonFiles = a.filter(f => /\.(ndjson|jsonl|json)$/i.test(f.name));
+      const csvFiles = a.filter(f => /\.csv$/i.test(f.name));
+
+      const tasks = [];
+      if (ndjsonFiles.length) {
+        tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
+          filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
+          activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); stop();
+          filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
+          const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
+          document.getElementById("scrub").max = mx;
+          document.getElementById("playLabel").textContent = "Step 0 / " + mx;
+          document.getElementById("playbackBar").classList.add("visible");
+          enableTabs(["stats", "kanban", "charts"]);
+          return "ndjson";
+        }));
+      }
+      if (csvFiles.length) {
+        tasks.push(new Promise((R, N) => { const r = new FileReader(); r.onload = () => R(r.result); r.onerror = N; r.readAsText(csvFiles[0]); }).then(text => {
+          loadMcCSVText(text);
+          enableTabs(["monteCarlo"]);
+          return "csv";
+        }));
+      }
+
+      Promise.all(tasks).then(results => {
         renderFileList();
-        switchTab("stats");
+        if (results.includes("ndjson") && results.includes("csv")) switchTab("stats");
+        else if (results.includes("ndjson")) switchTab("stats");
+        else if (results.includes("csv")) switchTab("monteCarlo");
       });
     }
     function renderFileList() {
       const el = document.getElementById("fileList"); el.innerHTML = "";
-      filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>${esc(d.name)}</span></div>`; });
+      filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>📊 ${esc(d.name)}.ndjson</span></div>`; });
+      if (mcData) { el.innerHTML += `<div class="file-item"><span>📈 monte-carlo-summary.csv (${mcData.policies.length} policies, ${mcData.metrics.length} metrics)</span></div>`; }
     }
 
     // --- Statistics Tab ---
@@ -774,33 +811,105 @@
       const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
       document.getElementById("chartTitleL").textContent = filesData[chartIdxL]?.name || "";
       document.getElementById("chartTitleR").textContent = filesData[chartIdxR]?.name || "";
-      if (pL) { doChart(pL, "chartCanvasL", "L"); setTimeout(() => d3brush(pL, "brushAreaL", "L"), 30); dSwim(pL, "swimAreaL"); }
-      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R"); setTimeout(() => d3brush(pR, "brushAreaR", "R"), 30); dSwim(pR, "swimAreaR"); }
+      const yMax = getSharedYMax();
+      if (pL) { doChart(pL, "chartCanvasL", "L", yMax); setTimeout(() => d3brush(pL, "brushAreaL", "L"), 30); dSwim(pL, "swimAreaL"); }
+      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R", yMax); setTimeout(() => d3brush(pR, "brushAreaR", "R"), 30); dSwim(pR, "swimAreaR"); }
     }
 
     const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "stale" ? C0.stale : k === "merged" ? C0.merged : k === "failed" ? C0.failed : k === "force_merge" ? C0.force_merge : C0.other);
 
+    let showMergeLines = true;
+    document.getElementById("chkMergeLines").addEventListener("change", e => {
+      showMergeLines = e.target.checked;
+      if (chartInstL) chartInstL.update("none");
+      if (chartInstR) chartInstR.update("none");
+    });
+
     function plMergePlay(p) {
       return { id: "mp", afterDatasetsDraw(chart) {
+        const anyVisible = chart.data.datasets.some((ds, i) => chart.isDatasetVisible(i));
+        if (!anyVisible) return;
         const s = chart.scales.x, ctx = chart.ctx, g = chart.chartArea; if (!s) return; ctx.save();
-        (p.merges || []).forEach(ev => { const px = s.getPixelForValue(ev.tick); if (g && px >= g.left && px <= g.right) { ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo(px, g.top); ctx.lineTo(px, g.bottom); ctx.stroke(); } });
+        if (showMergeLines) {
+          (p.merges || []).forEach(ev => { const px = s.getPixelForValue(ev.tick); if (g && px >= g.left && px <= g.right) { ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo(px, g.top); ctx.lineTo(px, g.bottom); ctx.stroke(); } });
+        }
         const phx = s.getPixelForValue(playhead);
         if (g) { ctx.strokeStyle = "rgba(80,200,255,0.9)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(phx, g.top); ctx.lineTo(phx, g.bottom); ctx.stroke(); }
         ctx.restore();
       }};
     }
-    function doChart(p, canvasId, side) {
+    let tooltipsEnabled = true;
+
+    function getSharedYMax() {
+      if (chartViewMode !== "compare") return undefined;
+      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+      if (!pL || !pR) return undefined;
+      const x0 = +document.getElementById("rmin").value || 0;
+      const x1L = +document.getElementById("rmax").value || pL.maxTick;
+      const x1R = +document.getElementById("rmax").value || pR.maxTick;
+      let mx = 0;
+      for (const p of [pL, pR]) {
+        const hi = p === pL ? x1L : x1R;
+        for (let t = Math.max(0, Math.floor(x0)); t <= Math.min(p.maxTick, Math.ceil(hi)); t++) {
+          const stack = (p.series.pool[t] || 0) + (p.series.active[t] || 0) + (p.series.stale[t] || 0) + (p.series.rest[t] || 0);
+          const line = p.series.open[t] || 0;
+          mx = Math.max(mx, stack, line);
+        }
+      }
+      return mx > 0 ? mx : undefined;
+    }
+
+    function doChart(p, canvasId, side, sharedYMax) {
       const cvs = document.getElementById(canvasId); if (!cvs) return;
       if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
+      const x0 = +document.getElementById("rmin").value || 0, x1 = +document.getElementById("rmax").value || p.maxTick;
+      const yOpts = { stacked: true, beginAtZero: true };
+      if (sharedYMax != null) { yOpts.max = sharedYMax; }
       const inst = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
-        { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 2, borderWidth: 0 },
-        { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 1, borderWidth: 0 },
-        { label: "Rest", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
-        { label: "open", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
-      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index" }, plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } } } },
-        scales: { x: { title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 10 } }, y: { stacked: true, beginAtZero: true } } }, plugins: [plMergePlay(p)] });
+        { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
+        { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
+        { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
+        { label: "Pending", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
+        { label: "Open (total)", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
+      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } }, onClick(e, item, legend) {
+          const chart = legend.chart, idx = item.datasetIndex, meta = chart.getDatasetMeta(idx);
+          if (e.native.shiftKey) {
+            const allHidden = chart.data.datasets.every((_, i) => i === idx || !chart.isDatasetVisible(i));
+            chart.data.datasets.forEach((_, i) => { chart.getDatasetMeta(i).hidden = allHidden ? null : i !== idx; });
+          } else { meta.hidden = meta.hidden === null ? true : null; }
+          chart.update();
+        } }, tooltip: { enabled: tooltipsEnabled } },
+        scales: { x: { min: x0, max: x1, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
+      }, plugins: [plMergePlay(p), plCrosshair()] });
       if (side === "L") chartInstL = inst; else chartInstR = inst;
     }
+
+    function plCrosshair() {
+      return { id: "crosshair",
+        afterEvent(chart, args) {
+          const prev = chart._crosshairX;
+          chart._crosshairX = (args.event.type === "mousemove") ? args.event.x : null;
+          if (args.event.type === "mouseout") chart._crosshairX = null;
+          if (prev !== chart._crosshairX) chart.draw();
+        },
+        afterDatasetsDraw(chart) {
+          if (chart._crosshairX == null) return;
+          const g = chart.chartArea; if (!g) return;
+          const ctx = chart.ctx; ctx.save();
+          ctx.fillStyle = "rgba(255,255,255,0.12)";
+          ctx.fillRect(chart._crosshairX - 1, g.top, 2, g.bottom - g.top);
+          ctx.restore();
+        }
+      };
+    }
+    function syncWindow() {
+      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+      const yMax = getSharedYMax();
+      if (pL) { doChart(pL, "chartCanvasL", "L", yMax); dSwim(pL, "swimAreaL"); }
+      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R", yMax); dSwim(pR, "swimAreaR"); }
+    }
+
     function d3brush(p, elId, side) {
       const el = document.getElementById(elId); if (!el) return; el.innerHTML = "";
       const maxT = Math.max(1, p.maxTick), w = el.clientWidth || 400, m = { l: 30, r: 6, t: 2, b: 18 }, h = 36;
@@ -809,8 +918,7 @@
       s.append("g").attr("transform", `translate(0,${h - m.b})`).call(d3.axisBottom(sc).ticks(4));
       const b = d3.brushX().extent([[m.l, 0], [w - m.r, h - m.b - 1]]).on("end", e => { if (!e.selection) return; const lo = sc.invert(e.selection[0]), hi = sc.invert(e.selection[1]);
         xRange = [lo, hi]; document.getElementById("rmin").value = Math.floor(lo); document.getElementById("rmax").value = Math.ceil(hi);
-        const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-        if (pL) dSwim(pL, "swimAreaL"); if (pR) dSwim(pR, "swimAreaR"); });
+        syncWindow(); });
       s.append("g").call(b).call(b.move, [sc(xRange[0]), sc(Math.min(maxT, xRange[1]))]);
     }
     function dSwim(p, swimId) {
@@ -824,38 +932,68 @@
       const rowH = 14, pad = { t: 4, l: 36, b: 18, r: 4 }, w = Math.max(300, (chartWrap?.clientWidth || document.getElementById(swimId).clientWidth || 400) - 8);
       const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
       const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
-      const g = sw.append("svg").attr("width", w).attr("height", H);
-      g.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
-      // Force-merge vertical dashed lines (behind everything)
-      const fmTicks = p.segs._forceMergeTicks || [];
-      fmTicks.forEach(ft => {
-        if (ft >= x0 && ft <= x1 && ft <= t) {
-          g.append("line").attr("x1", x(ft)).attr("x2", x(ft)).attr("y1", pad.t).attr("y2", H - pad.b)
-            .attr("stroke", C0.force_merge).attr("stroke-width", 1.5).attr("stroke-dasharray", "4,3").attr("opacity", 0.7);
-        }
-      });
-      if (t >= x0 && t <= x1) g.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
+      const svg = sw.append("svg").attr("width", w).attr("height", H).attr("tabindex", "0").style("outline", "none");
+      svg.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
+      if (t >= x0 && t <= x1) svg.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
       const visible = p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
         .map(s => { if (s.start > t) return null; if (s.kind === "merged" || s.kind === "force_merge") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
         .filter(s => s && s.end > s.start);
-      visible.filter(s => s.kind !== "merged" && s.kind !== "force_merge").forEach(s => g.append("rect").attr("x", x(Math.max(s.start, x0))).attr("y", y(String(s.mr))).attr("height", y.bandwidth())
-        .attr("width", Math.max(0, x(Math.min(s.end, x1)) - x(Math.max(s.start, x0)))).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2));
-      // Normal merged markers (blue circle)
+      const bw = y.bandwidth(), barH = bw * 0.75, barOff = (bw - barH) / 2;
+      const kindLabel = k => k === "running" ? "CI Running" : k === "success" ? "Ready" : k === "pending" ? "Pending (queued)" : k === "stale" ? "Stale" : k === "failed" ? "CI Failed" : k === "merged" ? "Merged" : k === "force_merge" ? "Force-merged" : k;
+      const tip = d3.select("body").selectAll(".swim-tip").data([0]).join("div").attr("class", "swim-tip")
+        .style("position", "fixed").style("display", "none").style("pointer-events", "none")
+        .style("background", "#1c2128").style("border", "1px solid #30363d").style("border-radius", "6px")
+        .style("padding", "0.4rem 0.6rem").style("font-size", "0.72rem").style("color", "#e6edf3")
+        .style("font-family", "'JetBrains Mono', monospace").style("z-index", "9999").style("max-width", "220px")
+        .style("box-shadow", "0 4px 12px rgba(0,0,0,0.5)");
+      function showTip(event, s) {
+        const dur = s.end - s.start;
+        tip.html(`<strong>MR !${s.mr}</strong><br>State: ${kindLabel(s.kind)}<br>Ticks ${s.start}→${s.end} (${dur} tick${dur > 1 ? "s" : ""})`)
+          .style("display", "block").style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px");
+      }
+      function hideTip() { tip.style("display", "none"); }
+      visible.filter(s => s.kind !== "merged" && s.kind !== "force_merge").forEach(s => {
+        const sx = x(Math.max(s.start, x0)), sw = Math.max(0, x(Math.min(s.end, x1)) - sx);
+        const sy = y(String(s.mr));
+        svg.append("rect").attr("x", sx).attr("y", sy + barOff).attr("height", barH)
+          .attr("width", sw).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2);
+        svg.append("rect").attr("x", sx).attr("y", sy).attr("height", bw).attr("width", sw)
+          .attr("fill", "transparent").style("cursor", "default")
+          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
+          .on("mouseout", hideTip);
+      });
+      // Merged markers — full row height line + circle
       visible.filter(s => s.kind === "merged").forEach(s => {
-        const mx = x(Math.max(s.start, x0)), bw = y.bandwidth(), yt = y(String(s.mr));
-        g.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
+        const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr));
+        svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
           .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
-        g.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.45))
-          .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1);
+        svg.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.5))
+          .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1)
+          .style("cursor", "default")
+          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
+          .on("mouseout", hideTip);
       });
-      // Force-merge markers (red diamond)
+      // Force-merge markers — full row height diamond (no spanning dashed lines)
       visible.filter(s => s.kind === "force_merge").forEach(s => {
-        const mx = x(Math.max(s.start, x0)), bw = y.bandwidth(), yt = y(String(s.mr)), cy = yt + bw / 2;
-        const r = Math.max(4, bw * 0.55);
-        g.append("polygon")
+        const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr)), cy = yt + bw / 2;
+        const r = Math.max(5, bw * 0.6);
+        svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
+          .attr("stroke", C0.force_merge).attr("stroke-width", 2).attr("opacity", 0.9);
+        svg.append("polygon")
           .attr("points", `${mx},${cy - r} ${mx + r},${cy} ${mx},${cy + r} ${mx - r},${cy}`)
-          .attr("fill", C0.force_merge).attr("stroke", "#0d1117").attr("stroke-width", 1);
+          .attr("fill", C0.force_merge).attr("stroke", "#0d1117").attr("stroke-width", 1)
+          .style("cursor", "default")
+          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
+          .on("mouseout", hideTip);
       });
+      // Crosshair on hover
+      const hLine = svg.append("line").attr("y1", pad.t).attr("y2", H - pad.b)
+        .attr("stroke", "rgba(255,255,255,0.15)").attr("stroke-width", 1).style("display", "none");
+      svg.on("mousemove", function(event) {
+        const [mx] = d3.pointer(event);
+        hLine.attr("x1", mx).attr("x2", mx).style("display", null);
+      }).on("mouseleave", () => hLine.style("display", "none"))
+      .on("click", () => { tooltipsEnabled = !tooltipsEnabled; if (chartInstL) { chartInstL.options.plugins.tooltip.enabled = tooltipsEnabled; chartInstL.update("none"); } if (chartInstR) { chartInstR.options.plugins.tooltip.enabled = tooltipsEnabled; chartInstR.update("none"); } });
     }
 
     // --- Playback ---
@@ -883,18 +1021,37 @@
     document.getElementById("btnReset").addEventListener("click", resetP);
     document.getElementById("scrub").addEventListener("input", e => { stop(); playhead = +e.target.value; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick(); onPlayheadChange(); });
     document.getElementById("selSpeed").addEventListener("change", () => { if (!playTimer) return; const s = +document.getElementById("selSpeed").value || 1; clearInterval(playTimer); playTimer = setInterval(tick, BASE_MS / s); });
-    function refreshBothSwim() {
-      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      if (pL) dSwim(pL, "swimAreaL");
-      if (chartViewMode === "compare" && pR) dSwim(pR, "swimAreaR");
-    }
+    function refreshBothSwim() { syncWindow(); }
     document.getElementById("rmin").addEventListener("change", refreshBothSwim);
     document.getElementById("rmax").addEventListener("change", refreshBothSwim);
     document.getElementById("fitBtn").addEventListener("click", () => {
       const mx = globalMaxTick(); document.getElementById("rmin").value = 0; document.getElementById("rmax").value = mx; xRange = [0, mx];
       const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      if (pL) { d3brush(pL, "brushAreaL", "L"); dSwim(pL, "swimAreaL"); }
-      if (chartViewMode === "compare" && pR) { d3brush(pR, "brushAreaR", "R"); dSwim(pR, "swimAreaR"); }
+      const yMax = getSharedYMax();
+      if (pL) { d3brush(pL, "brushAreaL", "L"); dSwim(pL, "swimAreaL"); doChart(pL, "chartCanvasL", "L", yMax); }
+      if (chartViewMode === "compare" && pR) { d3brush(pR, "brushAreaR", "R"); dSwim(pR, "swimAreaR"); doChart(pR, "chartCanvasR", "R", yMax); }
+    });
+
+    document.addEventListener("keydown", e => {
+      const active = document.querySelector(".tab-panel.active");
+      if (!active || active.id !== "panelCharts") return;
+      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+      const lo = +document.getElementById("rmin").value || 0;
+      const hi = +document.getElementById("rmax").value || globalMaxTick();
+      const span = hi - lo, step = Math.max(1, Math.round(span * 0.1));
+      const mx = globalMaxTick();
+      let newLo = lo, newHi = hi, handled = false;
+      if (e.key === "ArrowRight" && !e.shiftKey) { newLo = Math.min(mx - step, lo + step); newHi = newLo + span; handled = true; }
+      else if (e.key === "ArrowLeft" && !e.shiftKey) { newLo = Math.max(0, lo - step); newHi = newLo + span; handled = true; }
+      else if (e.key === "ArrowUp" && e.shiftKey) { const grow = Math.max(1, Math.round(span * 0.2)); newLo = Math.max(0, lo - grow); newHi = Math.min(mx, hi + grow); handled = true; }
+      else if (e.key === "ArrowDown" && e.shiftKey) { const shrink = Math.max(1, Math.round(span * 0.15)); if (span > 10) { newLo = lo + shrink; newHi = hi - shrink; if (newHi <= newLo) { newHi = newLo + 10; } } handled = true; }
+      if (!handled) return;
+      e.preventDefault();
+      document.getElementById("rmin").value = Math.floor(newLo); document.getElementById("rmax").value = Math.ceil(newHi);
+      xRange = [newLo, newHi];
+      syncWindow();
+      const pL = filesData[chartIdxL]?.packed;
+      if (pL) d3brush(pL, "brushAreaL", "L");
     });
 
     // =========================================================================
@@ -923,42 +1080,29 @@
     ]);
     const MC_SKIP_METRICS = new Set(["total_time_ticks"]);
 
-    const mcDrop = document.getElementById("mcDropZone");
-    const mcInput = document.getElementById("mcFileInput");
-    mcDrop.addEventListener("click", () => mcInput.click());
-    mcDrop.addEventListener("dragover", e => e.preventDefault());
-    mcDrop.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files[0]) loadMcCSV(e.dataTransfer.files[0]); });
-    mcInput.addEventListener("change", () => { if (mcInput.files[0]) loadMcCSV(mcInput.files[0]); });
+    function loadMcCSVText(text) {
+      const lines = text.trim().split("\n");
+      const headers = lines[0].split(",").map(h => h.trim());
+      const metricCols = headers.slice(2);
+      const policies = new Set();
+      const trials = {};
 
-    function loadMcCSV(file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const lines = reader.result.trim().split("\n");
-        const headers = lines[0].split(",").map(h => h.trim());
-        const metricCols = headers.slice(2);
-        const policies = new Set();
-        const trials = {};
+      for (let i = 1; i < lines.length; i++) {
+        const cols = lines[i].split(",").map(c => c.trim());
+        const policy = cols[1];
+        policies.add(policy);
+        if (!trials[policy]) trials[policy] = {};
+        metricCols.forEach((m, idx) => {
+          if (!trials[policy][m]) trials[policy][m] = [];
+          const v = parseFloat(cols[idx + 2]);
+          if (!isNaN(v)) trials[policy][m].push(v);
+        });
+      }
 
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",").map(c => c.trim());
-          const policy = cols[1];
-          policies.add(policy);
-          if (!trials[policy]) trials[policy] = {};
-          metricCols.forEach((m, idx) => {
-            if (!trials[policy][m]) trials[policy][m] = [];
-            const v = parseFloat(cols[idx + 2]);
-            if (!isNaN(v)) trials[policy][m].push(v);
-          });
-        }
-
-        mcData = { policies: [...policies], metrics: metricCols, trials };
-        mcVisiblePolicies = new Set(mcData.policies);
-        initMcControls();
-        document.getElementById("mcContent").style.display = "block";
-        mcDrop.style.display = "none";
-        renderMonteCarlo();
-      };
-      reader.readAsText(file);
+      mcData = { policies: [...policies], metrics: metricCols, trials };
+      mcVisiblePolicies = new Set(mcData.policies);
+      initMcControls();
+      document.getElementById("mcContent").style.display = "block";
     }
 
     function initMcControls() {
