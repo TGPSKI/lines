@@ -92,7 +92,9 @@ def pipeline_shape(pipeline: Pipeline) -> dict[str, Any]:
 
 
 def pipeline_list_shape(pipelines: list[Pipeline]) -> list[dict[str, Any]]:
-    return [pipeline_shape(p) for p in pipelines]
+    # Match production wrapper behavior: newest pipeline first.
+    ordered = sorted(pipelines, key=lambda p: p.id, reverse=True)
+    return [pipeline_shape(p) for p in ordered]
 
 
 def _pipeline_summary(pipeline: Pipeline | None) -> dict[str, Any] | None:

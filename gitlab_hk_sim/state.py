@@ -109,6 +109,13 @@ class MergeRequest:
     force_merge_tick: int = 0
     push_tick: int = 0
     ci_duration: int | None = None
+    # Deterministic merge failure modeling:
+    #   0  -> never force-fail
+    #   N>0 -> fail next N merge attempts, then allow
+    #   -1 -> always fail every merge attempt
+    merge_failures_remaining: int = 0
+    merge_failure_status_code: int = 405
+    merge_failure_detail: str = "405 Method Not Allowed"
 
     @property
     def is_open(self) -> bool:
@@ -142,6 +149,14 @@ class MergeRequest:
                 for p in self.pipelines
             )
         )
+
+    def consume_forced_merge_failure(self) -> tuple[int, str] | None:
+        """Consume one deterministic merge failure if configured for this MR."""
+        if self.merge_failures_remaining == 0:
+            return None
+        if self.merge_failures_remaining > 0:
+            self.merge_failures_remaining -= 1
+        return (self.merge_failure_status_code, self.merge_failure_detail)
 
 
 @dataclass
@@ -222,6 +237,22 @@ class PipelineDurationConfig:
 
 
 @dataclass
+class OperationFailureConfig:
+    """Configuration for simulated GitLab operation failures."""
+
+    merge_failure_rate: float = 0.0
+    rebase_failure_rate: float = 0.0
+
+    def should_fail_merge(self) -> bool:
+        return self.merge_failure_rate > 0 and random.random() < self.merge_failure_rate
+
+    def should_fail_rebase(self) -> bool:
+        return (
+            self.rebase_failure_rate > 0 and random.random() < self.rebase_failure_rate
+        )
+
+
+@dataclass
 class SimState:
     """Complete simulator state, loaded from scenario YAML."""
 
@@ -231,6 +262,11 @@ class SimState:
     pipeline_duration_config: PipelineDurationConfig = field(
         default_factory=PipelineDurationConfig
     )
+    operation_failure_config: OperationFailureConfig = field(
+        default_factory=OperationFailureConfig
+    )
+    scenario_metadata: dict[str, Any] = field(default_factory=dict)
+    tick_seconds: int = 60
     scheduled_target_advances: dict[int, str] = field(default_factory=dict)
     tick_count: int = 0
     _next_pipeline_id: int = field(default=9000)
@@ -278,11 +314,19 @@ class SimState:
         return {
             "tick_count": self.tick_count,
             "target_head": self.project.target_head,
+            "tick_seconds": self.tick_seconds,
             "total_mrs": len(self.merge_requests),
             "open_mrs": len(self.open_mrs()),
             "active_pipelines": len(self.active_pipelines()),
             "same_root_success_pool": len(self.same_root_success_pool()),
             "stale_successes": len(self.stale_successes()),
+            "operation_failure_config": {
+                "merge_failure_rate": self.operation_failure_config.merge_failure_rate,
+                "rebase_failure_rate": (
+                    self.operation_failure_config.rebase_failure_rate
+                ),
+            },
+            "scenario_metadata": self.scenario_metadata,
             "merge_requests": [
                 {
                     "iid": mr.iid,
@@ -291,6 +335,9 @@ class SimState:
                     "sha": mr.sha,
                     "rebased_target_sha": mr.rebased_target_sha,
                     "rebase_count": mr.rebase_count,
+                    "merge_failures_remaining": mr.merge_failures_remaining,
+                    "merge_failure_status_code": mr.merge_failure_status_code,
+                    "merge_failure_detail": mr.merge_failure_detail,
                     "pipelines": [
                         {
                             "id": p.id,

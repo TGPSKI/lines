@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import IO, Any
 
-from .state import SimState
+from .state import MERGE_LABELS_PRIORITY, SimState
 
 
 @dataclass
@@ -59,12 +59,30 @@ class MetricsCollector:
             for mr in state.merge_requests
             if mr.push_tick > 0
         ]
+        mr_catalog = {
+            str(mr.iid): {
+                "labels": list(mr.labels or []),
+                "priority_label": next(
+                    (lbl for lbl in MERGE_LABELS_PRIORITY if lbl in (mr.labels or [])),
+                    "",
+                ),
+                "service_labels": sorted(
+                    lbl for lbl in (mr.labels or []) if lbl.startswith("tenant-")
+                ),
+            }
+            for mr in state.merge_requests
+        }
         self.record(
             {
                 "event": "scenario_meta",
                 "tick": 0,
                 "total_mrs": len(state.merge_requests),
                 "failure_rate": state.pipeline_duration_config.failure_rate,
+                "tick_seconds": state.tick_seconds,
+                "operation_failure_rate": {
+                    "merge": state.operation_failure_config.merge_failure_rate,
+                    "rebase": state.operation_failure_config.rebase_failure_rate,
+                },
                 "pipeline_duration": {
                     "min": state.pipeline_duration_config.min_ticks,
                     "max": state.pipeline_duration_config.max_ticks,
@@ -76,6 +94,8 @@ class MetricsCollector:
                 "scheduled_target_advances": {
                     str(k): v for k, v in state.scheduled_target_advances.items()
                 },
+                "scenario_metadata": state.scenario_metadata,
+                "mr_catalog": mr_catalog,
             }
         )
 
@@ -106,6 +126,12 @@ class MetricsCollector:
         merge_events = [e for e in self.events if e.get("event") == "merge"]
         tick_events = [e for e in self.events if e.get("event") == "tick"]
         cancel_events = [e for e in self.events if e.get("event") == "pipeline_cancel"]
+        rebase_error_events = [
+            e for e in self.events if e.get("event") == "rebase_error"
+        ]
+        merge_error_events = [
+            e for e in self.events if e.get("event") == "merge_error"
+        ]
 
         peak_active = 0
         same_root_pool_values: list[int] = []
@@ -132,6 +158,8 @@ class MetricsCollector:
             "rebase_calls": len(rebase_events),
             "merge_calls": len(merge_events),
             "pipeline_cancels": len(cancel_events),
+            "rebase_errors": len(rebase_error_events),
+            "merge_errors": len(merge_error_events),
             "pipelines_created": len(rebase_events),
             "peak_active_pipelines": peak_active,
             "same_root_success_pool_values": same_root_pool_values,

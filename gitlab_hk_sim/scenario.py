@@ -11,6 +11,7 @@ from .state import (
     Commit,
     MergeRequest,
     MRState,
+    OperationFailureConfig,
     Pipeline,
     PipelineDurationConfig,
     PipelineStatus,
@@ -34,6 +35,9 @@ def _build_state(raw: dict[str, Any]) -> SimState:
     pipeline_duration_config = _build_pipeline_duration_config(
         raw.get("pipeline_durations", {})
     )
+    operation_failure_config = _build_operation_failure_config(
+        raw.get("failure_path_realism")
+    )
 
     max_pipeline_id = 9000
     for mr in mrs:
@@ -44,12 +48,16 @@ def _build_state(raw: dict[str, Any]) -> SimState:
     scheduled_target_advances = {
         int(k): str(v) for k, v in raw.get("scheduled_target_advances", {}).items()
     }
+    tick_seconds = max(1, int(raw.get("tick_seconds", 60)))
 
     return SimState(
         project=project,
         merge_requests=mrs,
         sha_pools=sha_pools,
         pipeline_duration_config=pipeline_duration_config,
+        operation_failure_config=operation_failure_config,
+        scenario_metadata=raw.get("metadata", {}),
+        tick_seconds=tick_seconds,
         scheduled_target_advances=scheduled_target_advances,
         _next_pipeline_id=max_pipeline_id,
     )
@@ -88,6 +96,32 @@ def _build_mr(raw: dict[str, Any], project_id: int) -> MergeRequest:
     else:
         effective_state = MRState(explicit_state)
 
+    merge_failure_raw = raw.get("merge_failure", {})
+    remaining_raw = (
+        merge_failure_raw.get("remaining")
+        if isinstance(merge_failure_raw, dict)
+        else raw.get("merge_failures_remaining", 0)
+    )
+    if remaining_raw is None:
+        remaining_raw = raw.get("merge_failures_remaining", 0)
+    merge_failures_remaining = _parse_failures_remaining(remaining_raw)
+    merge_failure_status_code = int(
+        (
+            merge_failure_raw.get("status_code")
+            if isinstance(merge_failure_raw, dict)
+            else raw.get("merge_failure_status_code", 405)
+        )
+        or raw.get("merge_failure_status_code", 405)
+    )
+    merge_failure_detail = str(
+        (
+            merge_failure_raw.get("detail")
+            if isinstance(merge_failure_raw, dict)
+            else raw.get("merge_failure_detail", "405 Method Not Allowed")
+        )
+        or raw.get("merge_failure_detail", "405 Method Not Allowed")
+    )
+
     return MergeRequest(
         id=raw["id"],
         iid=raw["iid"],
@@ -110,6 +144,9 @@ def _build_mr(raw: dict[str, Any], project_id: int) -> MergeRequest:
         force_merge_tick=int(raw.get("force_merge_tick", 0)),
         push_tick=int(raw.get("push_tick", 0)),
         ci_duration=int(raw["ci_duration"]) if "ci_duration" in raw else None,
+        merge_failures_remaining=merge_failures_remaining,
+        merge_failure_status_code=merge_failure_status_code,
+        merge_failure_detail=merge_failure_detail,
     )
 
 
@@ -151,3 +188,46 @@ def _build_pipeline_duration_config(raw: dict[str, Any]) -> PipelineDurationConf
         weights=weights,
         failure_rate=float(raw.get("failure_rate", 0.0)),
     )
+
+
+def _build_operation_failure_config(raw: Any) -> OperationFailureConfig:
+    """Build per-scenario merge/rebase operation failure configuration."""
+    if raw is None:
+        return OperationFailureConfig()
+
+    if isinstance(raw, (int, float)):
+        rate = _normalized_rate(float(raw))
+        return OperationFailureConfig(
+            merge_failure_rate=rate,
+            rebase_failure_rate=rate,
+        )
+
+    if not isinstance(raw, dict):
+        return OperationFailureConfig()
+
+    default_rate = _normalized_rate(float(raw.get("failure_rate", 0.0)))
+    merge_failure_rate = _normalized_rate(
+        float(raw.get("merge_failure_rate", default_rate))
+    )
+    rebase_failure_rate = _normalized_rate(
+        float(raw.get("rebase_failure_rate", default_rate))
+    )
+    return OperationFailureConfig(
+        merge_failure_rate=merge_failure_rate,
+        rebase_failure_rate=rebase_failure_rate,
+    )
+
+
+def _normalized_rate(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def _parse_failures_remaining(raw: Any) -> int:
+    if raw is None:
+        return 0
+    if isinstance(raw, str) and raw.strip().lower() == "always":
+        return -1
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 0

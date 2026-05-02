@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 from typing import Any
 
-from fastapi import APIRouter, Query, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 
 from . import gitlab_shapes as shapes
 from .metrics import MetricsCollector
@@ -308,6 +308,17 @@ async def rebase_merge_request(request: Request, project_id: str, mr_iid: int) -
     if mr is None:
         return {"error": "Not found"}
 
+    if sim_state.operation_failure_config.should_fail_rebase():
+        metrics.record(
+            {
+                "event": "rebase_error",
+                "tick": sim_state.tick_count,
+                "mr_iid": mr.iid,
+                "reason": "simulated_rebase_failure",
+            }
+        )
+        raise HTTPException(status_code=409, detail="simulated rebase failure")
+
     event = rebase_mr(sim_state, mr)
     metrics.record(event)
 
@@ -325,6 +336,32 @@ async def merge_merge_request(request: Request, project_id: str, mr_iid: int) ->
     mr = sim_state.get_mr(mr_iid)
     if mr is None:
         return {"error": "Not found"}
+
+    forced_failure = mr.consume_forced_merge_failure()
+    if forced_failure is not None:
+        status_code, detail = forced_failure
+        metrics.record(
+            {
+                "event": "merge_error",
+                "tick": sim_state.tick_count,
+                "mr_iid": mr.iid,
+                "reason": "forced_merge_failure",
+                "status_code": status_code,
+                "detail": detail,
+            }
+        )
+        raise HTTPException(status_code=status_code, detail=detail)
+
+    if sim_state.operation_failure_config.should_fail_merge():
+        metrics.record(
+            {
+                "event": "merge_error",
+                "tick": sim_state.tick_count,
+                "mr_iid": mr.iid,
+                "reason": "simulated_merge_failure",
+            }
+        )
+        raise HTTPException(status_code=409, detail="simulated merge failure")
 
     event = merge_mr(sim_state, mr)
     metrics.record(event)

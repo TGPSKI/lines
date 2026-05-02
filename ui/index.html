@@ -6,6 +6,7 @@
   <title>Merge Queue Simulator</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/d3@7.9.0/dist/d3.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
   <style>
     :root { --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --green: #2ea043; --purple: #a371f7; --yellow: #d29922; --red: #f85149; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -20,6 +21,10 @@
     .nav-tab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
     .nav-tab.active { color: var(--text); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg); position: relative; top: 1px; }
     .nav-tab.disabled { opacity: 0.35; pointer-events: none; cursor: default; }
+    .top-actions { margin-left: auto; display: flex; gap: 0.4rem; align-items: center; }
+    .top-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.32rem 0.62rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem; font-weight: 500; }
+    .top-btn:hover:not(:disabled) { background: #30363d; }
+    .top-btn:disabled { opacity: 0.45; cursor: default; }
 
     /* Playback bar */
     .playback-bar { display: none; align-items: center; gap: 0.6rem; padding: 0.45rem 1rem; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
@@ -35,10 +40,126 @@
     .tab-panel { display: none; flex: 1; overflow: auto; padding: 1rem 1.25rem; }
     .tab-panel.active { display: flex; flex-direction: column; }
     #panelKanban.active { overflow: hidden; }
+    #panelSwimlane.active { overflow: hidden; }
+
+    /* Shared tab control rows */
+    .tab-control-row {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+      margin: 0 0 0.55rem;
+      padding: 0.46rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .tab-control-group { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; min-height: 2rem; }
+    .tab-control-group.tab-control-group-grow { flex: 1 1 auto; min-width: 0; }
+    .tab-control-group + .tab-control-group { border-left: 1px solid rgba(139,148,158,0.28); padding-left: 0.7rem; }
+    .tab-control-title {
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 0.25rem;
+      white-space: nowrap;
+    }
+    .tab-toggle-chip {
+      border: 1px solid #3d444d;
+      border-radius: 999px;
+      background: #131821;
+      color: #c9d1d9;
+      padding: 0.16rem 0.58rem;
+      font-size: 0.74rem;
+      line-height: 1.2;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab-toggle-chip.active {
+      border-color: #58a6ff;
+      color: #d7ecff;
+      background: rgba(56,139,253,0.15);
+    }
+    .tab-control-row .chart-view-toggle,
+    .tab-control-row .tab-inline-controls,
+    .tab-control-row .chart-pickers,
+    .tab-control-row .chart-policy-tabs,
+    .tab-control-row .kanban-policy-tabs {
+      margin-bottom: 0;
+    }
+    .tab-control-row .chart-pickers { gap: 0.7rem; }
+    .tab-control-row .chart-policy-tabs { flex-wrap: wrap; }
+    #statsControlRow #scenarioInfoCard { width: 100%; }
+    #statsControlRow .scenario-info {
+      margin-bottom: 0;
+      border: none;
+      background: transparent;
+      border-radius: 0;
+      padding: 0;
+    }
+    #panelKanban .playback-bar {
+      padding: 0;
+      background: transparent;
+      border: none;
+      gap: 0.45rem;
+      display: none;
+    }
+    #panelKanban .playback-bar.visible { display: flex; }
+    #panelKanban .pb-scrub { width: min(360px, 26vw); }
 
     /* Load tab */
-    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 2.5rem 1.5rem; text-align: center; color: var(--muted); background: var(--panel); cursor: pointer; max-width: 500px; margin: 2rem auto; }
+    #panelLoad { gap: 0.6rem; }
+    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.35rem 1rem; text-align: center; color: var(--muted); background: var(--panel); cursor: pointer; max-width: 760px; margin: 0.25rem auto 0.15rem; }
     .drop-zone:hover { border-color: var(--accent); }
+    .load-actions { display: flex; justify-content: center; gap: 0.5rem; margin: 0 auto 0.8rem; max-width: 500px; flex-wrap: wrap; }
+    .load-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.3rem 0.65rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem; }
+    .load-btn:hover { background: #30363d; }
+    .run-browser { width: calc(100vw - 2.2rem); max-width: none; margin: 0 auto; border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 0.95rem 1rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .run-browser h3 { font-size: 0.9rem; margin-bottom: 0.62rem; color: var(--text); }
+    .run-browser .row { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)) auto; gap: 0.6rem; align-items: end; margin-bottom: 0.55rem; }
+    .run-browser label { font-size: 0.76rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.2rem; }
+    .run-browser select { background: #0d1117; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.28rem 0.4rem; font-size: 0.75rem; min-width: 150px; }
+    .run-browser .hint { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.55rem; }
+    .run-browser-body { display: grid; grid-template-columns: minmax(0, 2.55fr) minmax(250px, 0.72fr); gap: 0.7rem; min-height: 0; flex: 1; }
+    .run-list-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.45rem; min-height: 0; overflow: auto; }
+    .run-list-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; table-layout: fixed; }
+    .run-list-table thead th { position: sticky; top: 0; z-index: 2; background: #161b22; color: #c9d1d9; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.68rem; text-align: left; padding: 0.36rem 0.42rem; border-bottom: 1px solid var(--border); }
+    .run-list-table thead th.run-sortable { cursor: pointer; user-select: none; }
+    .run-list-table thead th.run-sortable:hover { color: #e6edf3; background: #1a2029; }
+    .run-list-table thead th.run-sortable .sort-ind { margin-left: 0.25rem; color: #8b949e; font-size: 0.65rem; }
+    .run-list-table thead th.run-sortable.sorted .sort-ind { color: #9ecbff; }
+    .run-list-table tbody td { padding: 0.34rem 0.42rem; border-bottom: 1px solid rgba(48,54,61,0.6); vertical-align: top; color: var(--text); }
+    .run-list-table tbody tr.run-row { cursor: pointer; }
+    .run-list-table tbody tr.run-row:hover td { background: rgba(255,255,255,0.03); }
+    .run-list-table tbody tr.run-row.selected td { background: rgba(56,139,253,0.14); box-shadow: inset 0 0 0 1px rgba(56,139,253,0.42); }
+    .run-list-table tbody tr.run-row.active td { outline: 1px solid rgba(88,166,255,0.45); outline-offset: -1px; }
+    .run-list-table th.col-category, .run-list-table td.col-category { width: 12%; min-width: 84px; font-weight: 600; color: #9ecbff; white-space: nowrap; }
+    .run-list-table th.col-timestamp, .run-list-table td.col-timestamp { width: 19%; min-width: 150px; color: #c9d1d9; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .run-list-table th.col-name, .run-list-table td.col-name { width: 35%; min-width: 220px; }
+    .run-list-table .run-name { font-size: 0.82rem; font-weight: 600; color: #e6edf3; line-height: 1.16; }
+    .run-list-table .run-subpath { margin-top: 0.15rem; font-size: 0.72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .run-list-table th.col-bubbles, .run-list-table td.col-bubbles { width: 34%; min-width: 220px; }
+    .run-bubbles { display: flex; flex-wrap: wrap; gap: 0.22rem; }
+    .run-bubble { border: 1px solid #3d444d; border-radius: 999px; background: #131821; color: #c9d1d9; padding: 0.1rem 0.42rem; font-size: 0.68rem; line-height: 1.12; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .run-bubble.strong { border-color: rgba(88,166,255,0.65); color: #d4e8ff; background: rgba(56,139,253,0.13); }
+    .run-bubble.warn { border-color: rgba(210,153,34,0.7); color: #ffd78e; background: rgba(210,153,34,0.12); }
+    .run-bubble.cal-primary { border-color: rgba(163,113,247,0.72); color: #eadbff; background: rgba(163,113,247,0.14); }
+    .run-bubble.cal-secondary { border-color: rgba(107,175,255,0.7); color: #d7ecff; background: rgba(88,166,255,0.14); }
+    .run-bubble.cal-warn { border-color: rgba(210,153,34,0.72); color: #ffdca0; background: rgba(210,153,34,0.14); }
+    .run-bubble.cmp-primary { border-color: rgba(88,166,255,0.72); color: #d7ecff; background: rgba(56,139,253,0.15); }
+    .run-bubble.cmp-secondary { border-color: rgba(56,212,201,0.66); color: #c9fffb; background: rgba(56,212,201,0.12); }
+    .run-bubble.dis-primary { border-color: rgba(255,166,87,0.76); color: #ffe0bb; background: rgba(255,166,87,0.14); }
+    .run-bubble.dis-secondary { border-color: rgba(248,81,73,0.72); color: #ffd2cf; background: rgba(248,81,73,0.14); }
+    .run-bubble.mc-primary { border-color: rgba(46,160,67,0.74); color: #cbffd8; background: rgba(46,160,67,0.15); }
+    .run-bubble.mc-secondary { border-color: rgba(127,188,255,0.68); color: #d6ebff; background: rgba(127,188,255,0.14); }
+    .run-bubble.meta-primary { border-color: rgba(139,148,158,0.74); color: #d7dde5; background: rgba(139,148,158,0.14); }
+    .run-list-empty { color: var(--muted); font-size: 0.82rem; padding: 0.6rem; border: 1px dashed var(--border); border-radius: 6px; }
+    .run-detail-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.48rem; min-height: 0; display: flex; flex-direction: column; }
+    .run-detail-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.28rem; }
+    .run-detail-pane pre { margin: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: #0b1018; padding: 0.38rem; font-size: 0.69rem; color: #c9d1d9; flex: 1; min-height: 0; }
+    .run-output-files { margin-top: 0.45rem; font-size: 0.74rem; color: var(--muted); overflow: auto; max-height: 110px; }
+    .run-output-files code { color: #9ecbff; }
     .file-list { margin-top: 1rem; max-width: 500px; margin-left: auto; margin-right: auto; }
     .file-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.3rem; background: var(--panel); font-size: 0.82rem; }
     .file-item .rm { color: var(--muted); cursor: pointer; border: none; background: none; font-size: 1rem; }
@@ -51,16 +172,51 @@
     .hero-card .value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
     .hero-card .sub { font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; }
     .hero-card .winner { font-size: 0.68rem; color: var(--accent); margin-top: 0.15rem; }
-    .cmp-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 8px; }
-    .cmp { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; }
-    .cmp th, .cmp td { border: 1px solid var(--border); padding: 0.45rem 0.7rem; text-align: right; font-variant-numeric: tabular-nums; }
-    .cmp th:first-child, .cmp td:first-child { text-align: left; white-space: nowrap; color: #c9d1d9; font-weight: 500; }
+    .cmp-wrap {
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      /* Keep the stats table scrollable when zoom increases row heights. */
+      max-height: min(72vh, calc(100vh - 260px));
+      min-height: 220px;
+    }
+    .cmp { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; table-layout: fixed; }
+    .cmp th, .cmp td { border: 1px solid var(--border); padding: 0.38rem 0.55rem; text-align: right; font-variant-numeric: tabular-nums; }
+    .cmp th:first-child, .cmp td:first-child { text-align: left; white-space: normal; color: #c9d1d9; font-weight: 500; width: 34%; }
     .cmp th { background: var(--panel); color: var(--text); font-weight: 600; }
     .cmp tr.section td { background: #141920; color: var(--muted); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em; }
     .cmp td.best { background: rgba(46,160,67,0.08); color: #3fb950; }
     .cmp td.metric-name { cursor: help; position: relative; }
-    .cmp td.metric-name[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: 0; top: 100%; z-index: 50; background: #1c2128; border: 1px solid var(--border); color: #c9d1d9; padding: 0.4rem 0.6rem; border-radius: 6px; font-size: 0.72rem; font-weight: 400; white-space: normal; width: max-content; max-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); pointer-events: none; }
+    .cmp td.metric-name[data-tip]:hover::after { content: attr(data-tip); position: absolute; left: 0; bottom: calc(100% + 4px); z-index: 50; background: #1c2128; border: 1px solid var(--border); color: #c9d1d9; padding: 0.4rem 0.6rem; border-radius: 6px; font-size: 0.72rem; font-weight: 400; white-space: normal; width: max-content; max-width: 280px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); pointer-events: none; }
     .cmp td.metric-name[data-tip=""]:hover::after { display: none; }
+    .stats-extended {
+      margin: 0 0 0.85rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 0.55rem;
+    }
+    .stats-extended-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.58rem 0.65rem;
+    }
+    .stats-extended-card h3 {
+      font-size: 0.75rem;
+      color: var(--text);
+      margin-bottom: 0.42rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .stats-extended-kv {
+      display: grid;
+      grid-template-columns: minmax(130px, 1fr) auto;
+      gap: 0.18rem 0.4rem;
+      font-size: 0.74rem;
+    }
+    .stats-extended-kv .k { color: var(--muted); }
+    .stats-extended-kv .v { color: var(--text); font-variant-numeric: tabular-nums; text-align: right; }
+    .stats-extended-note { color: var(--muted); font-size: 0.72rem; margin-top: 0.3rem; }
 
     /* Series selector */
     .series-selector { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.7rem; align-items: center; }
@@ -77,20 +233,31 @@
     .metric-picker button.active { border-color: var(--accent); color: var(--accent); background: rgba(56,139,253,0.08); }
 
     /* Kanban tab */
-    .kanban-snapshot { display: flex; align-items: center; gap: 1.2rem; padding: 0.5rem 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; flex-shrink: 0; font-size: 0.82rem; flex-wrap: wrap; }
+    .kanban-snapshot { display: flex; align-items: center; gap: 1.2rem; padding: 0.5rem 0.75rem; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin-bottom: 0.5rem; flex-shrink: 0; font-size: 0.82rem; flex-wrap: wrap; order: 2; }
     .kanban-snapshot b { color: var(--text); }
     .kanban-snapshot .story-tip { color: var(--muted); font-size: 0.75rem; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .traces-container { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; overflow: hidden; }
-    .trace { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; transition: flex 0.15s; }
-    .trace.collapsed { flex: 0 0 auto; }
-    .trace.expanded { flex: 1 1 0; min-height: 0; }
-    .trace-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.65rem; cursor: pointer; user-select: none; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
-    .trace-header .caret { font-size: 0.7rem; transition: transform 0.15s; color: var(--muted); }
-    .trace-header.open .caret { transform: rotate(90deg); }
+    .traces-container { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; overflow: hidden; order: 3; }
+    .kanban-policy-tabs { display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.5rem; order: 1; }
+    .kanban-policy-tabs .cp-tab { font-size: 0.75rem; }
+    .kanban-empty { color: var(--muted); font-size: 0.8rem; padding: 0.7rem; border: 1px dashed var(--border); border-radius: 8px; }
+    .kanban-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 0.55rem 0.85rem; margin: 0.6rem 0 0; padding: 0.6rem 0.8rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); font-size: 0.73rem; color: var(--muted); order: 4; }
+    .kanban-legend .kleg-group { display: inline-flex; align-items: center; gap: 0.38rem; flex-wrap: wrap; }
+    .kanban-legend .kleg-group.sep { margin-left: 0.9rem; padding-left: 0.9rem; border-left: 1px solid var(--border); }
+    .kanban-legend .kleg-title { color: var(--text); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.67rem; }
+    .kanban-legend .kleg-item { display: inline-flex; align-items: center; gap: 0.28rem; }
+    .kanban-legend .kleg-chip { width: 12px; height: 12px; border-radius: 3px; border: 1px solid #3d444d; background: #21262d; }
+    .kanban-legend .kleg-chip.queue-unvisited { background: #1a2330; border-color: #334357; }
+    .kanban-legend .kleg-chip.queue-visited { background: #17312a; border-color: #2f7a65; }
+    .kanban-legend .kleg-chip.queue-visited-new { background: #2a2413; border-color: #d29922; }
+    .kanban-legend .kleg-chip.just-rebased { background: #2d1f6f; border-color: var(--purple); box-shadow: 0 0 5px 1px rgba(163,113,247,0.45); }
+    .kanban-legend .kleg-chip.just-merged { background: #0d3320; border-color: var(--green); box-shadow: 0 0 5px 1px rgba(46,160,67,0.45); }
+    .kanban-legend .kleg-chip.force-merged { background: #3d1418; border-color: var(--red); box-shadow: 0 0 5px 1px rgba(248,81,73,0.45); }
+    .kanban-legend .kleg-chip.ci-failed { background: #2d1418; border-color: var(--red); }
+    .trace { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; transition: flex 0.15s; flex: 1 1 0; min-height: 0; }
+    .trace-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.65rem; cursor: default; user-select: none; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
     .trace-header .tname { font-size: 0.8rem; font-weight: 600; color: var(--accent); }
     .trace-header .tcounts { font-size: 0.72rem; color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
-    .trace-body { flex: 1; overflow: hidden; display: none; }
-    .trace.expanded .trace-body { display: flex; flex-direction: column; }
+    .trace-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
     .trace-cols { display: flex; gap: 0; flex-shrink: 0; border-bottom: 1px solid var(--border); }
     .trace-cols .col-hd { flex: 1; text-align: center; font-size: 0.65rem; text-transform: uppercase; color: var(--muted); padding: 0.3rem 0.2rem; border-right: 1px solid var(--border); letter-spacing: 0.03em; }
     .trace-cols .col-hd:last-child { border-right: none; }
@@ -103,12 +270,74 @@
     .kcard.force-merged { background: #3d1418; border-color: var(--red); box-shadow: 0 0 7px 2px rgba(248,81,73,0.55); transform: scale(1.06); color: var(--red); }
     .kcard.ci-failed { background: #2d1418; border-color: var(--red); box-shadow: 0 0 5px 1px rgba(248,81,73,0.35); color: var(--red); }
     .kcard.muted { opacity: 0.5; }
-    .scenario-info { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.9rem; margin-bottom: 0.7rem; font-size: 0.78rem; color: var(--muted); display: flex; flex-wrap: wrap; gap: 0.4rem 1.2rem; }
-    .scenario-info .si-item { display: flex; gap: 0.3rem; align-items: center; }
+    .kcard.queue-unvisited { background: #1a2330; border-color: #334357; color: #9fb3c8; }
+    .kcard.queue-visited { background: #17312a; border-color: #2f7a65; color: #8dd3bf; }
+    .kcard.queue-visited-new { background: #2a2413; border-color: #d29922; color: #f2cc60; box-shadow: 0 0 6px 1px rgba(210,153,34,0.45); transform: scale(1.04); }
+    .scenario-info { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.58rem 0.82rem; margin-bottom: 0.7rem; font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 0.65rem 1rem; flex-wrap: wrap; }
+    .scenario-info .si-main { display: flex; flex-wrap: wrap; align-items: center; gap: 0.38rem 1.05rem; min-width: 0; flex: 1 1 560px; }
+    .scenario-info .si-item { display: flex; gap: 0.3rem; align-items: center; white-space: nowrap; }
     .scenario-info .si-label { color: var(--muted); }
     .scenario-info .si-val { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
     .scenario-info .si-val.danger { color: var(--red); }
     .scenario-info .si-title { color: var(--accent); font-weight: 600; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .scenario-info .si-controls { margin-left: auto; display: flex; align-items: center; justify-content: flex-end; gap: 0.65rem; flex: 1 1 430px; min-width: 280px; }
+    .scenario-info .si-policy-row { display: flex; align-items: center; gap: 0.42rem; min-width: 0; flex: 1 1 auto; justify-content: flex-end; }
+    .scenario-info .si-controls-label { color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+    .scenario-info .si-policy-chips { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; justify-content: flex-end; min-width: 0; }
+    .scenario-info .si-policy-chip {
+      border: 1px solid #3a424d;
+      background: #11161f;
+      color: #8b949e;
+      border-radius: 999px;
+      font-size: 0.72rem;
+      padding: 0.16rem 0.52rem;
+      cursor: pointer;
+      line-height: 1.1;
+      max-width: 160px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .scenario-info .si-policy-chip.active {
+      border-color: #58a6ff;
+      color: #cfe8ff;
+      background: rgba(56,139,253,0.16);
+    }
+    .scenario-info .si-mode-toggle { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+    .scenario-info .si-mode-label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .scenario-info .si-mode-label.active { color: var(--text); }
+    .scenario-info .si-mode-switch {
+      width: 44px;
+      height: 22px;
+      border-radius: 999px;
+      border: 1px solid #3d444d;
+      background: #1a1f29;
+      position: relative;
+      cursor: pointer;
+      padding: 0;
+    }
+    .scenario-info .si-mode-switch .si-mode-knob {
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #8b949e;
+      transition: transform 0.18s ease, background 0.18s ease;
+    }
+    .scenario-info .si-mode-switch.on { background: rgba(56,139,253,0.26); border-color: #58a6ff; }
+    .scenario-info .si-mode-switch.on .si-mode-knob { transform: translateX(21px); background: #58a6ff; }
+    @media (max-width: 1180px) {
+      .scenario-info .si-controls { flex-basis: 100%; }
+      .scenario-info .si-policy-row { justify-content: flex-start; }
+      .scenario-info .si-policy-chips { justify-content: flex-start; }
+    }
     .merge-group { display: inline-flex; flex-wrap: wrap; gap: 0.2rem; padding: 0.2rem 0.35rem; border: 1px solid #21262d; border-radius: 5px; background: #0d1117; margin-bottom: 0.2rem; }
     .merge-group.recent { border-color: var(--green); background: #0a1f15; }
     .mg-label { font-size: 0.58rem; color: var(--muted); width: 100%; }
@@ -120,6 +349,7 @@
     .chart-view-toggle { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
     .chart-view-toggle button { padding: 0.25rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.72rem; }
     .chart-view-toggle button.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
+    .tab-inline-controls { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.45rem; color: var(--muted); font-size: 0.84rem; }
     .chart-pickers { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
     .chart-picker { display: flex; align-items: center; gap: 0.3rem; }
     .cp-label { font-size: 0.72rem; color: var(--muted); font-weight: 600; }
@@ -130,10 +360,201 @@
     .chart-col-title { font-size: 0.78rem; margin-bottom: 0.3rem; color: var(--text); }
     .chart-wrap { height: 520px; }
     .brush-wrap { height: 50px; margin: 0.3rem 0; }
-    .swim-legend { display: flex; gap: 1rem; font-size: 0.72rem; color: var(--muted); margin-top: 0.5rem; flex-wrap: wrap; justify-content: center; }
+    .bars-legend {
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      flex-wrap: wrap;
+      margin: 0 0 0.5rem;
+      padding: 0.46rem 0.55rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+    .bars-legend .bars-legend-group { display: inline-flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; min-height: 2rem; }
+    .bars-legend .bars-legend-group + .bars-legend-group { border-left: 1px solid rgba(139,148,158,0.28); padding-left: 0.7rem; }
+    .bars-legend .bars-legend-title {
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-right: 0.25rem;
+      white-space: nowrap;
+    }
+    .bars-legend .bars-legend-subtitle {
+      color: var(--muted);
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      letter-spacing: 0.035em;
+      margin: 0 0.1rem 0 0.35rem;
+      white-space: nowrap;
+    }
+    .bars-legend .bars-legend-btn {
+      border: 1px solid var(--series-color, #3d444d);
+      border-radius: 999px;
+      background: #131821;
+      color: #c9d1d9;
+      padding: 0.16rem 0.52rem;
+      font-size: 0.73rem;
+      line-height: 1.25;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bars-legend .bars-legend-btn:not(.active) {
+      opacity: 0.72;
+      filter: saturate(0.82);
+    }
+    .bars-legend .bars-legend-btn.active {
+      border-color: var(--series-color, #58a6ff);
+      color: #eef6ff;
+      background: rgba(255,255,255,0.08);
+    }
+    .bars-legend .bars-legend-btn .bars-legend-swatch {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--series-color, #8b949e);
+      margin-right: 0.36rem;
+      vertical-align: -1px;
+      box-shadow: 0 0 0 1px rgba(240,246,252,0.18);
+    }
+    .bars-legend .bars-legend-btn .bars-legend-swatch.line {
+      width: 12px;
+      height: 0;
+      border-radius: 0;
+      border-top: 2px dashed var(--series-color, #8b949e);
+      background: transparent;
+      box-shadow: none;
+      margin-right: 0.33rem;
+      vertical-align: 2px;
+    }
+    .bars-legend .bars-trace-btn {
+      border: 1px solid #3d444d;
+      border-radius: 6px;
+      background: #131821;
+      color: #c9d1d9;
+      padding: 0.16rem 0.5rem;
+      font-size: 0.72rem;
+      line-height: 1.25;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bars-legend .bars-trace-btn.active {
+      border-color: #58a6ff;
+      color: #d7ecff;
+      background: rgba(56,139,253,0.15);
+    }
+    .bars-legend .bars-stat-power-btn,
+    .bars-legend .bars-stat-mode-btn,
+    .bars-legend .bars-stat-trace-btn {
+      border: 1px solid #3d444d;
+      border-radius: 999px;
+      background: #131821;
+      color: #c9d1d9;
+      padding: 0.14rem 0.5rem;
+      font-size: 0.72rem;
+      line-height: 1.2;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .bars-legend .bars-stat-power-btn.active,
+    .bars-legend .bars-stat-mode-btn.active {
+      border-color: #58a6ff;
+      color: #d7ecff;
+      background: rgba(56,139,253,0.15);
+    }
+    .bars-legend .bars-stat-body {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.32rem;
+      flex-wrap: wrap;
+    }
+    .bars-legend .bars-stat-body.off .bars-stat-mode-btn,
+    .bars-legend .bars-stat-body.off .bars-stat-trace-btn {
+      opacity: 0.52;
+      filter: saturate(0.74);
+    }
+    .bars-legend .bars-stat-trace-btn {
+      border-color: var(--series-color, #3d444d);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      opacity: 0.75;
+      filter: saturate(0.84);
+    }
+    .bars-legend .bars-stat-trace-btn.active {
+      border-color: var(--series-color, #58a6ff);
+      color: #eef6ff;
+      background: rgba(255,255,255,0.08);
+      opacity: 1;
+      filter: none;
+    }
+    .bars-legend .bars-merge-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.32rem;
+      color: #c9d1d9;
+      font-size: 0.74rem;
+      border: 1px solid #3d444d;
+      border-radius: 999px;
+      padding: 0.16rem 0.58rem;
+      background: #131821;
+      cursor: pointer;
+      user-select: none;
+    }
+    .bars-legend .bars-merge-chip.active {
+      border-color: #58a6ff;
+      color: #d7ecff;
+      background: rgba(56,139,253,0.15);
+    }
+    .bars-panels { display: flex; flex-direction: column; gap: 0.6rem; flex: 1; min-height: 0; overflow: auto; }
+    .bars-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; display: flex; flex-direction: column; flex: 1; min-height: 230px; }
+    .bars-panel.single { min-height: 420px; }
+    .bars-panel h3 { font-size: 0.78rem; margin-bottom: 0.35rem; color: var(--text); }
+    .bars-panel canvas { flex: 1; min-height: 180px; }
+    .swim-single-wrap { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+    .swim-single-title { font-size: 0.8rem; margin-bottom: 0.35rem; color: var(--text); }
+    .swim-single-area { flex: 1; min-height: 420px; height: min(76vh, calc(100vw - 3.5rem)); overflow-y: auto; overflow-x: hidden; border: 1px solid var(--border); border-radius: 8px; padding: 0.4rem; }
+    .swim-legend { display: flex; gap: 1rem; font-size: 0.86rem; color: var(--muted); margin-top: 0.5rem; flex-wrap: wrap; justify-content: center; }
     .swim-legend i { display: inline-block; width: 12px; height: 12px; border-radius: 2px; vertical-align: -2px; margin-right: 0.25rem; }
-    .swim-controls { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; margin-top: 0.4rem; flex-wrap: wrap; }
-    .swim-controls input { width: 4.5rem; background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 0.2rem 0.3rem; }
+    .swim-tip { position: fixed; display: none; pointer-events: none; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; padding: 0.45rem 0.6rem; font-size: 0.72rem; color: #e6edf3; z-index: 9999; max-width: 340px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); }
+    .swim-tip.locked {
+      pointer-events: auto;
+      border-color: #58a6ff;
+      width: min(860px, calc(100vw - 24px));
+      height: min(640px, calc(100vh - 24px));
+      max-width: min(860px, calc(100vw - 24px));
+      max-height: min(640px, calc(100vh - 24px));
+      font-size: 0.82rem;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .swim-tip .head { display: flex; align-items: center; gap: 0.35rem; margin-bottom: 0.2rem; }
+    .swim-tip.locked .head { cursor: move; user-select: none; }
+    .swim-tip .head-title { font-weight: 700; color: #58a6ff; }
+    .swim-tip .head-sub { color: var(--muted); font-size: 0.67rem; margin-left: auto; }
+    .swim-tip.locked .head-sub { font-size: 0.76rem; }
+    .swim-tip .sum { color: #c9d1d9; line-height: 1.3; }
+    .swim-tip.locked .sum { font-size: 0.9rem; line-height: 1.35; }
+    .swim-tip .details { margin-top: 0.45rem; padding-top: 0.4rem; border-top: 1px solid #30363d; overflow: auto; flex: 1 1 auto; min-height: 0; }
+    .swim-tip .details .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.2rem 0.7rem; margin-bottom: 0.35rem; }
+    .swim-tip .details .k { color: var(--muted); font-size: 0.67rem; }
+    .swim-tip.locked .details .k { font-size: 0.75rem; }
+    .swim-tip .details .v { color: #e6edf3; font-variant-numeric: tabular-nums; }
+    .swim-tip.locked .details .v { font-size: 0.82rem; }
+    .swim-tip .history-scroll { margin-top: 0.35rem; height: 170px; overflow-y: auto; border-top: 1px solid #30363d; padding-top: 0.3rem; }
+    .swim-tip.locked .history-scroll { height: 240px; }
+    .swim-tip .details ul { margin: 0 0 0 1rem; padding: 0; }
+    .swim-tip .details li { margin-bottom: 0.22rem; line-height: 1.28; color: #c9d1d9; }
+    .swim-tip.locked .details li { font-size: 0.79rem; line-height: 1.34; }
+    .swim-tip .hint { margin-top: 0.35rem; color: var(--muted); font-size: 0.66rem; }
+    .swim-tip.locked .hint { font-size: 0.74rem; }
+    .swim-tip .scrub { margin-top: 0.45rem; }
+    .swim-tip .scrub-row { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.2rem; }
+    .swim-tip .scrub-row input[type="range"] { flex: 1; accent-color: var(--accent); }
+    .swim-tip .tick-val { font-variant-numeric: tabular-nums; color: #58a6ff; min-width: 2.8rem; text-align: right; }
 
     /* Monte Carlo tab */
     #panelMonteCarlo .mc-toggle { font-size:0.75rem; padding:0.2rem 0.5rem; border:1px solid var(--border); border-radius:5px; background:var(--panel); color:var(--muted); cursor:pointer; }
@@ -141,6 +562,162 @@
     .mc-sig-pos { color: var(--green); font-weight: 600; }
     .mc-sig-neg { color: var(--red); font-weight: 600; }
     .mc-sig-none { color: var(--muted); }
+    .exp-controls { display: flex; gap: 0.4rem; margin-bottom: 0.7rem; }
+    .exp-btn { padding: 0.26rem 0.62rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.76rem; }
+    .exp-btn.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
+    .exp-btn:disabled { opacity: 0.5; cursor: default; }
+    .exp-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; margin-bottom: 0.8rem; }
+    .exp-card { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.7rem; }
+    .exp-card h3 { font-size: 0.8rem; margin-bottom: 0.45rem; color: var(--text); }
+    .exp-chart-wrap { height: 260px; min-height: 260px; }
+    .exp-card canvas { width: 100%; height: 100%; }
+    .exp-note { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.45rem; }
+
+    /* Simulation tab */
+    #panelSimulation { gap: 0.85rem; }
+    #simulationContent {
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      width: 100%;
+      min-width: 0;
+    }
+    .sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 0.9rem; align-items: start; width: 100%; min-width: 0; }
+    .sim-grid.compact { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 0.7rem; }
+    .sim-grid.runtime { grid-template-columns: 1fr; }
+    .sim-section { display: flex; flex-direction: column; gap: 0.55rem; }
+    .sim-section + .sim-section { margin-top: 0.5rem; }
+    .sim-section-title {
+      font-size: 0.8rem;
+      color: var(--text);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.45rem;
+    }
+    .sim-section-title::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 8px rgba(88, 166, 255, 0.55);
+    }
+    .sim-section-title.calibration::before { background: var(--purple); box-shadow: 0 0 8px rgba(163, 113, 247, 0.55); }
+    .sim-section-title.runtime::before { background: var(--green); box-shadow: 0 0 8px rgba(46, 160, 67, 0.55); }
+    .sim-card { background: linear-gradient(180deg, rgba(22,27,34,0.96), rgba(13,17,23,0.98)); border: 1px solid var(--border); border-radius: 10px; padding: 0.95rem 1.05rem; box-shadow: 0 4px 14px rgba(0,0,0,0.22); min-width: 0; }
+    .sim-card.full { grid-column: 1 / -1; }
+    .sim-card h3 { font-size: 0.94rem; margin-bottom: 0.56rem; color: var(--text); letter-spacing: 0.01em; }
+    .sim-strip {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+      gap: 0.42rem;
+      margin-bottom: 0.08rem;
+    }
+    .sim-pill {
+      border: 1px solid #2c333b;
+      border-radius: 8px;
+      background: #0f141c;
+      padding: 0.4rem 0.52rem;
+      min-height: 54px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 0.08rem;
+    }
+    .sim-pill .k {
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .sim-pill .v {
+      color: var(--text);
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      line-height: 1.2;
+    }
+    .sim-kv { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; row-gap: 0.36rem; column-gap: 0.68rem; font-size: 0.86rem; }
+    .sim-kv .k { color: var(--muted); font-weight: 500; }
+    .sim-kv .v { color: var(--text); font-variant-numeric: tabular-nums; }
+    .sim-table-wrap { overflow: auto; max-height: min(60vh, 560px); border: 1px solid var(--border); border-radius: 8px; background: #0d1117; }
+    .sim-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+    .sim-table th, .sim-table td { border: 1px solid var(--border); padding: 0.38rem 0.54rem; text-align: right; font-variant-numeric: tabular-nums; }
+    .sim-table thead th { position: sticky; top: 0; background: #161b22; z-index: 1; }
+    .sim-table tbody tr:nth-child(even) td { background: rgba(255,255,255,0.02); }
+    .sim-table th:first-child, .sim-table td:first-child { text-align: left; }
+    .sim-table.dense { font-size: 0.81rem; }
+    .sim-table.dense th, .sim-table.dense td { padding: 0.31rem 0.46rem; }
+    .sim-table .sticky-col {
+      position: sticky;
+      left: 0;
+      z-index: 2;
+      background: #111722;
+      box-shadow: 1px 0 0 rgba(48,54,61,0.9);
+    }
+    .sim-table thead .sticky-col { z-index: 3; background: #161b22; }
+    .sim-split { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; }
+    .sim-subtle { color: var(--muted); font-size: 0.79rem; margin-bottom: 0.5rem; line-height: 1.4; }
+    .sim-collapse {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0f141c;
+      overflow: hidden;
+    }
+    .sim-collapse > summary {
+      cursor: pointer;
+      list-style: none;
+      padding: 0.42rem 0.54rem;
+      color: #c9d1d9;
+      font-size: 0.8rem;
+      border-bottom: 1px solid transparent;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.5rem;
+    }
+    .sim-collapse > summary::-webkit-details-marker { display: none; }
+    .sim-collapse > summary::after {
+      content: "expand";
+      color: var(--muted);
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .sim-collapse[open] > summary {
+      border-bottom-color: var(--border);
+      background: rgba(255,255,255,0.02);
+    }
+    .sim-collapse[open] > summary::after { content: "collapse"; }
+    .sim-collapse-body { padding: 0.45rem; }
+    .sim-badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.1rem 0.45rem;
+      font-size: 0.7rem;
+      color: #c9d1d9;
+      background: rgba(255,255,255,0.03);
+      margin-left: 0.35rem;
+      vertical-align: middle;
+    }
+    .sim-badge.peak { border-color: rgba(210,153,34,0.75); color: #ffd98f; background: rgba(210,153,34,0.12); }
+    .sim-badge.offpeak { border-color: rgba(88,166,255,0.7); color: #cde6ff; background: rgba(88,166,255,0.12); }
+    .sim-delta-good { color: #3fb950; }
+    .sim-delta-warn { color: #d29922; }
+    .sim-delta-bad { color: #f85149; }
+    .sim-empty { color: var(--muted); font-size: 0.8rem; }
+    @media (max-width: 960px) {
+      #simulationContent { gap: 0.62rem; }
+      .sim-grid { grid-template-columns: 1fr; }
+      .sim-kv { grid-template-columns: 1fr; }
+      .sim-split { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -149,75 +726,155 @@
     <nav class="nav-tabs" id="navTabs">
       <button class="nav-tab active" data-tab="load">Load</button>
       <button class="nav-tab disabled" data-tab="stats">Statistics</button>
+      <button class="nav-tab disabled" data-tab="simulation">Simulation</button>
       <button class="nav-tab disabled" data-tab="kanban">Kanban</button>
-      <button class="nav-tab disabled" data-tab="charts">Composition</button>
+      <button class="nav-tab disabled" data-tab="composition">Composition</button>
+      <button class="nav-tab disabled" data-tab="bars">Composition Charts</button>
+      <button class="nav-tab disabled" data-tab="swimlane">Swimlane</button>
+      <button class="nav-tab disabled" data-tab="experiments">Experiments</button>
       <button class="nav-tab disabled" data-tab="monteCarlo">Monte Carlo</button>
     </nav>
-  </div>
-
-  <div class="playback-bar" id="playbackBar">
-    <button class="pb-btn primary" id="btnPlay">Play</button>
-    <button class="pb-btn" id="btnReset">Reset</button>
-    <label style="font-size:0.78rem;color:var(--muted)"><input type="checkbox" id="chkLoop" /> Loop</label>
-    <span class="pb-label" id="playLabel">Step 0 / 0</span>
-    <input type="range" class="pb-scrub" id="scrub" min="0" max="0" value="0" step="1" />
-    <select class="pb-speed" id="selSpeed">
-      <option value="0.25">0.25x</option>
-      <option value="0.5">0.5x</option>
-      <option value="1" selected>1x</option>
-      <option value="2">2x</option>
-      <option value="4">4x</option>
-    </select>
+    <div class="top-actions">
+      <button class="top-btn" id="btnRedrawUi" title="Re-render active view using loaded data" disabled>Refresh UI</button>
+      <button class="top-btn" id="btnRunUiSelfCheck" title="Run client-side self-check and smoke tests">Run UI Self-Check</button>
+    </div>
   </div>
 
   <!-- Tab: Load -->
   <div class="tab-panel active" id="panelLoad">
-    <div class="drop-zone" id="dropZone">Drop <code>.ndjson</code> and/or <code>.csv</code> files here or click to open<br><span style="font-size:0.72rem;margin-top:0.4rem;display:inline-block;color:var(--muted)">NDJSON → Statistics, Kanban, Composition &nbsp;|&nbsp; CSV → Monte Carlo</span></div>
-    <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl,.csv" multiple hidden />
+    <div class="drop-zone" id="dropZone">Drop <code>.ndjson</code>, <code>.csv</code>, and/or <code>.yaml</code> files here or click to open<br><span style="font-size:0.72rem;margin-top:0.4rem;display:inline-block;color:var(--muted)">NDJSON → Statistics, Simulation, Kanban, Composition &nbsp;|&nbsp; CSV → Monte Carlo/Experiments &nbsp;|&nbsp; YAML → Scenario context + MR labels</span></div>
+    <div class="load-actions">
+      <button class="load-btn" id="btnBrowseFiles">Browse files</button>
+      <button class="load-btn" id="btnBrowseRunFolder">Browse run folder</button>
+      <button class="load-btn" id="btnUnload">Unload</button>
+    </div>
+    <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl,.csv,.yaml,.yml" multiple hidden />
+    <input type="file" id="runDirInput" webkitdirectory directory multiple hidden />
+    <div class="run-browser" id="runBrowser">
+      <h3>Run Browser (category / run / metadata)</h3>
+      <div class="row">
+        <label>Category <select id="runCategorySelect"><option value="">all</option></select></label>
+        <label>Metadata key <select id="runMetaKeySelect"><option value="">any</option></select></label>
+        <label>Metadata value <select id="runMetaValueSelect"><option value="">any</option></select></label>
+        <label>Name filter <select id="runNameFilterSelect"><option value="">any</option></select></label>
+        <button class="load-btn" id="btnLoadSelectedRun">Load selected runs</button>
+      </div>
+      <div class="hint" id="runBrowserStatus">No run folder indexed yet. Select one or more rows, then press Enter to load all selected runs.</div>
+      <div class="hint" id="uiSelfCheckStatus">Self-check: not run.</div>
+      <div class="run-browser-body">
+        <div class="run-list-pane">
+          <div id="runChipList"></div>
+        </div>
+        <div class="run-detail-pane">
+          <div class="run-detail-title">Selected run metadata</div>
+          <pre id="runMetadataView">{}</pre>
+          <div class="run-output-files" id="runOutputFiles"></div>
+        </div>
+      </div>
+    </div>
     <div class="file-list" id="fileList"></div>
   </div>
 
   <!-- Tab: Statistics -->
   <div class="tab-panel" id="panelStats">
-    <div id="scenarioInfoCard"></div>
-    <div class="series-selector" id="seriesSelector"></div>
+    <div class="tab-control-row stats-control-row" id="statsControlRow">
+      <div class="tab-control-group tab-control-group-grow">
+        <span class="tab-control-title">Controls</span>
+        <div id="scenarioInfoCard"></div>
+      </div>
+    </div>
     <div class="hero-cards" id="heroCards"></div>
     <div class="metric-picker" id="metricPicker"></div>
+    <div class="stats-extended" id="statsExtended"></div>
     <div class="cmp-wrap"><table class="cmp" id="cmpTable"></table></div>
+  </div>
+
+  <!-- Tab: Simulation -->
+  <div class="tab-panel" id="panelSimulation">
+    <div id="simulationContent"></div>
   </div>
 
   <!-- Tab: Kanban -->
   <div class="tab-panel" id="panelKanban">
+    <div class="tab-control-row" id="kanbanControlRow">
+      <div class="tab-control-group">
+        <span class="tab-control-title">Traces</span>
+        <div class="kanban-policy-tabs" id="kanbanPolicyTabs"></div>
+      </div>
+      <div class="tab-control-group tab-control-group-grow">
+        <span class="tab-control-title">Playhead</span>
+        <div class="playback-bar" id="playbackBar">
+          <button class="pb-btn primary" id="btnPlay">Play</button>
+          <button class="pb-btn" id="btnStep">Step</button>
+          <button class="pb-btn" id="btnReset">Reset</button>
+          <label style="font-size:0.78rem;color:var(--muted)"><input type="checkbox" id="chkLoop" /> Loop</label>
+          <span class="pb-label" id="playLabel">Step 0 / 0</span>
+          <input type="range" class="pb-scrub" id="scrub" min="0" max="0" value="0" step="1" />
+          <select class="pb-speed" id="selSpeed">
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1" selected>1x</option>
+            <option value="2">2x</option>
+            <option value="4">4x</option>
+          </select>
+        </div>
+      </div>
+    </div>
     <div class="kanban-snapshot" id="kSnap"></div>
+    <div class="kanban-legend" id="kanbanLegend">
+      <span class="kleg-group">
+        <span class="kleg-title">Queue</span>
+        <span class="kleg-item"><i class="kleg-chip queue-unvisited"></i>not visited</span>
+        <span class="kleg-item"><i class="kleg-chip queue-visited"></i>visited</span>
+        <span class="kleg-item"><i class="kleg-chip queue-visited-new"></i>newly visited</span>
+      </span>
+      <span class="kleg-group sep">
+        <span class="kleg-title">Transitions</span>
+        <span class="kleg-item"><i class="kleg-chip just-rebased"></i>just rebased</span>
+        <span class="kleg-item"><i class="kleg-chip just-merged"></i>just merged</span>
+        <span class="kleg-item"><i class="kleg-chip force-merged"></i>force merged</span>
+        <span class="kleg-item"><i class="kleg-chip ci-failed"></i>CI failed</span>
+      </span>
+    </div>
     <div class="traces-container" id="tracesContainer"></div>
   </div>
 
-  <!-- Tab: Composition + Swimlane -->
-  <div class="tab-panel" id="panelCharts">
-    <div class="chart-view-toggle" id="chartViewToggle">
-      <button class="active" data-mode="single">Single</button>
-      <button data-mode="compare">Compare</button>
-    </div>
-    <div class="chart-pickers" id="chartPickers">
-      <div class="chart-picker" id="pickerL"><span class="cp-label">Policy:</span><div class="chart-policy-tabs" id="chartPolicyTabsL"></div></div>
-      <div class="chart-picker" id="pickerR"><span class="cp-label">Right:</span><div class="chart-policy-tabs" id="chartPolicyTabsR"></div></div>
+  <!-- Tab: Composition -->
+  <div class="tab-panel" id="panelComposition">
+    <div class="tab-control-row" id="compositionControlRow">
+      <div class="tab-control-group">
+        <span class="tab-control-title">View</span>
+        <div class="chart-view-toggle" id="chartViewToggle">
+          <button class="active" data-mode="single">Single</button>
+          <button data-mode="compare">Compare</button>
+        </div>
+      </div>
+      <div class="tab-control-group">
+        <span class="tab-control-title">Merge lines</span>
+        <button class="tab-toggle-chip active" id="btnMergeLinesComposition" type="button" aria-pressed="true">ON</button>
+      </div>
+      <div class="tab-control-group tab-control-group-grow">
+        <span class="tab-control-title">Traces</span>
+        <div class="chart-pickers" id="chartPickers">
+          <div class="chart-picker" id="pickerL"><span class="cp-label">Policy:</span><div class="chart-policy-tabs" id="chartPolicyTabsL"></div></div>
+          <div class="chart-picker" id="pickerR"><span class="cp-label">Right:</span><div class="chart-policy-tabs" id="chartPolicyTabsR"></div></div>
+        </div>
+      </div>
     </div>
     <div class="chart-pair single-view" id="chartPair">
       <div class="chart-col">
         <h3 class="chart-col-title" id="chartTitleL"></h3>
         <div class="chart-wrap"><canvas id="chartCanvasL"></canvas></div>
-        <div class="brush-wrap" id="brushAreaL"></div>
-        <div id="swimAreaL" style="overflow-x:auto;min-height:80px"></div>
+        <div id="swimAreaL" style="overflow:hidden;min-height:120px"></div>
       </div>
       <div class="chart-col">
         <h3 class="chart-col-title" id="chartTitleR"></h3>
         <div class="chart-wrap"><canvas id="chartCanvasR"></canvas></div>
-        <div class="brush-wrap" id="brushAreaR"></div>
-        <div id="swimAreaR" style="overflow-x:auto;min-height:80px"></div>
+        <div id="swimAreaR" style="overflow:hidden;min-height:120px"></div>
       </div>
     </div>
     <div class="swim-legend">
-      <span><i style="background:rgba(110,118,129,0.9)"></i>Pending</span>
+      <span><i style="background:rgba(110,118,129,0.9)"></i>CI Queued</span>
       <span><i style="background:rgba(163,113,247,0.9)"></i>CI Running</span>
       <span><i style="background:rgba(46,160,67,0.9)"></i>Ready</span>
       <span><i style="background:rgba(210,153,34,0.9)"></i>Stale</span>
@@ -225,12 +882,53 @@
       <span><i style="background:#58a6ff; border-radius:50%"></i>Merged</span>
       <span><i style="background:#f85149; clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%); width:12px;height:12px"></i>Force-merge</span>
     </div>
-    <div class="swim-controls">
-      <label>From <input type="number" id="rmin" value="0" min="0" /></label>
-      <label>To <input type="number" id="rmax" value="100" min="0" /></label>
-      <button class="pb-btn" id="fitBtn">Fit all</button>
-      <label style="margin-left:1rem;font-size:0.75rem;display:flex;align-items:center;gap:0.3rem;color:var(--muted)"><input type="checkbox" id="chkMergeLines" checked /> Merge lines</label>
+  </div>
+
+  <!-- Tab: Composition Charts -->
+  <div class="tab-panel" id="panelBars">
+    <div class="bars-legend" id="barsLegendControls">
+      <div class="bars-legend-group" id="barsTraceControls"></div>
+      <div class="bars-legend-group" id="barsLegendSeriesControls"></div>
+      <div class="bars-legend-group">
+        <span class="bars-legend-title">Merge lines</span>
+        <button class="bars-merge-chip active" id="btnMergeLinesBars" type="button" aria-pressed="true">ON</button>
+      </div>
+      <div class="bars-legend-group" id="barsStatsControls"></div>
     </div>
+    <div class="bars-panels" id="barsPanels"></div>
+  </div>
+
+  <!-- Tab: Swimlane -->
+  <div class="tab-panel" id="panelSwimlane">
+    <div class="tab-control-row" id="swimlaneControlRow">
+      <div class="tab-control-group tab-control-group-grow">
+        <span class="tab-control-title">Traces</span>
+        <div class="chart-policy-tabs" id="swimPolicyTabs"></div>
+      </div>
+    </div>
+    <div class="swim-single-wrap">
+      <h3 class="swim-single-title" id="swimSingleTitle"></h3>
+      <div id="swimAreaSingle" class="swim-single-area"></div>
+    </div>
+    <div class="swim-legend">
+      <span><i style="background:rgba(110,118,129,0.9)"></i>CI Queued</span>
+      <span><i style="background:rgba(163,113,247,0.9)"></i>CI Running</span>
+      <span><i style="background:rgba(46,160,67,0.9)"></i>Ready</span>
+      <span><i style="background:rgba(210,153,34,0.9)"></i>Stale</span>
+      <span><i style="background:#f85149"></i>CI Failed</span>
+      <span><i style="background:#58a6ff; border-radius:50%"></i>Merged</span>
+      <span><i style="background:#f85149; clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%); width:12px;height:12px"></i>Force-merge</span>
+    </div>
+  </div>
+
+  <!-- Tab: Experiments -->
+  <div class="tab-panel" id="panelExperiments">
+    <div class="exp-controls" id="expControls">
+      <button class="exp-btn active" data-mode="discrimination" id="expModeDiscrimination">Discrimination</button>
+      <button class="exp-btn" data-mode="calibration" id="expModeCalibration">Calibration</button>
+    </div>
+    <div id="expHint" class="exp-note"></div>
+    <div id="expContent"></div>
   </div>
 
   <!-- Tab: Monte Carlo -->
@@ -282,1232 +980,10 @@
     </div>
   </div>
 
-  <script>
-  (function () {
-    const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)", failed: "#f85149", force_merge: "#f85149" };
-    const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
-    let playhead = 0, playTimer = null, xRange = [0, 100];
-    let filesData = [], activeIndex = 0;
-
-    // --- Parsing & Analysis ---
-    function parseNdjson(t) { return t.split("\n").map(l => l.trim()).filter(Boolean).map(j => { try { return JSON.parse(j); } catch { return null; } }).filter(Boolean); }
-    function filterE(arr) {
-      const base = (Array.isArray(arr) ? arr : []).filter(e => e && e.event !== "api_call");
-      const extra = [];
-      base.forEach(e => { if (e.event === "tick" && Array.isArray(e.force_merges)) e.force_merges.forEach(fm => extra.push(fm)); });
-      return base.concat(extra);
-    }
-    function pct(a, p) { if (!a.length) return 0; const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(s.length * p / 100))]; }
-
-    function buildSwimlaneSegs(evs, maxT) {
-      const segs = [], pipe = new Map();
-      evs.forEach(e => { if (e.event === "rebase" && e.pipeline_id != null) pipe.set(e.pipeline_id, { mr: e.mr_iid, rebaseTick: e.tick, outcome: e.pipeline_outcome || null }); });
-      evs.forEach(e => {
-        if (e.event !== "tick" || !e.transitions) return;
-        e.transitions.forEach(tr => {
-          const p = pipe.get(tr.pipeline_id);
-          const m = (tr.from || "").toLowerCase(), n = (tr.to || "").toLowerCase();
-          if (tr.mr_iid == null) return;
-          if (m === "pending" && n === "running" && p) { segs.push({ mr: tr.mr_iid, start: p.rebaseTick, end: e.tick, kind: "pending" }); p.runAt = e.tick; }
-          else if (m === "running" && n === "success" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "running" }); p.succAt = e.tick; }
-          else if (m === "running" && n === "failed" && p && p.runAt != null) { segs.push({ mr: tr.mr_iid, start: p.runAt, end: e.tick, kind: "failed" }); p.failedAt = e.tick; }
-        });
-      });
-      const allMergeTicks = evs.filter(e => e.event === "merge").map(e => e.tick).sort((a, b) => a - b);
-      pipe.forEach((p, pid) => {
-        if (p.succAt == null) return;
-        let nextMerge = null, nextRebase = null;
-        evs.forEach(e => {
-          if (String(e.mr_iid) !== String(p.mr) || e.tick < p.succAt) return;
-          if (e.event === "merge" && e.tick >= p.succAt && (!nextMerge || e.tick < nextMerge)) nextMerge = e.tick;
-          if (e.event === "rebase" && e.tick > p.succAt && (!nextRebase || e.tick < nextRebase)) nextRebase = e.tick;
-        });
-        const t1 = Math.min(nextMerge ?? maxT, nextRebase ?? maxT, maxT);
-        if (t1 <= p.succAt) return;
-        if (nextMerge != null && (nextRebase == null || nextMerge <= nextRebase)) {
-          segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
-        } else if (nextRebase != null) {
-          segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "stale" });
-        } else {
-          const firstOtherMerge = allMergeTicks.find(mt => mt > p.succAt);
-          if (firstOtherMerge != null && firstOtherMerge < t1) {
-            segs.push({ mr: p.mr, start: p.succAt, end: firstOtherMerge, kind: "success" });
-            segs.push({ mr: p.mr, start: firstOtherMerge, end: t1, kind: "stale" });
-          } else {
-            segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
-          }
-        }
-      });
-      const mergeTick = new Map(), forceMergeTicks = [];
-      evs.forEach(e => {
-        if (e.event === "merge" && e.mr_iid != null) {
-          mergeTick.set(e.mr_iid, e.tick);
-          const kind = e.force_merge ? "force_merge" : "merged";
-          segs.push({ mr: e.mr_iid, start: e.tick, end: e.tick + Math.max(1, maxT * 0.006), kind });
-          if (e.force_merge) forceMergeTicks.push(e.tick);
-        }
-      });
-      segs.forEach(s => { const mt = mergeTick.get(s.mr); if (mt != null && s.kind !== "merged" && s.kind !== "force_merge" && s.end > mt) s.end = mt; });
-      segs.forEach(s => { s.end = Math.max(s.end, s.start); });
-      const result = segs.filter(s => s.end > s.start).sort((a, b) => a.mr - b.mr || a.start - b.start);
-      result._forceMergeTicks = forceMergeTicks;
-      return result;
-    }
-
-    function analyze(raw) {
-      const evs = filterE([...raw]);
-      let maxTick = 0;
-      evs.forEach(e => { if (e.tick != null) maxTick = Math.max(maxTick, e.tick); });
-      const segs = buildSwimlaneSegs(evs, maxTick);
-      const byT = new Map();
-      evs.forEach(e => { if (e.event === "tick" && e.tick != null) byT.set(e.tick, { ...e }); else if (e.event === "snapshot" && e.tick != null && !byT.has(e.tick)) byT.set(e.tick, { ...e }); });
-      evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; } } });
-      const series = { labels: [], pool: [], active: [], stale: [], rest: [], open: [] };
-      for (let t = 0; t <= maxTick; t++) {
-        const w = byT.get(t) || {}, o = w.open_mrs ?? 0;
-        const ciMrs = new Set(), readyMrs = new Set(), staleMrs = new Set();
-        for (const s of segs) {
-          if (s.start > t || s.end <= t) continue;
-          if (s.kind === "running") ciMrs.add(s.mr);
-          else if (s.kind === "success") readyMrs.add(s.mr);
-          else if (s.kind === "stale") staleMrs.add(s.mr);
-        }
-        readyMrs.forEach(mr => { ciMrs.delete(mr); staleMrs.delete(mr); });
-        ciMrs.forEach(mr => staleMrs.delete(mr));
-        const ci = ciMrs.size, ready = readyMrs.size, stale = staleMrs.size;
-        series.labels.push(t); series.pool.push(ready); series.active.push(ci); series.stale.push(stale); series.rest.push(Math.max(0, o - ready - ci - stale)); series.open.push(o);
-      }
-      return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs };
-    }
-
-    function rebaseSetAtTick(evs, t) { const s = new Set(); evs.forEach(e => { if (e.event === "rebase" && e.tick === t) s.add(e.mr_iid); }); return s; }
-    function mergeTickByMr(evs) { const m = new Map(); evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) { const x = m.get(e.mr_iid); if (x == null || e.tick < x) m.set(e.mr_iid, e.tick); } }); return m; }
-    function allIids(evs) { const s = new Set(); evs.forEach(e => { if (e.mr_iid != null) s.add(e.mr_iid); (e.transitions || []).forEach(tr => { if (tr.mr_iid != null) s.add(tr.mr_iid); }); }); return s; }
-    function colAtT(segs, t, m, mergeM, rebaseS) {
-      if (t >= (mergeM.get(m) ?? 1e9)) return "merged";
-      if (rebaseS.has(m)) return "rebase";
-      for (const s of segs) { if (s.mr !== m) continue; if (s.start > t || s.end <= t) continue; if (s.kind === "pending" || s.kind === "running") return "ci"; if (s.kind === "success") return "ready"; }
-      return "wait";
-    }
-    function buildKanbanState(packed, evs, t) {
-      const f = filterE(evs), mergeM = mergeTickByMr(f), rebaseS = rebaseSetAtTick(f, t), iids = Array.from(allIids(f));
-      const w = { wait: [], rebase: [], ci: [], ready: [], merged: [] };
-      for (const m of iids) { const c = colAtT(packed.segs, t, m, mergeM, rebaseS); w[c === "rebase" ? "rebase" : c].push(m); }
-      Object.values(w).forEach(a => a.sort((a, b) => a - b));
-      return w;
-    }
-    function storyAt(evs, t) {
-      const a = [];
-      evs.forEach(e => {
-        if (e.tick === t) {
-          if (e.event === "rebase") a.push("Rebased !" + e.mr_iid);
-          if (e.event === "merge" && e.force_merge) a.push("FORCE-MERGED !" + e.mr_iid + " (bypassed queue)");
-          else if (e.event === "merge") a.push("Merged !" + e.mr_iid);
-        }
-      });
-      evs.forEach(e => {
-        if (e.event === "tick" && e.tick === t) (e.transitions || []).forEach(tr => {
-          const to = (tr.to || "").toLowerCase();
-          if (to === "failed") a.push("!" + tr.mr_iid + ": CI failed");
-          else a.push("!" + tr.mr_iid + ": " + tr.from + " → " + tr.to);
-        });
-      });
-      return a.length ? a : ["Clock advanced."];
-    }
-
-    function computeFileMetrics(evs) {
-      const f = filterE(evs), packed = analyze(f);
-      const rebaseE = f.filter(e => e.event === "rebase"), mergeE = f.filter(e => e.event === "merge"), tickE = f.filter(e => e.event === "tick");
-      const srpL = tickE.map(e => e.same_root_success_pool || 0), stL = tickE.map(e => e.stale_successes || 0);
-      const peak = tickE.reduce((M, e) => Math.max(M, e.active_pipelines || 0), 0);
-      const mrc = {}; rebaseE.forEach(e => { mrc[e.mr_iid] = (mrc[e.mr_iid] || 0) + 1; });
-      const dup = Object.values(mrc).filter(n => n > 1).reduce((a, n) => a + n - 1, 0);
-      const totalT = packed.maxTick;
-      const mTicks = mergeE.map(e => e.tick).sort((a, b) => a - b);
-      const mergeRounds = new Set(mergeE.map(e => e.tick)).size;
-      const o0 = packed.series.open.find(v => v > 0) ?? 0;
-      const ciTimes = packed.segs.filter(s => s.kind === "running").map(s => s.end - s.start);
-      const ciMin = ciTimes.length ? Math.min(...ciTimes) : 0;
-      const ciMax = ciTimes.length ? Math.max(...ciTimes) : 0;
-      const ciAvg = ciTimes.length ? ciTimes.reduce((a, b) => a + b, 0) / ciTimes.length : 0;
-      const forceMergeCount = mergeE.filter(e => e.force_merge).length;
-      let ciFailures = 0;
-      tickE.forEach(e => { (e.transitions || []).forEach(tr => { if ((tr.to || "").toLowerCase() === "failed") ciFailures++; }); });
-      return {
-        packed, total_time_ticks: totalT, mrs_merged: mergeE.length, throughput: mergeE.length / Math.max(1, totalT),
-        time_to_first: mTicks[0] ?? totalT, time_to_10: mTicks[9] ?? totalT, avg_int: totalT / Math.max(1, mergeE.length),
-        queue_drain: o0 ? (100 * mergeE.length) / o0 : 0, rebase_calls: rebaseE.length, pipelines: rebaseE.length,
-        peak, dup, stale_max: stL.length ? Math.max(...stL) : 0, srp_p95: pct(srpL, 95), srp_max: srpL.length ? Math.max(...srpL) : 0,
-        merge_rounds: mergeRounds, avg_mrs_per_round: mergeE.length / Math.max(1, mergeRounds),
-        ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: allIids(f).size,
-        force_merges: forceMergeCount, ci_failures: ciFailures
-      };
-    }
-
-    function getPacked() { return filesData[activeIndex]?.packed; }
-    function globalMaxTick() { let mx = 0; filesData.forEach(d => { if (d.packed) mx = Math.max(mx, d.packed.maxTick); }); return mx; }
-    function esc(s) { return (s + "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/"/g, "&quot;"); }
-
-    // --- Tab Navigation ---
-    function switchTab(name) {
-      document.querySelectorAll(".nav-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
-      document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel" + name.charAt(0).toUpperCase() + name.slice(1)));
-      if (name === "kanban") renderKanbanTab();
-      if (name === "charts") { renderChartPolicyTabs(); refreshCharts(); }
-      if (name === "stats") renderStats();
-      if (name === "monteCarlo") renderMonteCarlo();
-    }
-    document.getElementById("navTabs").addEventListener("click", e => { if (e.target.dataset.tab && !e.target.classList.contains("disabled")) switchTab(e.target.dataset.tab); });
-
-    // --- Load Tab ---
-    const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
-    dropZone.addEventListener("click", () => fileInput.click());
-    dropZone.addEventListener("dragover", e => e.preventDefault());
-    dropZone.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
-    fileInput.addEventListener("change", () => { if (fileInput.files) loadFiles(fileInput.files); });
-
-    function enableTabs(tabNames) {
-      tabNames.forEach(name => {
-        const btn = document.querySelector(`.nav-tab[data-tab="${name}"]`);
-        if (btn) btn.classList.remove("disabled");
-      });
-    }
-
-    function loadFiles(fl) {
-      const a = Array.from(fl); if (!a.length) return;
-      const ndjsonFiles = a.filter(f => /\.(ndjson|jsonl|json)$/i.test(f.name));
-      const csvFiles = a.filter(f => /\.csv$/i.test(f.name));
-
-      const tasks = [];
-      if (ndjsonFiles.length) {
-        tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
-          filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
-          activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); stop();
-          filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
-          const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
-          document.getElementById("scrub").max = mx;
-          document.getElementById("playLabel").textContent = "Step 0 / " + mx;
-          document.getElementById("playbackBar").classList.add("visible");
-          enableTabs(["stats", "kanban", "charts"]);
-          return "ndjson";
-        }));
-      }
-      if (csvFiles.length) {
-        tasks.push(new Promise((R, N) => { const r = new FileReader(); r.onload = () => R(r.result); r.onerror = N; r.readAsText(csvFiles[0]); }).then(text => {
-          loadMcCSVText(text);
-          enableTabs(["monteCarlo"]);
-          return "csv";
-        }));
-      }
-
-      Promise.all(tasks).then(results => {
-        renderFileList();
-        if (results.includes("ndjson") && results.includes("csv")) switchTab("stats");
-        else if (results.includes("ndjson")) switchTab("stats");
-        else if (results.includes("csv")) switchTab("monteCarlo");
-      });
-    }
-    function renderFileList() {
-      const el = document.getElementById("fileList"); el.innerHTML = "";
-      filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>📊 ${esc(d.name)}.ndjson</span></div>`; });
-      if (mcData) { el.innerHTML += `<div class="file-item"><span>📈 monte-carlo-summary.csv (${mcData.policies.length} policies, ${mcData.metrics.length} metrics)</span></div>`; }
-    }
-
-    // --- Statistics Tab ---
-    let selectedSeries = null; // null = all selected
-
-    const METRIC_TOOLTIPS = {
-      total_time_ticks: "Total simulation duration in discrete time steps",
-      mrs_merged: "Number of merge requests successfully merged during the simulation",
-      throughput: "Merge rate: MRs merged divided by total time steps",
-      time_to_first: "Steps elapsed before the first MR was merged",
-      time_to_10: "Steps elapsed before 10 MRs were merged",
-      avg_int: "Average number of steps between successive merges",
-      queue_drain: "Percentage of the initial open queue that was merged (can exceed 100% if new MRs arrive)",
-      rebase_calls: "Total number of rebase operations triggered by housekeeping",
-      peak: "Maximum number of CI pipelines running concurrently at any step",
-      dup: "Rebases that were wasted because the MR needed rebasing again before merge",
-      ci_min: "Shortest CI pipeline duration observed (in ticks)",
-      ci_avg: "Average CI pipeline duration across all runs (in ticks)",
-      ci_max: "Longest CI pipeline duration observed (in ticks)",
-      srp_p95: "95th percentile of same-root success pool size (MRs sharing a base SHA)",
-      srp_max: "Maximum same-root success pool size observed",
-      merge_rounds: "Number of distinct ticks where at least one merge occurred",
-      avg_mrs_per_round: "Average number of MRs merged per merge round (batch efficiency)",
-      mr_count: "Total unique MRs that appeared in the simulation",
-      force_merges: "Number of MRs that bypassed the queue via operator force-merge",
-      ci_failures: "Total pipeline failures observed during the simulation"
-    };
-    const METRIC_HIGHER_IS_BETTER = {
-      mrs_merged: true, throughput: true, queue_drain: true, merge_rounds: true, avg_mrs_per_round: true,
-      total_time_ticks: null, time_to_first: false, time_to_10: false, avg_int: false,
-      rebase_calls: false, peak: false, dup: false, ci_min: null, ci_avg: null, ci_max: null,
-      srp_p95: false, srp_max: false, mr_count: true,
-      force_merges: null, ci_failures: false
-    };
-
-    function renderSeriesSelector() {
-      const el = document.getElementById("seriesSelector"); el.innerHTML = "";
-      if (!filesData.length) return;
-      const all = selectedSeries === null || (selectedSeries && selectedSeries.length === filesData.length);
-      filesData.forEach((d, i) => {
-        const chk = all || (selectedSeries && selectedSeries.includes(i));
-        el.innerHTML += `<label><input type="checkbox" data-idx="${i}" ${chk ? "checked" : ""} /> ${esc(d.name)}</label>`;
-      });
-      el.innerHTML += `<span class="sel-hint">Select policies to compare in hero cards</span>`;
-      el.addEventListener("change", onSeriesChange);
-    }
-    function onSeriesChange() {
-      const boxes = document.querySelectorAll("#seriesSelector input[type=checkbox]");
-      const sel = []; boxes.forEach((b, i) => { if (b.checked) sel.push(i); });
-      selectedSeries = sel.length === filesData.length ? null : sel;
-      renderStats();
-    }
-    function getSelectedIndices() {
-      if (!selectedSeries || selectedSeries.length === 0) return filesData.map((_, i) => i);
-      return selectedSeries;
-    }
-
-    const ALL_HERO_METRICS = [
-      { key: "mrs_merged", label: "MRs Merged", higher: true, fmt: v => Math.round(v) },
-      { key: "throughput", label: "Throughput", higher: true, fmt: v => v.toFixed(3) },
-      { key: "queue_drain", label: "Queue Drain %", higher: true, fmt: v => Math.round(v) + "%" },
-      { key: "ci_avg", label: "Avg CI Time", higher: false, fmt: v => v.toFixed(1) },
-      { key: "peak", label: "Peak Pipelines", higher: false, fmt: v => v },
-      { key: "dup", label: "Wasted Rebases", higher: false, fmt: v => v },
-      { key: "time_to_first", label: "Time to 1st Merge", higher: false, fmt: v => Math.round(v) },
-      { key: "time_to_10", label: "Time to 10 Merges", higher: false, fmt: v => Math.round(v) },
-      { key: "avg_int", label: "Avg Merge Interval", higher: false, fmt: v => v.toFixed(1) },
-      { key: "rebase_calls", label: "Total Rebases", higher: false, fmt: v => Math.round(v) },
-      { key: "srp_p95", label: "Same-root p95", higher: false, fmt: v => v },
-      { key: "srp_max", label: "Same-root max", higher: false, fmt: v => v },
-      { key: "merge_rounds", label: "Merge Rounds", higher: true, fmt: v => Math.round(v) },
-      { key: "avg_mrs_per_round", label: "MRs/Round", higher: true, fmt: v => v.toFixed(3) },
-    ];
-    let heroMetricKeys = ["mrs_merged", "throughput", "queue_drain", "dup", "time_to_10", "rebase_calls"];
-
-    function renderScenarioInfoCard() {
-      const el = document.getElementById("scenarioInfoCard");
-      const meta = filesData.map(d => (d.events || []).find(e => e.event === "scenario_meta")).filter(Boolean);
-      if (!meta.length) { el.innerHTML = ""; return; }
-      const m = meta[0];
-      let html = `<div class="scenario-info"><span class="si-title">Scenario</span>`;
-      html += `<span class="si-item"><span class="si-label">MRs:</span><span class="si-val">${m.total_mrs}</span></span>`;
-      if (m.pipeline_duration) html += `<span class="si-item"><span class="si-label">CI Duration:</span><span class="si-val">${m.pipeline_duration.min}–${m.pipeline_duration.max} ticks</span></span>`;
-      html += `<span class="si-item"><span class="si-label">Failure Rate:</span><span class="si-val${m.failure_rate > 0 ? ' danger' : ''}">${(m.failure_rate * 100).toFixed(1)}%</span></span>`;
-      if (m.force_merges && m.force_merges.length) {
-        const fmStr = m.force_merges.map(f => `!${f.iid} @t${f.tick}`).join(", ");
-        html += `<span class="si-item"><span class="si-label">Force-merges:</span><span class="si-val danger">${fmStr}</span></span>`;
-      }
-      if (m.cancellations && m.cancellations.length) {
-        const cStr = m.cancellations.map(c => `!${c.iid} @t${c.tick}`).join(", ");
-        html += `<span class="si-item"><span class="si-label">Cancellations:</span><span class="si-val">${cStr}</span></span>`;
-      }
-      if (m.arrivals && m.arrivals.length) {
-        html += `<span class="si-item"><span class="si-label">Arrivals:</span><span class="si-val">${m.arrivals.length}</span></span>`;
-      }
-      if (m.scheduled_target_advances && Object.keys(m.scheduled_target_advances).length) {
-        html += `<span class="si-item"><span class="si-label">External advances:</span><span class="si-val">${Object.keys(m.scheduled_target_advances).length}</span></span>`;
-      }
-      html += `</div>`;
-      el.innerHTML = html;
-    }
-    function renderStats() {
-      if (!filesData.length) return;
-      renderScenarioInfoCard();
-      renderSeriesSelector();
-      renderMetricPicker();
-      const metrics = filesData.map(d => d.metrics);
-      renderHeroCards(metrics);
-      renderCmpTable();
-    }
-    function renderMetricPicker() {
-      const el = document.getElementById("metricPicker"); el.innerHTML = "";
-      el.innerHTML = `<span class="mp-label">Hero cards:</span>`;
-      ALL_HERO_METRICS.forEach(m => {
-        const active = heroMetricKeys.includes(m.key) ? " active" : "";
-        el.innerHTML += `<button data-key="${m.key}" class="${active}" title="${esc(METRIC_TOOLTIPS[m.key] || m.label)}">${m.label}</button>`;
-      });
-    }
-    document.getElementById("metricPicker").addEventListener("click", e => {
-      const btn = e.target.closest("button[data-key]");
-      if (!btn) return;
-      const k = btn.dataset.key;
-      if (heroMetricKeys.includes(k)) { heroMetricKeys = heroMetricKeys.filter(x => x !== k); }
-      else { heroMetricKeys.push(k); }
-      renderStats();
-    });
-    function renderHeroCards(metrics) {
-      const cards = ALL_HERO_METRICS.filter(m => heroMetricKeys.includes(m.key));
-      const sel = getSelectedIndices();
-      const el = document.getElementById("heroCards"); el.innerHTML = "";
-      cards.forEach(c => {
-        let bestIdx = sel[0], bestVal = metrics[sel[0]][c.key];
-        sel.forEach(i => { const v = metrics[i][c.key]; if (c.higher ? v > bestVal : v < bestVal) { bestVal = v; bestIdx = i; } });
-        const worstVal = sel.reduce((w, i) => c.higher ? Math.min(w, metrics[i][c.key]) : Math.max(w, metrics[i][c.key]), bestVal);
-        el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">${c.fmt(bestVal)}</div><div class="winner">${esc(filesData[bestIdx].name)}</div><div class="sub">${c.higher ? "worst" : "max"}: ${c.fmt(worstVal)}</div></div>`;
-      });
-    }
-    function renderCmpTable() {
-      const sel = getSelectedIndices();
-      const heads = sel.map(i => filesData[i].name);
-      const metrics = sel.map(i => filesData[i].metrics);
-      const fmt = (x, f) => (f === "d3" ? (typeof x === "number" ? x.toFixed(3) : x) : f === "d1" ? (typeof x === "number" ? x.toFixed(1) : x) : f === "d0" ? String(Math.round(x)) : x);
-      const rows = [
-        ["s", "── Throughput & Time ──"], ["total_time_ticks", "Total time (steps)", "d0"], ["mrs_merged", "MRs merged", "d0"], ["throughput", "Throughput", "d3"],
-        ["time_to_first", "Time to first merge", "d0"], ["time_to_10", "Time to merge 10", "d0"], ["avg_int", "Avg merge interval", "d0"], ["queue_drain", "Queue drain %", "d0"],
-        ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"], ["ci_failures", "CI Failures", "d0"],
-        ["s", "── Events ──"], ["force_merges", "Force-merges", "d0"],
-        ["s", "── Pool ──"], ["srp_p95", "Same-root p95", "d0"], ["srp_max", "Same-root max", "d0"],
-        ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"], ["mr_count", "Total MRs seen", "d0"]
-      ];
-      let h = "<thead><tr><th>Metric</th>" + heads.map(n => `<th>${esc(n)}</th>`).join("") + "</tr></thead><tbody>";
-      rows.forEach(r => {
-        if (r[0] === "s") { h += `<tr class="section"><td colspan="${heads.length + 1}">${r[1]}</td></tr>`; return; }
-        const key = r[0], tip = METRIC_TOOLTIPS[key] || "", hib = METRIC_HIGHER_IS_BETTER[key];
-        const vals = metrics.map(M => M[key]);
-        const bestSet = new Set();
-        if (hib !== null && vals.some(v => typeof v === "number")) {
-          let bv = hib ? -Infinity : Infinity;
-          vals.forEach((v) => { if (typeof v !== "number") return; if (hib ? v > bv : v < bv) bv = v; });
-          vals.forEach((v, i) => { if (v === bv) bestSet.add(i); });
-          if (bestSet.size === vals.length) bestSet.clear();
-        }
-        h += `<tr><td class="metric-name" data-tip="${esc(tip)}">${r[1]}</td>` + metrics.map((M, i) => {
-          const v = M[key], cls = bestSet.has(i) ? ' class="best"' : "";
-          return `<td${cls}>${r[2] && v != null && typeof v === "number" ? fmt(v, r[2]) : (v == null ? "—" : v)}</td>`;
-        }).join("") + "</tr>";
-      });
-      h += "</tbody>";
-      document.getElementById("cmpTable").innerHTML = h;
-    }
-
-    // --- Kanban Tab ---
-    let traceStates = [];
-    function renderKanbanTab() {
-      if (!filesData.length) return;
-      if (traceStates.length !== filesData.length) traceStates = filesData.map((_, i) => i < 2);
-      renderSnapshot();
-      renderTraces();
-    }
-    function renderSnapshot() {
-      const el = document.getElementById("kSnap");
-      const t = playhead;
-      const parts = filesData.map(d => {
-        if (!d.packed) return "";
-        const i = Math.min(t, d.packed.series.open.length - 1);
-        return `<span><b>${d.packed.series.open[i] || 0}</b> open</span>`;
-      });
-      const f = filterE(filesData[0]?.events || []);
-      const story = storyAt(f, t);
-      el.innerHTML = `<span style="font-weight:600">Step ${t}</span> ` + parts.join(" ") + ` <span class="story-tip" title="${esc(story.join("; "))}">${esc(story[0] || "")}</span>`;
-    }
-    function renderTraces() {
-      const container = document.getElementById("tracesContainer");
-      container.innerHTML = "";
-      filesData.forEach((d, i) => {
-        if (!d.packed) return;
-        const expanded = traceStates[i];
-        const f = filterE(d.events), t = playhead;
-        const w = buildKanbanState(d.packed, f, t);
-        const trace = document.createElement("div");
-        trace.className = "trace " + (expanded ? "expanded" : "collapsed");
-
-        const hdr = document.createElement("div");
-        hdr.className = "trace-header" + (expanded ? " open" : "");
-        hdr.innerHTML = `<span class="caret">▶</span><span class="tname">${esc(d.name)}</span><span class="tcounts">W:${w.wait.length} R:${w.rebase.length} CI:${w.ci.length} Rdy:${w.ready.length} M:${w.merged.length}</span>`;
-        hdr.addEventListener("click", () => { traceStates[i] = !traceStates[i]; renderTraces(); });
-        trace.appendChild(hdr);
-
-        if (expanded) {
-          const body = document.createElement("div");
-          body.className = "trace-body";
-          const colHdr = document.createElement("div");
-          colHdr.className = "trace-cols";
-          ["Waiting", "Rebasing", "CI", "Ready", "Merged"].forEach(n => { colHdr.innerHTML += `<div class="col-hd">${n}</div>`; });
-          body.appendChild(colHdr);
-
-          const rebasedRecent = new Set(), mergedRecent = new Set(), forceMergedRecent = new Set(), ciFailedRecent = new Set();
-          for (let dt = 0; dt < HIGHLIGHT_TICKS; dt++) { const tt = t - dt; f.forEach(e => {
-            if (e.tick === tt && e.mr_iid != null) {
-              if (e.event === "rebase") rebasedRecent.add(e.mr_iid);
-              if (e.event === "merge" && e.force_merge) forceMergedRecent.add(e.mr_iid);
-              else if (e.event === "merge") mergedRecent.add(e.mr_iid);
-            }
-            if (e.event === "tick" && e.tick === tt) (e.transitions || []).forEach(tr => { if ((tr.to || "").toLowerCase() === "failed") ciFailedRecent.add(tr.mr_iid); });
-          }); }
-
-          const cards = document.createElement("div");
-          cards.className = "trace-cards";
-          const colData = [w.wait, w.rebase, w.ci, w.ready, w.merged];
-          const mTickMap = mergeTickByMr(f);
-          colData.forEach((arr, ci) => {
-            const col = document.createElement("div");
-            col.className = "tcol";
-            if (ci === 4) {
-              const byMT = new Map();
-              arr.forEach(m => { const mt = mTickMap.get(m) ?? 0; if (!byMT.has(mt)) byMT.set(mt, []); byMT.get(mt).push(m); });
-              Array.from(byMT.keys()).sort((a, b) => b - a).forEach(mt => {
-                const mrs = byMT.get(mt), isRecent = (t - mt) < HIGHLIGHT_TICKS;
-                if (mrs.length > 1) {
-                  const grp = document.createElement("div");
-                  grp.className = "merge-group" + (isRecent ? " recent" : "");
-                  grp.innerHTML = `<span class="mg-label">t=${mt} (${mrs.length})</span>`;
-                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
-                  col.appendChild(grp);
-                } else {
-                  mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; col.appendChild(c); });
-                }
-              });
-            } else {
-              arr.forEach(m => {
-                const c = document.createElement("div");
-                let cls = "kcard";
-                if (forceMergedRecent.has(m)) cls += " force-merged";
-                else if (mergedRecent.has(m)) cls += " just-merged";
-                else if (ciFailedRecent.has(m)) cls += " ci-failed";
-                else if (rebasedRecent.has(m)) cls += " just-rebased";
-                c.className = cls; c.textContent = "!" + m; col.appendChild(c);
-              });
-            }
-            cards.appendChild(col);
-          });
-          body.appendChild(cards);
-          trace.appendChild(body);
-        }
-        container.appendChild(trace);
-      });
-    }
-
-    // --- Charts Tab ---
-    let chartIdxL = 0, chartIdxR = 1, chartInstL = null, chartInstR = null;
-    let chartViewMode = "single";
-
-    document.getElementById("chartViewToggle").addEventListener("click", e => {
-      const btn = e.target.closest("button"); if (!btn) return;
-      chartViewMode = btn.dataset.mode;
-      document.querySelectorAll("#chartViewToggle button").forEach(b => b.classList.toggle("active", b === btn));
-      const pair = document.getElementById("chartPair");
-      pair.classList.toggle("single-view", chartViewMode === "single");
-      document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
-      document.getElementById("pickerL").querySelector(".cp-label").textContent = chartViewMode === "single" ? "Policy:" : "Left:";
-      setTimeout(refreshCharts, 30);
-    });
-
-    function renderChartPolicyTabs() {
-      [["chartPolicyTabsL", chartIdxL, "L"], ["chartPolicyTabsR", chartIdxR, "R"]].forEach(([elId, sel, side]) => {
-        const el = document.getElementById(elId); el.innerHTML = "";
-        filesData.forEach((d, i) => {
-          const b = document.createElement("button");
-          b.className = "cp-tab" + (i === sel ? " active" : "");
-          b.textContent = d.name;
-          b.onclick = () => { if (side === "L") chartIdxL = i; else chartIdxR = i; renderChartPolicyTabs(); refreshCharts(); };
-          el.appendChild(b);
-        });
-      });
-      document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
-    }
-    function refreshCharts() {
-      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      document.getElementById("chartTitleL").textContent = filesData[chartIdxL]?.name || "";
-      document.getElementById("chartTitleR").textContent = filesData[chartIdxR]?.name || "";
-      const yMax = getSharedYMax();
-      if (pL) { doChart(pL, "chartCanvasL", "L", yMax); setTimeout(() => d3brush(pL, "brushAreaL", "L"), 30); dSwim(pL, "swimAreaL"); }
-      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R", yMax); setTimeout(() => d3brush(pR, "brushAreaR", "R"), 30); dSwim(pR, "swimAreaR"); }
-    }
-
-    const segC = k => (k === "pending" ? C0.pending : k === "running" ? C0.running : k === "success" ? C0.success : k === "stale" ? C0.stale : k === "merged" ? C0.merged : k === "failed" ? C0.failed : k === "force_merge" ? C0.force_merge : C0.other);
-
-    let showMergeLines = true;
-    document.getElementById("chkMergeLines").addEventListener("change", e => {
-      showMergeLines = e.target.checked;
-      if (chartInstL) chartInstL.update("none");
-      if (chartInstR) chartInstR.update("none");
-    });
-
-    function plMergePlay(p) {
-      return { id: "mp", afterDatasetsDraw(chart) {
-        const anyVisible = chart.data.datasets.some((ds, i) => chart.isDatasetVisible(i));
-        if (!anyVisible) return;
-        const s = chart.scales.x, ctx = chart.ctx, g = chart.chartArea; if (!s) return; ctx.save();
-        if (showMergeLines) {
-          (p.merges || []).forEach(ev => { const px = s.getPixelForValue(ev.tick); if (g && px >= g.left && px <= g.right) { ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo(px, g.top); ctx.lineTo(px, g.bottom); ctx.stroke(); } });
-        }
-        const phx = s.getPixelForValue(playhead);
-        if (g) { ctx.strokeStyle = "rgba(80,200,255,0.9)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(phx, g.top); ctx.lineTo(phx, g.bottom); ctx.stroke(); }
-        ctx.restore();
-      }};
-    }
-    let tooltipsEnabled = true;
-
-    function getSharedYMax() {
-      if (chartViewMode !== "compare") return undefined;
-      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      if (!pL || !pR) return undefined;
-      const x0 = +document.getElementById("rmin").value || 0;
-      const x1L = +document.getElementById("rmax").value || pL.maxTick;
-      const x1R = +document.getElementById("rmax").value || pR.maxTick;
-      let mx = 0;
-      for (const p of [pL, pR]) {
-        const hi = p === pL ? x1L : x1R;
-        for (let t = Math.max(0, Math.floor(x0)); t <= Math.min(p.maxTick, Math.ceil(hi)); t++) {
-          const stack = (p.series.pool[t] || 0) + (p.series.active[t] || 0) + (p.series.stale[t] || 0) + (p.series.rest[t] || 0);
-          const line = p.series.open[t] || 0;
-          mx = Math.max(mx, stack, line);
-        }
-      }
-      return mx > 0 ? mx : undefined;
-    }
-
-    function doChart(p, canvasId, side, sharedYMax) {
-      const cvs = document.getElementById(canvasId); if (!cvs) return;
-      if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
-      const x0 = +document.getElementById("rmin").value || 0, x1 = +document.getElementById("rmax").value || p.maxTick;
-      const yOpts = { stacked: true, beginAtZero: true };
-      if (sharedYMax != null) { yOpts.max = sharedYMax; }
-      const inst = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
-        { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
-        { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
-        { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
-        { label: "Pending", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
-        { label: "Open (total)", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
-      ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-        plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: 10 } }, onClick(e, item, legend) {
-          const chart = legend.chart, idx = item.datasetIndex, meta = chart.getDatasetMeta(idx);
-          if (e.native.shiftKey) {
-            const allHidden = chart.data.datasets.every((_, i) => i === idx || !chart.isDatasetVisible(i));
-            chart.data.datasets.forEach((_, i) => { chart.getDatasetMeta(i).hidden = allHidden ? null : i !== idx; });
-          } else { meta.hidden = meta.hidden === null ? true : null; }
-          chart.update();
-        } }, tooltip: { enabled: tooltipsEnabled } },
-        scales: { x: { min: x0, max: x1, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
-      }, plugins: [plMergePlay(p), plCrosshair()] });
-      if (side === "L") chartInstL = inst; else chartInstR = inst;
-    }
-
-    function plCrosshair() {
-      return { id: "crosshair",
-        afterEvent(chart, args) {
-          const prev = chart._crosshairX;
-          chart._crosshairX = (args.event.type === "mousemove") ? args.event.x : null;
-          if (args.event.type === "mouseout") chart._crosshairX = null;
-          if (prev !== chart._crosshairX) chart.draw();
-        },
-        afterDatasetsDraw(chart) {
-          if (chart._crosshairX == null) return;
-          const g = chart.chartArea; if (!g) return;
-          const ctx = chart.ctx; ctx.save();
-          ctx.fillStyle = "rgba(255,255,255,0.12)";
-          ctx.fillRect(chart._crosshairX - 1, g.top, 2, g.bottom - g.top);
-          ctx.restore();
-        }
-      };
-    }
-    function syncWindow() {
-      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      const yMax = getSharedYMax();
-      if (pL) { doChart(pL, "chartCanvasL", "L", yMax); dSwim(pL, "swimAreaL"); }
-      if (chartViewMode === "compare" && pR) { doChart(pR, "chartCanvasR", "R", yMax); dSwim(pR, "swimAreaR"); }
-    }
-
-    function d3brush(p, elId, side) {
-      const el = document.getElementById(elId); if (!el) return; el.innerHTML = "";
-      const maxT = Math.max(1, p.maxTick), w = el.clientWidth || 400, m = { l: 30, r: 6, t: 2, b: 18 }, h = 36;
-      const sc = d3.scaleLinear().domain([0, maxT]).range([m.l, w - m.r]);
-      const s = d3.select("#" + elId).append("svg").attr("width", w).attr("height", h);
-      s.append("g").attr("transform", `translate(0,${h - m.b})`).call(d3.axisBottom(sc).ticks(4));
-      const b = d3.brushX().extent([[m.l, 0], [w - m.r, h - m.b - 1]]).on("end", e => { if (!e.selection) return; const lo = sc.invert(e.selection[0]), hi = sc.invert(e.selection[1]);
-        xRange = [lo, hi]; document.getElementById("rmin").value = Math.floor(lo); document.getElementById("rmax").value = Math.ceil(hi);
-        syncWindow(); });
-      s.append("g").call(b).call(b.move, [sc(xRange[0]), sc(Math.min(maxT, xRange[1]))]);
-    }
-    function dSwim(p, swimId) {
-      const x0 = +document.getElementById("rmin").value || 0, x1 = +document.getElementById("rmax").value || p.maxTick;
-      const sw = d3.select("#" + swimId).html(""); const t = playhead;
-      const list = new Set(); p.segs.forEach(s => list.add(s.mr));
-      const mrL = Array.from(list).sort((a, b) => a - b);
-      if (!mrL.length) { sw.append("p").text("No segments."); return; }
-      const chartCol = document.getElementById(swimId).closest(".chart-col");
-      const chartWrap = chartCol ? chartCol.querySelector(".chart-wrap") : null;
-      const rowH = 14, pad = { t: 4, l: 36, b: 18, r: 4 }, w = Math.max(300, (chartWrap?.clientWidth || document.getElementById(swimId).clientWidth || 400) - 8);
-      const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
-      const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
-      const svg = sw.append("svg").attr("width", w).attr("height", H).attr("tabindex", "0").style("outline", "none");
-      svg.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
-      if (t >= x0 && t <= x1) svg.append("line").attr("x1", x(t)).attr("x2", x(t)).attr("y1", pad.t).attr("y2", H - pad.b).attr("stroke", "#4fd").attr("stroke-width", 2);
-      const visible = p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
-        .map(s => { if (s.start > t) return null; if (s.kind === "merged" || s.kind === "force_merge") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
-        .filter(s => s && s.end > s.start);
-      const bw = y.bandwidth(), barH = bw * 0.75, barOff = (bw - barH) / 2;
-      const kindLabel = k => k === "running" ? "CI Running" : k === "success" ? "Ready" : k === "pending" ? "Pending (queued)" : k === "stale" ? "Stale" : k === "failed" ? "CI Failed" : k === "merged" ? "Merged" : k === "force_merge" ? "Force-merged" : k;
-      const tip = d3.select("body").selectAll(".swim-tip").data([0]).join("div").attr("class", "swim-tip")
-        .style("position", "fixed").style("display", "none").style("pointer-events", "none")
-        .style("background", "#1c2128").style("border", "1px solid #30363d").style("border-radius", "6px")
-        .style("padding", "0.4rem 0.6rem").style("font-size", "0.72rem").style("color", "#e6edf3")
-        .style("font-family", "'JetBrains Mono', monospace").style("z-index", "9999").style("max-width", "220px")
-        .style("box-shadow", "0 4px 12px rgba(0,0,0,0.5)");
-      function showTip(event, s) {
-        const dur = s.end - s.start;
-        tip.html(`<strong>MR !${s.mr}</strong><br>State: ${kindLabel(s.kind)}<br>Ticks ${s.start}→${s.end} (${dur} tick${dur > 1 ? "s" : ""})`)
-          .style("display", "block").style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px");
-      }
-      function hideTip() { tip.style("display", "none"); }
-      visible.filter(s => s.kind !== "merged" && s.kind !== "force_merge").forEach(s => {
-        const sx = x(Math.max(s.start, x0)), sw = Math.max(0, x(Math.min(s.end, x1)) - sx);
-        const sy = y(String(s.mr));
-        svg.append("rect").attr("x", sx).attr("y", sy + barOff).attr("height", barH)
-          .attr("width", sw).attr("fill", segC(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2);
-        svg.append("rect").attr("x", sx).attr("y", sy).attr("height", bw).attr("width", sw)
-          .attr("fill", "transparent").style("cursor", "default")
-          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
-          .on("mouseout", hideTip);
-      });
-      // Merged markers — full row height line + circle
-      visible.filter(s => s.kind === "merged").forEach(s => {
-        const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr));
-        svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
-          .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
-        svg.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.5))
-          .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1)
-          .style("cursor", "default")
-          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
-          .on("mouseout", hideTip);
-      });
-      // Force-merge markers — full row height diamond (no spanning dashed lines)
-      visible.filter(s => s.kind === "force_merge").forEach(s => {
-        const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr)), cy = yt + bw / 2;
-        const r = Math.max(5, bw * 0.6);
-        svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
-          .attr("stroke", C0.force_merge).attr("stroke-width", 2).attr("opacity", 0.9);
-        svg.append("polygon")
-          .attr("points", `${mx},${cy - r} ${mx + r},${cy} ${mx},${cy + r} ${mx - r},${cy}`)
-          .attr("fill", C0.force_merge).attr("stroke", "#0d1117").attr("stroke-width", 1)
-          .style("cursor", "default")
-          .on("mouseover", event => showTip(event, s)).on("mousemove", event => tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px"))
-          .on("mouseout", hideTip);
-      });
-      // Crosshair on hover
-      const hLine = svg.append("line").attr("y1", pad.t).attr("y2", H - pad.b)
-        .attr("stroke", "rgba(255,255,255,0.15)").attr("stroke-width", 1).style("display", "none");
-      svg.on("mousemove", function(event) {
-        const [mx] = d3.pointer(event);
-        hLine.attr("x1", mx).attr("x2", mx).style("display", null);
-      }).on("mouseleave", () => hLine.style("display", "none"))
-      .on("click", () => { tooltipsEnabled = !tooltipsEnabled; if (chartInstL) { chartInstL.options.plugins.tooltip.enabled = tooltipsEnabled; chartInstL.update("none"); } if (chartInstR) { chartInstR.options.plugins.tooltip.enabled = tooltipsEnabled; chartInstR.update("none"); } });
-    }
-
-    // --- Playback ---
-    function stop() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.getElementById("btnPlay").textContent = "Play"; }
-    function tick() { const mx = globalMaxTick(); if (!mx) { stop(); return; } playhead++;
-      if (playhead > mx) { if (document.getElementById("chkLoop").checked) playhead = 0; else { playhead = mx; stop(); return; } }
-      document.getElementById("scrub").value = playhead; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + mx; onPlayheadChange(); }
-    function play() { if (playTimer) { stop(); return; } document.getElementById("btnPlay").textContent = "Pause";
-      const s = +document.getElementById("selSpeed").value || 1; playTimer = setInterval(tick, BASE_MS / s); }
-    function resetP() { stop(); playhead = 0; document.getElementById("scrub").value = 0; document.getElementById("playLabel").textContent = "Step 0 / " + globalMaxTick(); onPlayheadChange(); }
-
-    function onPlayheadChange() {
-      const active = document.querySelector(".tab-panel.active");
-      if (active.id === "panelKanban") { renderSnapshot(); renderTraces(); }
-      if (active.id === "panelCharts") {
-        if (chartInstL) chartInstL.update("none");
-        if (chartViewMode === "compare" && chartInstR) chartInstR.update("none");
-        const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-        if (pL) dSwim(pL, "swimAreaL");
-        if (chartViewMode === "compare" && pR) dSwim(pR, "swimAreaR");
-      }
-    }
-
-    document.getElementById("btnPlay").addEventListener("click", play);
-    document.getElementById("btnReset").addEventListener("click", resetP);
-    document.getElementById("scrub").addEventListener("input", e => { stop(); playhead = +e.target.value; document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick(); onPlayheadChange(); });
-    document.getElementById("selSpeed").addEventListener("change", () => { if (!playTimer) return; const s = +document.getElementById("selSpeed").value || 1; clearInterval(playTimer); playTimer = setInterval(tick, BASE_MS / s); });
-    function refreshBothSwim() { syncWindow(); }
-    document.getElementById("rmin").addEventListener("change", refreshBothSwim);
-    document.getElementById("rmax").addEventListener("change", refreshBothSwim);
-    document.getElementById("fitBtn").addEventListener("click", () => {
-      const mx = globalMaxTick(); document.getElementById("rmin").value = 0; document.getElementById("rmax").value = mx; xRange = [0, mx];
-      const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
-      const yMax = getSharedYMax();
-      if (pL) { d3brush(pL, "brushAreaL", "L"); dSwim(pL, "swimAreaL"); doChart(pL, "chartCanvasL", "L", yMax); }
-      if (chartViewMode === "compare" && pR) { d3brush(pR, "brushAreaR", "R"); dSwim(pR, "swimAreaR"); doChart(pR, "chartCanvasR", "R", yMax); }
-    });
-
-    document.addEventListener("keydown", e => {
-      const active = document.querySelector(".tab-panel.active");
-      if (!active || active.id !== "panelCharts") return;
-      if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
-      const lo = +document.getElementById("rmin").value || 0;
-      const hi = +document.getElementById("rmax").value || globalMaxTick();
-      const span = hi - lo, step = Math.max(1, Math.round(span * 0.1));
-      const mx = globalMaxTick();
-      let newLo = lo, newHi = hi, handled = false;
-      if (e.key === "ArrowRight" && !e.shiftKey) { newLo = Math.min(mx - step, lo + step); newHi = newLo + span; handled = true; }
-      else if (e.key === "ArrowLeft" && !e.shiftKey) { newLo = Math.max(0, lo - step); newHi = newLo + span; handled = true; }
-      else if (e.key === "ArrowUp" && e.shiftKey) { const grow = Math.max(1, Math.round(span * 0.2)); newLo = Math.max(0, lo - grow); newHi = Math.min(mx, hi + grow); handled = true; }
-      else if (e.key === "ArrowDown" && e.shiftKey) { const shrink = Math.max(1, Math.round(span * 0.15)); if (span > 10) { newLo = lo + shrink; newHi = hi - shrink; if (newHi <= newLo) { newHi = newLo + 10; } } handled = true; }
-      if (!handled) return;
-      e.preventDefault();
-      document.getElementById("rmin").value = Math.floor(newLo); document.getElementById("rmax").value = Math.ceil(newHi);
-      xRange = [newLo, newHi];
-      syncWindow();
-      const pL = filesData[chartIdxL]?.packed;
-      if (pL) d3brush(pL, "brushAreaL", "L");
-    });
-
-    // =========================================================================
-    // Monte Carlo Tab
-    // =========================================================================
-    let mcData = null; // { policies: [...], metrics: [...], trials: { policy: { metric: [values] } } }
-    let mcBoxChart = null, mcCIChart = null;
-    let mcVisiblePolicies = new Set();
-
-    const MC_COLORS = ["#58a6ff", "#a371f7", "#2ea043", "#d29922", "#f85149", "#79c0ff", "#d2a8ff", "#56d364"];
-    const MC_METRIC_LABELS = {
-      total_time_ticks: "Total Time (ticks)", mrs_merged: "MRs Merged",
-      throughput_merges_per_tick: "Throughput (merges/tick)", time_to_first_merge: "Time to First Merge",
-      time_to_merge_10: "Time to Merge 10 MRs", avg_merge_interval_ticks: "Avg Merge Interval",
-      queue_drain_pct: "Queue Drain %", rebase_calls: "Rebases",
-      pipelines_created: "Pipelines Created", peak_active_pipelines: "Peak Active Pipelines",
-      duplicate_rebase_total: "Duplicate Rebases", wait_p50: "Wait Time p50 (ticks)",
-      wait_p95: "Wait Time p95 (ticks)", wait_max: "Max Wait (ticks)",
-      starved_mrs: "Starved MRs (>100 ticks)"
-    };
-    const MC_LOWER_BETTER = new Set([
-      "total_time_ticks", "time_to_first_merge", "time_to_merge_10",
-      "avg_merge_interval_ticks", "rebase_calls", "pipelines_created",
-      "peak_active_pipelines", "duplicate_rebase_total",
-      "wait_p50", "wait_p95", "wait_max", "starved_mrs"
-    ]);
-    const MC_SKIP_METRICS = new Set(["total_time_ticks"]);
-
-    function loadMcCSVText(text) {
-      const lines = text.trim().split("\n");
-      const headers = lines[0].split(",").map(h => h.trim());
-      const metricCols = headers.slice(2);
-      const policies = new Set();
-      const trials = {};
-
-      for (let i = 1; i < lines.length; i++) {
-        const cols = lines[i].split(",").map(c => c.trim());
-        const policy = cols[1];
-        policies.add(policy);
-        if (!trials[policy]) trials[policy] = {};
-        metricCols.forEach((m, idx) => {
-          if (!trials[policy][m]) trials[policy][m] = [];
-          const v = parseFloat(cols[idx + 2]);
-          if (!isNaN(v)) trials[policy][m].push(v);
-        });
-      }
-
-      mcData = { policies: [...policies], metrics: metricCols, trials };
-      mcVisiblePolicies = new Set(mcData.policies);
-      initMcControls();
-      document.getElementById("mcContent").style.display = "block";
-    }
-
-    function initMcControls() {
-      const sel = document.getElementById("mcMetricSelect");
-      sel.innerHTML = mcData.metrics.map(m =>
-        `<option value="${m}">${MC_METRIC_LABELS[m] || m}</option>`
-      ).join("");
-      sel.addEventListener("change", renderMonteCarlo);
-
-      const toggles = document.getElementById("mcPolicyToggles");
-      toggles.innerHTML = mcData.policies.map((p, i) =>
-        `<button class="mc-toggle active" data-policy="${p}" style="border-left:3px solid ${MC_COLORS[i % MC_COLORS.length]}">${p}</button>`
-      ).join("");
-      toggles.addEventListener("click", e => {
-        const btn = e.target.closest(".mc-toggle");
-        if (!btn) return;
-        btn.classList.toggle("active");
-        mcVisiblePolicies = new Set([...toggles.querySelectorAll(".mc-toggle.active")].map(b => b.dataset.policy));
-        renderMonteCarlo();
-      });
-
-      const compA = document.getElementById("mcCompareA");
-      const compB = document.getElementById("mcCompareB");
-      const opts = mcData.policies.map(p => `<option value="${p}">${p}</option>`).join("");
-      compA.innerHTML = opts;
-      compB.innerHTML = opts;
-      if (mcData.policies.length > 1) compB.selectedIndex = 1;
-      compA.addEventListener("change", renderMcPairwise);
-      compB.addEventListener("change", renderMcPairwise);
-    }
-
-    function mcStats(values) {
-      if (!values || !values.length) return { mean: 0, stddev: 0, ci95: 0, min: 0, max: 0, q1: 0, median: 0, q3: 0 };
-      const sorted = [...values].sort((a, b) => a - b);
-      const n = sorted.length;
-      const mean = sorted.reduce((a, b) => a + b, 0) / n;
-      const variance = n > 1 ? sorted.reduce((s, v) => s + (v - mean) ** 2, 0) / (n - 1) : 0;
-      const stddev = Math.sqrt(variance);
-      const ci95 = n > 1 ? 1.96 * stddev / Math.sqrt(n) : 0;
-      const q = p => { const i = p * (n - 1); const lo = Math.floor(i); return lo === i ? sorted[lo] : sorted[lo] + (sorted[lo + 1] - sorted[lo]) * (i - lo); };
-      return { mean, stddev, ci95, min: sorted[0], max: sorted[n - 1], q1: q(0.25), median: q(0.5), q3: q(0.75) };
-    }
-
-    function renderMonteCarlo() {
-      if (!mcData) return;
-      renderMcBoxChart();
-      renderMcCIChart();
-      renderMcStatsTable();
-      renderMcPairwise();
-      renderMcRank();
-      renderMcHeatmap();
-    }
-
-    function renderMcBoxChart() {
-      const metric = document.getElementById("mcMetricSelect").value;
-      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
-      const ctx = document.getElementById("mcBoxChart").getContext("2d");
-
-      if (mcBoxChart) mcBoxChart.destroy();
-
-      const datasets = [];
-      policies.forEach((policy, i) => {
-        const values = mcData.trials[policy]?.[metric] || [];
-        const s = mcStats(values);
-        const color = MC_COLORS[mcData.policies.indexOf(policy) % MC_COLORS.length];
-        // Box plot as floating bars (min-Q1, Q1-median, median-Q3, Q3-max)
-        datasets.push({
-          label: policy,
-          data: [{ x: i, y: [s.q1, s.q3] }],
-          backgroundColor: color + "33",
-          borderColor: color,
-          borderWidth: 1,
-          barPercentage: 0.6,
-          categoryPercentage: 0.8,
-        });
-      });
-
-      // Use scatter for strip plot overlay
-      const stripData = [];
-      policies.forEach((policy, i) => {
-        const values = mcData.trials[policy]?.[metric] || [];
-        const color = MC_COLORS[mcData.policies.indexOf(policy) % MC_COLORS.length];
-        values.forEach(v => {
-          stripData.push({ x: i + (Math.random() - 0.5) * 0.3, y: v, color });
-        });
-      });
-
-      const allValues = policies.flatMap(p => mcData.trials[p]?.[metric] || []);
-      const yMin = allValues.length ? Math.min(...allValues) * 0.9 : 0;
-      const yMax = allValues.length ? Math.max(...allValues) * 1.1 : 100;
-
-      mcBoxChart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: policies,
-          datasets: [
-            ...policies.map((policy, i) => {
-              const values = mcData.trials[policy]?.[metric] || [];
-              const s = mcStats(values);
-              const color = MC_COLORS[mcData.policies.indexOf(policy) % MC_COLORS.length];
-              return {
-                label: policy + " IQR",
-                data: [{ x: policy, y: s.q3 - s.q1 }],
-                base: policies.map((p, j) => j === i ? mcStats(mcData.trials[p]?.[metric] || []).q1 : null),
-                backgroundColor: color + "44",
-                borderColor: color,
-                borderWidth: 2,
-                barPercentage: 0.5,
-              };
-            }),
-            {
-              type: "scatter",
-              label: "Trials",
-              data: policies.flatMap((policy, i) => {
-                const values = mcData.trials[policy]?.[metric] || [];
-                return values.map(v => ({ x: i, y: v }));
-              }),
-              backgroundColor: policies.flatMap((policy) => {
-                const values = mcData.trials[policy]?.[metric] || [];
-                const color = MC_COLORS[mcData.policies.indexOf(policy) % MC_COLORS.length];
-                return values.map(() => color + "88");
-              }),
-              pointRadius: 3,
-              pointHoverRadius: 5,
-            }
-          ]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: { legend: { display: false }, tooltip: { enabled: true } },
-          scales: {
-            x: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-            y: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" }, min: yMin, max: yMax }
-          }
-        }
-      });
-    }
-
-    function renderMcCIChart() {
-      const metric = document.getElementById("mcMetricSelect").value;
-      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
-      const ctx = document.getElementById("mcCIChart").getContext("2d");
-
-      if (mcCIChart) mcCIChart.destroy();
-
-      const means = [];
-      const ciLow = [];
-      const ciHigh = [];
-      const colors = [];
-
-      policies.forEach(policy => {
-        const values = mcData.trials[policy]?.[metric] || [];
-        const s = mcStats(values);
-        means.push(s.mean);
-        ciLow.push(s.mean - s.ci95);
-        ciHigh.push(s.mean + s.ci95);
-        colors.push(MC_COLORS[mcData.policies.indexOf(policy) % MC_COLORS.length]);
-      });
-
-      mcCIChart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: policies,
-          datasets: [{
-            label: "Mean",
-            data: means,
-            backgroundColor: colors.map(c => c + "66"),
-            borderColor: colors,
-            borderWidth: 2,
-          }]
-        },
-        options: {
-          responsive: true, maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              callbacks: {
-                afterLabel: (ctx) => {
-                  const i = ctx.dataIndex;
-                  return `CI95: [${ciLow[i].toFixed(2)}, ${ciHigh[i].toFixed(2)}]`;
-                }
-              }
-            }
-          },
-          scales: {
-            x: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-            y: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" } }
-          }
-        },
-        plugins: [{
-          id: "errorBars",
-          afterDraw(chart) {
-            const { ctx, scales: { x, y } } = chart;
-            ctx.save();
-            ctx.lineWidth = 2;
-            policies.forEach((_, i) => {
-              const xPos = x.getPixelForValue(i);
-              const yLo = y.getPixelForValue(ciLow[i]);
-              const yHi = y.getPixelForValue(ciHigh[i]);
-              ctx.strokeStyle = colors[i];
-              ctx.beginPath();
-              ctx.moveTo(xPos, yLo); ctx.lineTo(xPos, yHi);
-              ctx.moveTo(xPos - 4, yLo); ctx.lineTo(xPos + 4, yLo);
-              ctx.moveTo(xPos - 4, yHi); ctx.lineTo(xPos + 4, yHi);
-              ctx.stroke();
-            });
-            ctx.restore();
-          }
-        }]
-      });
-    }
-
-    function renderMcStatsTable() {
-      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
-      const table = document.getElementById("mcStatsTable");
-      let html = "<thead><tr><th>Metric</th>";
-      policies.forEach(p => { html += `<th>${p}</th>`; });
-      html += "</tr></thead><tbody>";
-
-      mcData.metrics.forEach(metric => {
-        if (MC_SKIP_METRICS.has(metric)) return;
-        const label = MC_METRIC_LABELS[metric] || metric;
-        html += `<tr><td class="metric-name">${label}</td>`;
-        let bestVal = null;
-        const lowerBetter = MC_LOWER_BETTER.has(metric);
-
-        const statsArr = policies.map(p => mcStats(mcData.trials[p]?.[metric] || []));
-        statsArr.forEach(s => {
-          if (bestVal === null || (lowerBetter ? s.mean < bestVal : s.mean > bestVal)) bestVal = s.mean;
-        });
-
-        statsArr.forEach(s => {
-          const isBest = Math.abs(s.mean - bestVal) < 0.001;
-          const cls = isBest ? " class=\"best\"" : "";
-          html += `<td${cls}>${s.mean.toFixed(2)} <span style="color:var(--muted);font-size:0.68rem">+/-${s.ci95.toFixed(2)}</span></td>`;
-        });
-        html += "</tr>";
-      });
-      html += "</tbody>";
-      table.innerHTML = html;
-    }
-
-    function renderMcPairwise() {
-      if (!mcData) return;
-      const pA = document.getElementById("mcCompareA").value;
-      const pB = document.getElementById("mcCompareB").value;
-      const container = document.getElementById("mcPairwise");
-
-      if (!pA || !pB || pA === pB) {
-        container.innerHTML = "<p style='color:var(--muted)'>Select two different policies to compare.</p>";
-        return;
-      }
-
-      let html = "<table style='width:100%;font-size:0.75rem;border-collapse:collapse'>";
-      html += `<tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:0.3rem">Metric</th><th>Delta</th><th>Sig?</th></tr>`;
-
-      mcData.metrics.forEach(metric => {
-        if (MC_SKIP_METRICS.has(metric)) return;
-        const sA = mcStats(mcData.trials[pA]?.[metric] || []);
-        const sB = mcStats(mcData.trials[pB]?.[metric] || []);
-        const delta = sA.mean - sB.mean;
-        const lower = MC_LOWER_BETTER.has(metric);
-        const ciOverlap = (sA.mean - sA.ci95) <= (sB.mean + sB.ci95) && (sB.mean - sB.ci95) <= (sA.mean + sA.ci95);
-        const significant = !ciOverlap;
-        const aWins = lower ? delta < 0 : delta > 0;
-        const label = MC_METRIC_LABELS[metric] || metric;
-
-        let sigClass = "mc-sig-none";
-        let sigLabel = "~";
-        if (significant) {
-          sigClass = aWins ? "mc-sig-pos" : "mc-sig-neg";
-          sigLabel = aWins ? `${pA} wins` : `${pB} wins`;
-        }
-
-        html += `<tr style="border-bottom:1px solid var(--border)">`;
-        html += `<td style="padding:0.25rem">${label}</td>`;
-        html += `<td style="text-align:center;padding:0.25rem">${delta >= 0 ? "+" : ""}${delta.toFixed(2)}</td>`;
-        html += `<td style="text-align:center;padding:0.25rem" class="${sigClass}">${sigLabel}</td>`;
-        html += `</tr>`;
-      });
-      html += "</table>";
-      container.innerHTML = html;
-    }
-
-    // --- Rank Summary Bar ---
-    let mcRankChart = null;
-
-    function mcIsLowerBetter(m) {
-      return MC_LOWER_BETTER.has(m);
-    }
-
-    function renderMcRank() {
-      if (!mcData) return;
-      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
-      const ctx = document.getElementById("mcRankChart").getContext("2d");
-      if (mcRankChart) mcRankChart.destroy();
-
-      const wins = {}, ties = {}, losses = {};
-      policies.forEach(p => { wins[p] = 0; ties[p] = 0; losses[p] = 0; });
-
-      mcData.metrics.forEach(metric => {
-        if (MC_SKIP_METRICS.has(metric)) return;
-        const statsMap = {};
-        policies.forEach(p => { statsMap[p] = mcStats(mcData.trials[p]?.[metric] || []); });
-        const lower = mcIsLowerBetter(metric);
-
-        policies.forEach(p => {
-          let isWinner = true, isTied = false;
-          policies.forEach(other => {
-            if (other === p) return;
-            const sP = statsMap[p], sO = statsMap[other];
-            const pBetter = lower ? sP.mean < sO.mean : sP.mean > sO.mean;
-            const overlap = (sP.mean - sP.ci95) <= (sO.mean + sO.ci95) && (sO.mean - sO.ci95) <= (sP.mean + sP.ci95);
-            if (overlap) isTied = true;
-            if (!pBetter && !overlap) isWinner = false;
-          });
-          if (isWinner && !isTied) wins[p]++;
-          else if (isTied) ties[p]++;
-          else losses[p]++;
-        });
-      });
-
-      mcRankChart = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels: policies,
-          datasets: [
-            { label: "Wins", data: policies.map(p => wins[p]), backgroundColor: "#2ea04399", borderColor: "#2ea043", borderWidth: 1 },
-            { label: "Ties", data: policies.map(p => ties[p]), backgroundColor: "#d2992244", borderColor: "#d29922", borderWidth: 1 },
-            { label: "Losses", data: policies.map(p => losses[p]), backgroundColor: "#f8514944", borderColor: "#f85149", borderWidth: 1 },
-          ]
-        },
-        options: {
-          indexAxis: "y",
-          responsive: true, maintainAspectRatio: false,
-          scales: {
-            x: { stacked: true, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
-            y: { stacked: true, ticks: { color: "#8b949e" }, grid: { color: "#21262d" } }
-          },
-          plugins: {
-            legend: { position: "bottom", labels: { color: "#8b949e", font: { size: 10 }, boxWidth: 10 } }
-          }
-        }
-      });
-    }
-
-    // --- Winner Heatmap ---
-    function renderMcHeatmap() {
-      if (!mcData) return;
-      const policies = mcData.policies.filter(p => mcVisiblePolicies.has(p));
-      const container = document.getElementById("mcHeatmap");
-      if (policies.length < 2) { container.innerHTML = ""; return; }
-
-      const results = {};
-      policies.forEach(pA => {
-        results[pA] = {};
-        policies.forEach(pB => { results[pA][pB] = { wins: 0, losses: 0, ties: 0 }; });
-      });
-
-      mcData.metrics.forEach(metric => {
-        if (MC_SKIP_METRICS.has(metric)) return;
-        const lower = mcIsLowerBetter(metric);
-        policies.forEach(pA => {
-          policies.forEach(pB => {
-            if (pA === pB) return;
-            const sA = mcStats(mcData.trials[pA]?.[metric] || []);
-            const sB = mcStats(mcData.trials[pB]?.[metric] || []);
-            const overlap = (sA.mean - sA.ci95) <= (sB.mean + sB.ci95) && (sB.mean - sB.ci95) <= (sA.mean + sA.ci95);
-            if (overlap) { results[pA][pB].ties++; return; }
-            const aWins = lower ? sA.mean < sB.mean : sA.mean > sB.mean;
-            if (aWins) results[pA][pB].wins++;
-            else results[pA][pB].losses++;
-          });
-        });
-      });
-
-      let html = "<table style='width:100%;font-size:0.72rem;border-collapse:collapse;text-align:center'>";
-      html += "<tr><th style='padding:0.3rem;border:1px solid var(--border)'></th>";
-      policies.forEach(p => { html += `<th style="padding:0.3rem;border:1px solid var(--border);color:var(--text)">${p}</th>`; });
-      html += "</tr>";
-
-      policies.forEach(pA => {
-        html += `<tr><td style="padding:0.3rem;border:1px solid var(--border);color:var(--text);font-weight:600;text-align:left">${pA}</td>`;
-        policies.forEach(pB => {
-          if (pA === pB) {
-            html += `<td style="padding:0.3rem;border:1px solid var(--border);background:#161b22">—</td>`;
-            return;
-          }
-          const r = results[pA][pB];
-          const total = r.wins + r.losses + r.ties;
-          const ratio = total > 0 ? r.wins / total : 0;
-          let bg, color;
-          if (ratio > 0.6) { bg = `rgba(46,160,67,${0.15 + ratio * 0.3})`; color = "#3fb950"; }
-          else if (ratio < 0.4) { bg = `rgba(248,81,73,${0.15 + (1 - ratio) * 0.2})`; color = "#f85149"; }
-          else { bg = "rgba(210,153,34,0.1)"; color = "#d29922"; }
-          html += `<td style="padding:0.3rem;border:1px solid var(--border);background:${bg};color:${color};font-weight:600" title="${pA} vs ${pB}: ${r.wins}W/${r.ties}T/${r.losses}L">${r.wins}/${r.ties}/${r.losses}</td>`;
-        });
-        html += "</tr>";
-      });
-      html += "</table>";
-      html += `<div style="font-size:0.65rem;color:var(--muted);margin-top:0.3rem">Cells: Wins/Ties/Losses (row vs column). Green = row dominates.</div>`;
-      container.innerHTML = html;
-    }
-
-  })();
-  </script>
+  <script src="./js/mqsim-common.js"></script>
+  <script src="./js/mqsim-core.js"></script>
+  <script src="./js/mqsim-experiments.js"></script>
+  <script src="./js/mqsim-monte-carlo.js"></script>
+  <script src="./js/mqsim-selfcheck.js"></script>
 </body>
 </html>

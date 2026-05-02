@@ -3,6 +3,7 @@
 from gitlab_hk_sim.state import (
     MergeRequest,
     MRState,
+    OperationFailureConfig,
     Pipeline,
     PipelineStatus,
     Project,
@@ -101,6 +102,34 @@ class TestMergeRequest:
         )
         assert not mr.has_useful_success("target-001")
 
+    def test_consume_forced_merge_failure_counted(self):
+        mr = _make_mr(iid=1)
+        mr.merge_failures_remaining = 2
+        mr.merge_failure_status_code = 405
+        mr.merge_failure_detail = "405 Method Not Allowed"
+
+        first = mr.consume_forced_merge_failure()
+        second = mr.consume_forced_merge_failure()
+        third = mr.consume_forced_merge_failure()
+
+        assert first == (405, "405 Method Not Allowed")
+        assert second == (405, "405 Method Not Allowed")
+        assert third is None
+        assert mr.merge_failures_remaining == 0
+
+    def test_consume_forced_merge_failure_always(self):
+        mr = _make_mr(iid=1)
+        mr.merge_failures_remaining = -1
+        mr.merge_failure_status_code = 409
+        mr.merge_failure_detail = "simulated merge failure"
+
+        first = mr.consume_forced_merge_failure()
+        second = mr.consume_forced_merge_failure()
+
+        assert first == (409, "simulated merge failure")
+        assert second == (409, "simulated merge failure")
+        assert mr.merge_failures_remaining == -1
+
 
 class TestSHAPools:
     def test_next_mr_sha_from_pool(self):
@@ -162,3 +191,15 @@ class TestSimState:
         state = SimState(project=project, merge_requests=[mr])
         assert state.get_mr(5) is mr
         assert state.get_mr(99) is None
+
+
+class TestOperationFailureConfig:
+    def test_zero_rate_never_fails(self):
+        cfg = OperationFailureConfig(merge_failure_rate=0.0, rebase_failure_rate=0.0)
+        assert not cfg.should_fail_merge()
+        assert not cfg.should_fail_rebase()
+
+    def test_one_rate_always_fails(self):
+        cfg = OperationFailureConfig(merge_failure_rate=1.0, rebase_failure_rate=1.0)
+        assert cfg.should_fail_merge()
+        assert cfg.should_fail_rebase()

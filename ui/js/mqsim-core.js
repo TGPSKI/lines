@@ -1,0 +1,3989 @@
+/*
+ * Split from ui/index.html for maintainability.
+ * Client-side only: plain browser JavaScript, no build step.
+ */
+
+const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)", failed: "#f85149", force_merge: "#f85149" };
+const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
+const MERGE_LABELS_PRIORITY = [
+  "bot/approved: critical",
+  "bot/approved: urgent",
+  "bot/approved: high",
+  "bot/approved: progressive-delivery",
+  "bot/approved: medium",
+  "bot/approved: low",
+  "bot/approved",
+  "bot/automerge",
+  "auto-merge",
+  "lgtm"
+];
+let playhead = 0, playTimer = null, xRange = [0, 100];
+let filesData = [], activeIndex = 0;
+let expMode = "discrimination";
+let expData = {
+  discrimination: null,
+  discriminationMeta: null,
+  calibrationGrid: [],
+  calibrationValidation: [],
+  calibrationSummary: [],
+};
+let expDiscDeltaChart = null, expDiscRebaseChart = null, expCalErrorChart = null, expCalScatterChart = null, expCalDimChart = null, expCalBenchRuntimeChart = null, expCalBenchScoreChart = null;
+let kanbanVisibleIdxs = new Set();
+let barVisibleIdxs = new Set();
+let swimIdx = 0;
+let loadedRunMetadataByCategory = {};
+let loadedScenarioDocs = [];
+
+// Monte Carlo shared state (declared here for cross-file availability).
+let mcData = null; // { policies: [...], metrics: [...], trials: { policy: { metric: [values] } } }
+let mcBoxChart = null, mcCIChart = null;
+let mcVisiblePolicies = new Set();
+
+// --- Parsing & Analysis ---
+function parseNdjson(text) {
+  const lines = String(text || "").split("\n");
+  const out = [];
+  lines.forEach(rawLine => {
+    const line = rawLine.trim();
+    if (!line) return;
+    try {
+      const parsed = JSON.parse(line);
+      if (parsed && typeof parsed === "object") out.push(parsed);
+    } catch {
+      // Ignore malformed NDJSON lines, matching historical behavior.
+    }
+  });
+  return out;
+}
+function parseYamlDoc(text) {
+  if (!(window.jsyaml && typeof window.jsyaml.load === "function")) return null;
+  try {
+    return window.jsyaml.load(text);
+  } catch {
+    return null;
+  }
+}
+function normalizeNameStem(name) {
+  return String(name || "")
+    .toLowerCase()
+    .replace(/\.(ndjson|jsonl|json|yaml|yml)$/i, "")
+    .replace(/-metrics$/i, "")
+    .trim();
+}
+function getPriorityLabel(labels) {
+  const arr = Array.isArray(labels) ? labels.map(String) : [];
+  return MERGE_LABELS_PRIORITY.find(lbl => arr.includes(lbl)) || "";
+}
+function buildCatalogEntryFromLabels(labels) {
+  const list = Array.isArray(labels) ? labels.map(String).filter(Boolean) : [];
+  return {
+    labels: list,
+    priority_label: getPriorityLabel(list),
+    service_labels: list.filter(lbl => lbl.startsWith("tenant-")).sort((a, b) => a.localeCompare(b)),
+  };
+}
+function buildScenarioCatalog(rawScenario) {
+  const out = {};
+  const mrs = Array.isArray(rawScenario?.merge_requests) ? rawScenario.merge_requests : [];
+  mrs.forEach(mr => {
+    const iid = Number(mr?.iid);
+    if (!Number.isFinite(iid) || iid <= 0) return;
+    out[String(iid)] = buildCatalogEntryFromLabels(mr?.labels);
+  });
+  return out;
+}
+function scenarioMetaFromYaml(rawScenario, sourceFileName = "") {
+  const mrs = Array.isArray(rawScenario?.merge_requests) ? rawScenario.merge_requests : [];
+  const arrivals = [];
+  const cancellations = [];
+  const forceMerges = [];
+  const pushes = [];
+  mrs.forEach(mr => {
+    const iid = Number(mr?.iid);
+    if (!Number.isFinite(iid) || iid <= 0) return;
+    const arrivalTick = Number(mr?.arrival_tick);
+    const cancelTick = Number(mr?.cancel_tick);
+    const forceMergeTick = Number(mr?.force_merge_tick);
+    const pushTick = Number(mr?.push_tick);
+    if (arrivalTick > 0) arrivals.push({ iid, tick: arrivalTick });
+    if (cancelTick > 0) cancellations.push({ iid, tick: cancelTick });
+    if (forceMergeTick > 0) forceMerges.push({ iid, tick: forceMergeTick });
+    if (pushTick > 0) pushes.push({ iid, tick: pushTick });
+  });
+  return {
+    event: "scenario_meta",
+    tick: 0,
+    total_mrs: mrs.length,
+    failure_rate: Number(rawScenario?.pipeline_durations?.failure_rate) || 0,
+    tick_seconds: Number(rawScenario?.tick_seconds) || 60,
+    operation_failure_rate: {
+      merge: Number(rawScenario?.failure_path_realism?.merge_failure_rate) || 0,
+      rebase: Number(rawScenario?.failure_path_realism?.rebase_failure_rate) || 0,
+    },
+    pipeline_duration: {
+      min: Number(rawScenario?.pipeline_durations?.min_ticks) || 0,
+      max: Number(rawScenario?.pipeline_durations?.max_ticks) || 0,
+    },
+    force_merges: forceMerges,
+    cancellations,
+    arrivals,
+    pushes,
+    scheduled_target_advances: rawScenario?.scheduled_target_advances || {},
+    scenario_metadata: rawScenario?.metadata || {},
+    mr_catalog: buildScenarioCatalog(rawScenario),
+    scenario_source_file: sourceFileName,
+  };
+}
+function mergeCatalogEntries(fallbackEntry, existingEntry) {
+  const fb = fallbackEntry && typeof fallbackEntry === "object" ? fallbackEntry : {};
+  const ex = existingEntry && typeof existingEntry === "object" ? existingEntry : {};
+  const labelsEx = Array.isArray(ex.labels) ? ex.labels : [];
+  const labelsFb = Array.isArray(fb.labels) ? fb.labels : [];
+  const labels = labelsEx.length ? labelsEx : labelsFb;
+  const serviceEx = Array.isArray(ex.service_labels) ? ex.service_labels : [];
+  const serviceFb = Array.isArray(fb.service_labels) ? fb.service_labels : [];
+  return {
+    labels,
+    priority_label: ex.priority_label || fb.priority_label || getPriorityLabel(labels) || "",
+    service_labels: serviceEx.length ? serviceEx : (serviceFb.length ? serviceFb : labels.filter(lbl => String(lbl).startsWith("tenant-")).sort((a, b) => String(a).localeCompare(String(b)))),
+  };
+}
+function mergeCatalogs(fallbackCatalog, existingCatalog) {
+  const fb = fallbackCatalog && typeof fallbackCatalog === "object" ? fallbackCatalog : {};
+  const ex = existingCatalog && typeof existingCatalog === "object" ? existingCatalog : {};
+  const merged = {};
+  const keys = new Set([...Object.keys(fb), ...Object.keys(ex)]);
+  keys.forEach(key => {
+    merged[key] = mergeCatalogEntries(fb[key], ex[key]);
+  });
+  return merged;
+}
+function withScenarioMeta(events, fallbackMeta) {
+  const arr = Array.isArray(events) ? events : [];
+  if (!fallbackMeta || typeof fallbackMeta !== "object") return arr;
+  const idx = arr.findIndex(e => e && e.event === "scenario_meta");
+  if (idx < 0) return [fallbackMeta, ...arr];
+  const current = arr[idx] || {};
+  const next = { ...fallbackMeta, ...current };
+  next.arrivals = (Array.isArray(current.arrivals) && current.arrivals.length) ? current.arrivals : fallbackMeta.arrivals;
+  next.cancellations = (Array.isArray(current.cancellations) && current.cancellations.length) ? current.cancellations : fallbackMeta.cancellations;
+  next.force_merges = (Array.isArray(current.force_merges) && current.force_merges.length) ? current.force_merges : fallbackMeta.force_merges;
+  next.pushes = (Array.isArray(current.pushes) && current.pushes.length) ? current.pushes : fallbackMeta.pushes;
+  next.pipeline_duration = (current.pipeline_duration && typeof current.pipeline_duration === "object" && Object.keys(current.pipeline_duration).length)
+    ? current.pipeline_duration
+    : fallbackMeta.pipeline_duration;
+  next.operation_failure_rate = (current.operation_failure_rate && typeof current.operation_failure_rate === "object" && Object.keys(current.operation_failure_rate).length)
+    ? current.operation_failure_rate
+    : fallbackMeta.operation_failure_rate;
+  next.scheduled_target_advances = (current.scheduled_target_advances && typeof current.scheduled_target_advances === "object" && Object.keys(current.scheduled_target_advances).length)
+    ? current.scheduled_target_advances
+    : fallbackMeta.scheduled_target_advances;
+  next.scenario_metadata = (current.scenario_metadata && typeof current.scenario_metadata === "object" && Object.keys(current.scenario_metadata).length)
+    ? current.scenario_metadata
+    : fallbackMeta.scenario_metadata;
+  next.mr_catalog = mergeCatalogs(fallbackMeta.mr_catalog, current.mr_catalog);
+  if (current.total_mrs == null) next.total_mrs = fallbackMeta.total_mrs;
+  if (current.tick_seconds == null) next.tick_seconds = fallbackMeta.tick_seconds;
+  if (current.failure_rate == null) next.failure_rate = fallbackMeta.failure_rate;
+  const before = JSON.stringify(current);
+  const after = JSON.stringify(next);
+  if (before === after) return arr;
+  const out = arr.slice();
+  out[idx] = next;
+  return out;
+}
+function resolveScenarioDocForTrace(events, traceName = "") {
+  if (!loadedScenarioDocs.length) return null;
+  if (loadedScenarioDocs.length === 1) return loadedScenarioDocs[0];
+  const stem = normalizeNameStem(traceName);
+  const meta = (Array.isArray(events) ? events : []).find(e => e && e.event === "scenario_meta") || {};
+  const scenarioName = String(meta?.scenario_metadata?.name || "").trim().toLowerCase();
+  if (scenarioName) {
+    const byName = loadedScenarioDocs.find(s => String(s?.doc?.metadata?.name || "").trim().toLowerCase() === scenarioName);
+    if (byName) return byName;
+  }
+  const ctxScenario = String(loadedRunMetadataByCategory?.comparisons?.context?.scenario || "").toLowerCase();
+  if (ctxScenario) {
+    const byCtx = loadedScenarioDocs.find(s => ctxScenario.includes(normalizeNameStem(s.fileName)));
+    if (byCtx) return byCtx;
+  }
+  if (stem) {
+    const byStem = loadedScenarioDocs.find(s => normalizeNameStem(s.fileName).includes(stem) || stem.includes(normalizeNameStem(s.fileName)));
+    if (byStem) return byStem;
+  }
+  return loadedScenarioDocs[0];
+}
+function applyLoadedScenariosToFilesData() {
+  if (!filesData.length || !loadedScenarioDocs.length) return false;
+  let changed = false;
+  filesData = filesData.map(d => {
+    const docEntry = resolveScenarioDocForTrace(d.events, d.name);
+    if (!docEntry) return d;
+    const fallbackMeta = scenarioMetaFromYaml(docEntry.doc, docEntry.fileName);
+    const mergedEvents = withScenarioMeta(d.events || [], fallbackMeta);
+    if (mergedEvents === d.events) return d;
+    changed = true;
+    return { ...d, events: mergedEvents };
+  });
+  if (changed) {
+    filesData.forEach(d => {
+      const M = computeFileMetrics(d.events);
+      d.metrics = M;
+      d.packed = M.packed;
+    });
+  }
+  return changed;
+}
+
+function isShiftPressed(evt) {
+  return !!(evt?.native?.shiftKey || evt?.shiftKey || window.event?.shiftKey);
+}
+
+function isTypingTarget(target) {
+  const el = target instanceof HTMLElement ? target : null;
+  if (!el) return false;
+  if (el.isContentEditable) return true;
+  const field = el.closest("input, textarea, select");
+  if (!field) return false;
+  return !field.classList.contains("lock-scrub");
+}
+
+function handleLegendToggle(evt, item, legend) {
+  const chart = legend?.chart;
+  const idx = item?.datasetIndex;
+  if (!chart || idx == null) return;
+  if (isShiftPressed(evt)) {
+    const hasOtherVisible = chart.data.datasets.some((_, i) => (
+      i !== idx && chart.isDatasetVisible(i)
+    ));
+    chart.data.datasets.forEach((_, i) => {
+      chart.setDatasetVisibility(i, hasOtherVisible ? i === idx : true);
+    });
+  } else {
+    chart.setDatasetVisibility(idx, !chart.isDatasetVisible(idx));
+  }
+  chart.update();
+}
+function normalizeEventsForAnalysis(arr) {
+  const base = (Array.isArray(arr) ? arr : []).filter(e => e && e.event !== "api_call");
+  const extra = [];
+  base.forEach(e => { if (e.event === "tick" && Array.isArray(e.force_merges)) e.force_merges.forEach(fm => extra.push(fm)); });
+  return base.concat(extra);
+}
+function percentile(values, percentileValue) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((u, v) => u - v);
+  const idx = Math.min(sorted.length - 1, Math.floor((sorted.length * percentileValue) / 100));
+  return sorted[idx];
+}
+
+function buildSwimlaneSegs(evs, maxT) {
+  const mrId = v => String(v);
+  const segs = [], pipe = new Map();
+  const horizon = maxT + 1; // exclusive upper bound so last frame remains representable
+  evs.forEach(e => { if (e.event === "rebase" && e.pipeline_id != null) pipe.set(e.pipeline_id, { mr: mrId(e.mr_iid), rebaseTick: e.tick, outcome: e.pipeline_outcome || null }); });
+  evs.forEach(e => {
+    if (e.event !== "tick" || !e.transitions) return;
+    e.transitions.forEach(tr => {
+      const m = (tr.from || "").toLowerCase(), n = (tr.to || "").toLowerCase();
+      if (tr.mr_iid == null) return;
+      const mid = mrId(tr.mr_iid);
+      const pid = tr.pipeline_id;
+      let p = pid == null ? null : pipe.get(pid);
+      // Some pipelines exist at scenario start and transition without a matching
+      // rebase event in the stream. Synthesize minimal tracking so they can render.
+      if (!p && pid != null) {
+        p = {
+          mr: mid,
+          rebaseTick: Math.max(0, e.tick - 1),
+          outcome: null,
+        };
+        pipe.set(pid, p);
+      }
+      if (p && p.mr !== mid) p.mr = mid;
+      if (m === "pending" && n === "running" && p) {
+        const start = Math.max(0, p.rebaseTick ?? (e.tick - 1));
+        if (e.tick > start) segs.push({ mr: mid, start, end: e.tick, kind: "pending" });
+        p.runAt = e.tick;
+      } else if (m === "running" && n === "success" && p) {
+        const runAt = Math.max(0, p.runAt ?? (e.tick - 1));
+        if (e.tick > runAt) segs.push({ mr: mid, start: runAt, end: e.tick, kind: "running" });
+        p.succAt = e.tick;
+      } else if (m === "running" && n === "failed" && p) {
+        const runAt = Math.max(0, p.runAt ?? (e.tick - 1));
+        if (e.tick > runAt) segs.push({ mr: mid, start: runAt, end: e.tick, kind: "failed" });
+        p.failedAt = e.tick;
+      }
+    });
+  });
+  const allMergeEvents = evs
+    .filter(e => e.event === "merge" && e.mr_iid != null)
+    .map(e => ({ tick: e.tick, mr: mrId(e.mr_iid) }))
+    .sort((a, b) => a.tick - b.tick);
+  pipe.forEach((p, pid) => {
+    if (p.succAt == null) return;
+    let nextMerge = null, nextRebase = null;
+    evs.forEach(e => {
+      if (mrId(e.mr_iid) !== p.mr || e.tick < p.succAt) return;
+      if (e.event === "merge" && e.tick >= p.succAt && (!nextMerge || e.tick < nextMerge)) nextMerge = e.tick;
+      if (e.event === "rebase" && e.tick > p.succAt && (!nextRebase || e.tick < nextRebase)) nextRebase = e.tick;
+    });
+    const t1 = Math.min(nextMerge ?? horizon, nextRebase ?? horizon, horizon);
+    if (t1 <= p.succAt) return;
+    // A success becomes stale as soon as *another* MR merges, even if this MR
+    // itself eventually merges later (e.g., force-merge). Keep that stale split.
+    const firstOtherMerge = allMergeEvents.find(
+      me => me.tick > p.succAt && me.mr !== p.mr
+    )?.tick ?? null;
+    if (firstOtherMerge != null && firstOtherMerge < t1) {
+      segs.push({ mr: p.mr, start: p.succAt, end: firstOtherMerge, kind: "success" });
+      segs.push({ mr: p.mr, start: firstOtherMerge, end: t1, kind: "stale" });
+    } else if (nextMerge != null && (nextRebase == null || nextMerge <= nextRebase)) {
+      segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+    } else if (nextRebase != null) {
+      segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "stale" });
+    } else {
+      segs.push({ mr: p.mr, start: p.succAt, end: t1, kind: "success" });
+    }
+  });
+  const mergeTick = new Map(), forceMergeTicks = [];
+  evs.forEach(e => {
+    if (e.event === "merge" && e.mr_iid != null) {
+      const mid = mrId(e.mr_iid);
+      const prev = mergeTick.get(mid);
+      if (prev == null || e.tick < prev) mergeTick.set(mid, e.tick);
+      const kind = e.force_merge ? "force_merge" : "merged";
+      segs.push({ mr: mid, start: e.tick, end: e.tick + Math.max(1, maxT * 0.006), kind });
+      if (e.force_merge) forceMergeTicks.push(e.tick);
+    }
+  });
+
+  const closeTick = new Map();
+  evs.forEach(e => {
+    if (e.event !== "tick" || !Array.isArray(e.cancellations) || e.tick == null) return;
+    e.cancellations.forEach(mrid => {
+      const mid = mrId(mrid);
+      const prev = closeTick.get(mid);
+      if (prev == null || e.tick < prev) closeTick.set(mid, e.tick);
+    });
+  });
+
+  segs.forEach(s => {
+    if (s.kind === "merged" || s.kind === "force_merge") return;
+    const mid = mrId(s.mr);
+    const mt = mergeTick.get(mid);
+    const ct = closeTick.get(mid);
+    const cut = Math.min(mt ?? Infinity, ct ?? Infinity);
+    if (cut !== Infinity && s.end > cut) s.end = cut;
+  });
+  segs.forEach(s => { s.end = Math.max(s.end, s.start); });
+  const result = segs.filter(s => s.end > s.start).sort((a, b) => {
+    const an = Number(a.mr), bn = Number(b.mr);
+    if (Number.isFinite(an) && Number.isFinite(bn) && an !== bn) return an - bn;
+    if (String(a.mr) !== String(b.mr)) return String(a.mr).localeCompare(String(b.mr));
+    return a.start - b.start;
+  });
+  result._forceMergeTicks = forceMergeTicks;
+  return result;
+}
+
+function buildPackedSeriesFromEvents(raw) {
+  const evs = normalizeEventsForAnalysis([...raw]);
+  let maxTick = 0;
+  evs.forEach(e => { if (e.tick != null) maxTick = Math.max(maxTick, e.tick); });
+  const segs = buildSwimlaneSegs(evs, maxTick);
+  const byT = new Map();
+  evs.forEach(e => { if (e.event === "tick" && e.tick != null) byT.set(e.tick, { ...e }); else if (e.event === "snapshot" && e.tick != null && !byT.has(e.tick)) byT.set(e.tick, { ...e }); });
+  evs.forEach(e => { if (e.event === "snapshot" && e.tick != null) { const r = byT.get(e.tick); if (r) { r.open_mrs = r.open_mrs ?? e.open_mrs; } } });
+  const series = { labels: [], pool: [], active: [], stale: [], rest: [], open: [] };
+  for (let t = 0; t <= maxTick; t++) {
+    const w = byT.get(t) || {}, o = w.open_mrs ?? 0;
+    const ciMrs = new Set(), readyMrs = new Set(), staleMrs = new Set();
+    for (const s of segs) {
+      if (s.start > t || s.end <= t) continue;
+      if (s.kind === "running") ciMrs.add(s.mr);
+      else if (s.kind === "success") readyMrs.add(s.mr);
+      else if (s.kind === "stale") staleMrs.add(s.mr);
+    }
+    readyMrs.forEach(mr => { ciMrs.delete(mr); staleMrs.delete(mr); });
+    ciMrs.forEach(mr => staleMrs.delete(mr));
+    const ci = ciMrs.size, ready = readyMrs.size, stale = staleMrs.size;
+    series.labels.push(t); series.pool.push(ready); series.active.push(ci); series.stale.push(stale); series.rest.push(Math.max(0, o - ready - ci - stale)); series.open.push(o);
+  }
+  return { maxTick, merges: evs.filter(e => e.event === "merge").map(e => ({ tick: e.tick, mr: e.mr_iid })), series, segs };
+}
+
+function rebaseSetAtTick(evs, t) { const s = new Set(); evs.forEach(e => { if (e.event === "rebase" && e.tick === t && e.mr_iid != null) s.add(String(e.mr_iid)); }); return s; }
+function mergeTickByMr(evs) { const m = new Map(); evs.forEach(e => { if (e.event === "merge" && e.mr_iid != null) { const k = String(e.mr_iid); const x = m.get(k); if (x == null || e.tick < x) m.set(k, e.tick); } }); return m; }
+function arrivalTickByMr(evs) {
+  const m = new Map();
+  const meta = evs.find(e => e.event === "scenario_meta") || {};
+  const arr = Array.isArray(meta.arrivals) ? meta.arrivals : [];
+  arr.forEach(a => {
+    if (!a || a.iid == null) return;
+    const k = String(a.iid);
+    const t = Number(a.tick) || 0;
+    const prev = m.get(k);
+    if (prev == null || t < prev) m.set(k, t);
+  });
+  evs.forEach(e => {
+    if (e.event !== "tick" || !Array.isArray(e.arrivals) || e.tick == null) return;
+    e.arrivals.forEach(iid => {
+      if (iid == null) return;
+      const k = String(iid);
+      const prev = m.get(k);
+      if (prev == null || e.tick < prev) m.set(k, e.tick);
+    });
+  });
+  return m;
+}
+function cancellationTickByMr(evs) {
+  const m = new Map();
+  evs.forEach(e => {
+    if (e.event !== "tick" || !Array.isArray(e.cancellations) || e.tick == null) return;
+    e.cancellations.forEach(iid => {
+      if (iid == null) return;
+      const k = String(iid);
+      const prev = m.get(k);
+      if (prev == null || e.tick < prev) m.set(k, e.tick);
+    });
+  });
+  return m;
+}
+function collectAllIids(evs) {
+  const s = new Set();
+  const meta = evs.find(e => e.event === "scenario_meta") || {};
+  if (meta.mr_catalog && typeof meta.mr_catalog === "object") {
+    Object.keys(meta.mr_catalog).forEach(k => s.add(String(k)));
+  }
+  const arr = Array.isArray(meta.arrivals) ? meta.arrivals : [];
+  arr.forEach(a => { if (a && a.iid != null) s.add(String(a.iid)); });
+  evs.forEach(e => {
+    if (e.mr_iid != null) s.add(String(e.mr_iid));
+    (e.transitions || []).forEach(tr => { if (tr.mr_iid != null) s.add(String(tr.mr_iid)); });
+  });
+  if (!s.size && Number.isFinite(Number(meta.total_mrs)) && Number(meta.total_mrs) > 0) {
+    const n = Math.floor(Number(meta.total_mrs));
+    for (let i = 1; i <= n; i++) s.add(String(i));
+  }
+  return s;
+}
+function classifyMrAtTick(segs, t, m, mergeM, rebaseS) {
+  const mid = String(m);
+  if (t >= (mergeM.get(mid) ?? 1e9)) return "merged";
+  if (rebaseS.has(mid)) return "rebase";
+  let hasReady = false, hasStale = false, hasCi = false;
+  for (const s of segs) {
+    if (String(s.mr) !== mid) continue;
+    if (s.start > t || s.end <= t) continue;
+    if (s.kind === "success") hasReady = true;
+    else if (s.kind === "stale") hasStale = true;
+    else if (s.kind === "pending" || s.kind === "running") hasCi = true;
+  }
+  if (hasCi) return "ci";
+  if (hasReady) return "ready";
+  if (hasStale) return "stale";
+  return "wait";
+}
+function buildKanbanState(packed, evs, t) {
+  const f = normalizeEventsForAnalysis(evs);
+  const mergeM = mergeTickByMr(f);
+  const rebaseS = rebaseSetAtTick(f, t);
+  const arrivalM = arrivalTickByMr(f);
+  const cancelM = cancellationTickByMr(f);
+  const iids = Array.from(collectAllIids(f));
+  const w = { queue: [], wait: [], rebase: [], ci: [], ready: [], stale: [], merged: [] };
+  for (const m of iids) {
+    const mid = String(m);
+    const mergedAt = mergeM.get(mid);
+    const canceledAt = cancelM.get(mid);
+    const arrivalAt = arrivalM.get(mid) ?? 0;
+    const isMerged = mergedAt != null && mergedAt <= t;
+    if (isMerged) {
+      w.merged.push(mid);
+      continue;
+    }
+    if (canceledAt != null && canceledAt <= t) continue;
+    if (arrivalAt > t) continue;
+    w.queue.push(mid);
+    const c = classifyMrAtTick(packed.segs, t, mid, mergeM, rebaseS);
+    w[c === "rebase" ? "rebase" : c].push(mid);
+  }
+  Object.values(w).forEach(a => a.sort((a, b) => Number(a) - Number(b)));
+  return w;
+}
+function buildNarrativeAtTick(evs, t) {
+  const a = [];
+  evs.forEach(e => {
+    if (e.tick === t) {
+      if (e.event === "rebase") a.push("Rebased !" + e.mr_iid);
+      if (e.event === "merge" && e.force_merge) a.push("FORCE-MERGED !" + e.mr_iid + " (bypassed queue)");
+      else if (e.event === "merge") a.push("Merged !" + e.mr_iid);
+    }
+  });
+  evs.forEach(e => {
+    if (e.event === "tick" && e.tick === t) (e.transitions || []).forEach(tr => {
+      const to = (tr.to || "").toLowerCase();
+      if (to === "failed") a.push("!" + tr.mr_iid + ": CI failed");
+      else a.push("!" + tr.mr_iid + ": " + tr.from + " → " + tr.to);
+    });
+  });
+  return a.length ? a : ["Clock advanced."];
+}
+
+function computeFileMetrics(evs) {
+  const f = normalizeEventsForAnalysis(evs);
+  const packed = buildPackedSeriesFromEvents(f);
+  const rebaseE = f.filter(e => e.event === "rebase"), mergeE = f.filter(e => e.event === "merge"), tickE = f.filter(e => e.event === "tick");
+  const rebaseErrE = f.filter(e => e.event === "rebase_error");
+  const mergeErrE = f.filter(e => e.event === "merge_error");
+  const pipelineCancelE = f.filter(e => e.event === "pipeline_cancel");
+  const meta = f.find(e => e.event === "scenario_meta") || {};
+  const tickSeconds = Math.max(1, Number(meta.tick_seconds) || 60);
+  const srpL = tickE.map(e => e.same_root_success_pool || 0), stL = tickE.map(e => e.stale_successes || 0);
+  const peak = tickE.reduce((M, e) => Math.max(M, e.active_pipelines || 0), 0);
+  const mrc = {}; rebaseE.forEach(e => { mrc[e.mr_iid] = (mrc[e.mr_iid] || 0) + 1; });
+  const dup = Object.values(mrc).filter(n => n > 1).reduce((a, n) => a + n - 1, 0);
+  const totalT = packed.maxTick;
+  const totalHours = (totalT * tickSeconds) / 3600;
+  const mTicks = mergeE.map(e => e.tick).sort((a, b) => a - b);
+  const mergeRounds = new Set(mergeE.map(e => e.tick)).size;
+  const o0 = packed.series.open.find(v => v > 0) ?? 0;
+  const ciTimes = packed.segs.filter(s => s.kind === "running").map(s => s.end - s.start);
+  const ciMin = ciTimes.length ? Math.min(...ciTimes) : 0;
+  const ciMax = ciTimes.length ? Math.max(...ciTimes) : 0;
+  const ciAvg = ciTimes.length ? ciTimes.reduce((a, b) => a + b, 0) / ciTimes.length : 0;
+  const forceMergeCount = mergeE.filter(e => e.force_merge).length;
+  let ciFailures = 0;
+  tickE.forEach(e => { (e.transitions || []).forEach(tr => { if ((tr.to || "").toLowerCase() === "failed") ciFailures++; }); });
+  const embeddedScenarioMetadata = meta.scenario_metadata && typeof meta.scenario_metadata === "object"
+    ? meta.scenario_metadata
+    : {};
+  const calTargets = embeddedScenarioMetadata.calibration_targets && typeof embeddedScenarioMetadata.calibration_targets === "object"
+    ? embeddedScenarioMetadata.calibration_targets
+    : {};
+  const arrivalProfile = calTargets.arrival_profile && typeof calTargets.arrival_profile === "object"
+    ? calTargets.arrival_profile
+    : {};
+  const timelineTicks = Number(meta.total_time_ticks)
+    || Number(embeddedScenarioMetadata.window_ticks)
+    || totalT;
+  const timeline = computeHourlyTimeline({
+    events: f,
+    scenarioMeta: meta,
+    arrivalProfile,
+    tickSeconds,
+    totalTicks: timelineTicks,
+  });
+  const peakOffRatio = timeline.throughput_offpeak_window_mph > 0
+    ? timeline.throughput_peak_window_mph / timeline.throughput_offpeak_window_mph
+    : 0;
+  return {
+    packed, total_time_ticks: totalT, mrs_merged: mergeE.length, throughput: mergeE.length / Math.max(1, totalT),
+    throughput_hour: totalHours > 0 ? mergeE.length / totalHours : 0,
+    tick_seconds: tickSeconds,
+    time_to_first: mTicks[0] ?? totalT, time_to_10: mTicks[9] ?? totalT, avg_int: totalT / Math.max(1, mergeE.length),
+    queue_drain: o0 ? (100 * mergeE.length) / o0 : 0, rebase_calls: rebaseE.length, pipelines: rebaseE.length,
+    peak, dup, stale_max: stL.length ? Math.max(...stL) : 0, srp_p95: percentile(srpL, 95), srp_max: srpL.length ? Math.max(...srpL) : 0,
+    merge_rounds: mergeRounds, avg_mrs_per_round: mergeE.length / Math.max(1, mergeRounds),
+    ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: collectAllIids(f).size,
+    force_merges: forceMergeCount, ci_failures: ciFailures,
+    rebase_errors: rebaseErrE.length, merge_errors: mergeErrE.length,
+    pipeline_cancels: pipelineCancelE.length,
+    modeled_hours: timeline.modeled_hours,
+    total_arrivals: timeline.total_arrivals,
+    throughput_24h_mph: timeline.throughput_24h_mph,
+    throughput_active_mph: timeline.throughput_active_mph,
+    throughput_peak8_mph: timeline.throughput_peak8_mph,
+    throughput_peak8_p90_mph: timeline.throughput_peak8_p90_mph,
+    throughput_peak_window_mph: timeline.throughput_peak_window_mph,
+    throughput_offpeak_window_mph: timeline.throughput_offpeak_window_mph,
+    arrivals_peak_window_per_hour: timeline.arrivals_peak_window_per_hour,
+    arrivals_offpeak_window_per_hour: timeline.arrivals_offpeak_window_per_hour,
+    peak_offpeak_throughput_ratio: peakOffRatio,
+    merge_interval_p50_seconds: timeline.merge_interval_p50_seconds,
+    merge_interval_p95_seconds: timeline.merge_interval_p95_seconds
+  };
+}
+
+function globalMaxTick() { let mx = 0; filesData.forEach(d => { if (d.packed) mx = Math.max(mx, d.packed.maxTick); }); return mx; }
+
+// --- Tab Navigation ---
+function updatePlaybackVisibility() {
+  const active = document.querySelector(".tab-panel.active");
+  const show = !!(active && active.id === "panelKanban" && filesData.length);
+  if (!show && playTimer) stop();
+  const bar = document.getElementById("playbackBar");
+  if (bar) bar.classList.toggle("visible", show);
+}
+
+function swimIdsAllowedForTab(name) {
+  if (name === "composition") return new Set(["swimAreaL", "swimAreaR"]);
+  if (name === "swimlane") return new Set(["swimAreaSingle"]);
+  return new Set();
+}
+
+function updateSwimTooltipVisibilityForTab(name) {
+  const active = getActiveSwimLock();
+  const tip = getGlobalSwimTipEl();
+  if (!active) {
+    tip.style("display", "none").style("pointer-events", "none").classed("locked", false);
+    return;
+  }
+  const allowed = swimIdsAllowedForTab(name);
+  if (!allowed.has(active.swimId)) {
+    tip.style("display", "none").style("pointer-events", "none").classed("locked", false);
+    return;
+  }
+  renderLockedSwimTip(active.swimId);
+}
+
+function getActiveSwimLockForTab(name) {
+  const allowed = swimIdsAllowedForTab(name);
+  if (!allowed.size) return null;
+  const tipSwimId = getGlobalSwimTipEl().attr("data-swim-id") || null;
+  if (tipSwimId && allowed.has(tipSwimId)) {
+    const exact = getActiveSwimLock(tipSwimId);
+    if (exact) return exact;
+  }
+  for (const swimId of allowed) {
+    const lock = getActiveSwimLock(swimId);
+    if (lock) return lock;
+  }
+  return null;
+}
+
+function getActiveTabName() {
+  return document.querySelector(".nav-tab.active")?.dataset.tab || "load";
+}
+
+function renderTabContent(name) {
+  if (name === "kanban") renderKanbanTab();
+  if (name === "composition") { renderChartPolicyTabs(); refreshCharts(); }
+  if (name === "bars") renderBarsTab();
+  if (name === "swimlane") renderSwimlaneTab();
+  if (name === "experiments") renderExperiments();
+  if (name === "stats") renderStats();
+  if (name === "simulation") renderSimulationTab();
+  if (name === "monteCarlo") renderMonteCarlo();
+}
+
+function switchTab(name) {
+  document.querySelectorAll(".nav-tab").forEach(b => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "panel" + name.charAt(0).toUpperCase() + name.slice(1)));
+  renderTabContent(name);
+  updatePlaybackVisibility();
+  updateSwimTooltipVisibilityForTab(name);
+}
+document.getElementById("navTabs").addEventListener("click", e => { if (e.target.dataset.tab && !e.target.classList.contains("disabled")) switchTab(e.target.dataset.tab); });
+
+function hasLoadedData() {
+  return !!(
+    filesData.length
+    || loadedScenarioDocs.length
+    || mcData
+    || expData.discrimination
+    || expData.calibrationGrid.length
+    || expData.calibrationValidation.length
+    || expData.calibrationSummary.length
+  );
+}
+
+function updateRefreshUiButtonState() {
+  const btn = document.getElementById("btnRedrawUi");
+  if (!btn) return;
+  btn.disabled = !hasLoadedData();
+}
+
+function refreshUiWithoutReloadingFiles() {
+  if (!hasLoadedData()) return;
+  renderFileList();
+  const activeTab = getActiveTabName();
+  renderTabContent(activeTab);
+  updatePlaybackVisibility();
+  updateSwimTooltipVisibilityForTab(activeTab);
+}
+
+document.getElementById("btnRedrawUi").addEventListener("click", refreshUiWithoutReloadingFiles);
+
+// --- Load Tab ---
+const dropZone = document.getElementById("dropZone"), fileInput = document.getElementById("fileInput");
+const runDirInput = document.getElementById("runDirInput");
+const btnBrowseFiles = document.getElementById("btnBrowseFiles");
+const btnBrowseRunFolder = document.getElementById("btnBrowseRunFolder");
+const btnUnload = document.getElementById("btnUnload");
+const btnLoadSelectedRun = document.getElementById("btnLoadSelectedRun");
+const runCategorySelect = document.getElementById("runCategorySelect");
+const runMetaKeySelect = document.getElementById("runMetaKeySelect");
+const runMetaValueSelect = document.getElementById("runMetaValueSelect");
+const runNameFilterSelect = document.getElementById("runNameFilterSelect");
+const runChipList = document.getElementById("runChipList");
+const runMetadataView = document.getElementById("runMetadataView");
+const runOutputFiles = document.getElementById("runOutputFiles");
+const runBrowserStatus = document.getElementById("runBrowserStatus");
+let runCatalog = [];
+const selectedRunKeys = new Set();
+let activeRunKey = null;
+let runSortBy = "timestamp";
+let runSortDir = "desc";
+const RUN_SORTABLE_COLUMNS = new Set(["category", "timestamp", "name"]);
+const DATA_TABS = ["stats", "simulation", "kanban", "composition", "bars", "swimlane", "experiments", "monteCarlo"];
+
+function readFileText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = reject;
+    reader.readAsText(file);
+  });
+}
+
+function flattenMetadata(obj, prefix = "", out = {}) {
+  if (!obj || typeof obj !== "object") return out;
+  Object.entries(obj).forEach(([k, v]) => {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v == null) return;
+    if (typeof v === "object" && !Array.isArray(v)) flattenMetadata(v, key, out);
+    else out[key] = String(v);
+  });
+  return out;
+}
+
+const RUN_CATEGORIES = new Set(["comparisons", "discrimination", "monte-carlo", "calibration"]);
+
+function inferRunCategory(normalizedPath) {
+  const lower = String(normalizedPath || "").toLowerCase();
+  if (/(?:^|\/)discrimination-summary\.csv$/i.test(lower)) return "discrimination";
+  if (/(?:^|\/)monte-carlo-summary\.csv$/i.test(lower)) return "monte-carlo";
+  if (
+    /(?:^|\/)calibration-(?:grid|validation)\.csv$/i.test(lower)
+    || /(?:^|\/)calibration-.*\.csv$/i.test(lower)
+    || /(?:^|\/)selected-scenario\.ya?ml$/i.test(lower)
+    || /(?:^|\/)scenario.*\.ya?ml$/i.test(lower)
+    || /(?:^|\/)adaptive-vs-fixed-summary\.csv$/i.test(lower)
+    || /(?:^|\/)metadata\.json$/i.test(lower)
+  ) return "calibration";
+  if (/\.(ndjson|jsonl|json)$/i.test(lower)) return "comparisons";
+  return null;
+}
+
+function parseRunFileRelPath(relPath) {
+  const normalized = (relPath || "").replace(/\\/g, "/");
+  const parts = normalized.split("/").filter(Boolean);
+  if (!parts.length) return null;
+
+  // Preferred format: reports/<category>/<run>/...
+  const categoryIdx = parts.findIndex(p => RUN_CATEGORIES.has(p));
+  if (categoryIdx >= 0 && parts.length >= categoryIdx + 3) {
+    return {
+      category: parts[categoryIdx],
+      run: parts[categoryIdx + 1],
+      subpath: parts.slice(categoryIdx + 2).join("/"),
+    };
+  }
+
+  // Fallback when user selects a category/run folder directly.
+  if (parts.length >= 2) {
+    const inferred = inferRunCategory(normalized);
+    if (!inferred) return null;
+    return {
+      category: inferred,
+      run: parts[0],
+      subpath: parts.slice(1).join("/"),
+    };
+  }
+  return null;
+}
+
+function createRunCatalogEntry({ category, run, subRun = "", files = [] }) {
+  const runName = subRun ? `${run}/${subRun}` : run;
+  return {
+    key: `${category}::${runName}`,
+    category,
+    run: runName,
+    files,
+    metadata: {},
+    metadataFlat: {},
+    metadataSubpath: subRun ? `${subRun}/metadata.json` : "metadata.json",
+  };
+}
+
+function expandCalibrationLeafRuns(rawEntry) {
+  const nestedRoots = new Set();
+  rawEntry.files.forEach(({ subpath }) => {
+    const m = String(subpath || "").match(/^(.*)\/metadata\.json$/i);
+    if (!m) return;
+    const root = m[1];
+    if (!root || /^scenarios(?:\/|$)/i.test(root)) return;
+    nestedRoots.add(root);
+  });
+  const nested = [...nestedRoots].sort((a, b) => a.localeCompare(b));
+  if (!nested.length) {
+    return [createRunCatalogEntry({
+      category: rawEntry.category,
+      run: rawEntry.run,
+      files: rawEntry.files,
+    })];
+  }
+  const expanded = nested.map(root => {
+    const prefix = `${root}/`;
+    const files = rawEntry.files.filter(f => f.subpath.startsWith(prefix));
+    return createRunCatalogEntry({
+      category: rawEntry.category,
+      run: rawEntry.run,
+      subRun: root,
+      files,
+    });
+  });
+  const rootFiles = rawEntry.files.filter(f => !nested.some(root => f.subpath.startsWith(`${root}/`)));
+  const hasRootSummaryArtifacts = rootFiles.some(f => (
+    /adaptive-vs-fixed-summary\.csv$/i.test(f.subpath)
+    || /summary\.csv$/i.test(f.subpath)
+    || /metadata\.json$/i.test(f.subpath)
+  ));
+  if (hasRootSummaryArtifacts) {
+    expanded.unshift(createRunCatalogEntry({
+      category: rawEntry.category,
+      run: `${rawEntry.run}/benchmark`,
+      files: rootFiles,
+    }));
+  }
+  return expanded;
+}
+
+async function indexRunDirectory(filesLike) {
+  const files = Array.from(filesLike || []);
+  const groupedRuns = new Map();
+  files.forEach(file => {
+    const rel = file.webkitRelativePath || file.name;
+    const parsed = parseRunFileRelPath(rel);
+    if (!parsed) return;
+    const key = `${parsed.category}::${parsed.run}`;
+    if (!groupedRuns.has(key)) {
+      groupedRuns.set(key, {
+        category: parsed.category,
+        run: parsed.run,
+        files: []
+      });
+    }
+    groupedRuns.get(key).files.push({ file, subpath: parsed.subpath, relPath: rel });
+  });
+
+  const expandedRuns = [];
+  groupedRuns.forEach(rawEntry => {
+    if (rawEntry.category === "calibration") {
+      expandedRuns.push(...expandCalibrationLeafRuns(rawEntry));
+      return;
+    }
+    expandedRuns.push(createRunCatalogEntry({
+      category: rawEntry.category,
+      run: rawEntry.run,
+      files: rawEntry.files,
+    }));
+  });
+
+  await Promise.all(expandedRuns.map(async entry => {
+    const metaFile = entry.files.find(x => x.subpath === entry.metadataSubpath);
+    if (!metaFile) return;
+    try {
+      const text = await readFileText(metaFile.file);
+      entry.metadata = JSON.parse(text);
+      entry.metadataFlat = flattenMetadata(entry.metadata);
+    } catch {
+      entry.metadata = { parse_error: "Unable to parse metadata.json" };
+      entry.metadataFlat = flattenMetadata(entry.metadata);
+    }
+  }));
+
+  runCatalog = expandedRuns.sort((a, b) => {
+    if (a.category !== b.category) return a.category.localeCompare(b.category);
+    return b.run.localeCompare(a.run);
+  });
+  const validKeys = new Set(runCatalog.map(r => r.key));
+  Array.from(selectedRunKeys).forEach(key => { if (!validKeys.has(key)) selectedRunKeys.delete(key); });
+  if (activeRunKey && !validKeys.has(activeRunKey)) activeRunKey = null;
+  renderRunBrowserControls();
+}
+
+function getFilteredRuns() {
+  const category = runCategorySelect.value;
+  const metaKey = runMetaKeySelect.value;
+  const metaValue = runMetaValueSelect.value;
+  const runName = runNameFilterSelect.value;
+  const filtered = runCatalog.filter(run => {
+    if (category && run.category !== category) return false;
+    if (runName && run.run !== runName) return false;
+    if (metaKey) {
+      const v = run.metadataFlat[metaKey];
+      if (v == null) return false;
+      if (metaValue && v !== metaValue) return false;
+    }
+    return true;
+  });
+  return filtered.sort(compareRunsBySort);
+}
+
+function compareMaybeNumericText(a, b) {
+  return String(a || "").localeCompare(String(b || ""), undefined, { numeric: true, sensitivity: "base" });
+}
+
+function compareRunTimestamps(a, b) {
+  const tsA = getRunTimestampMs(a);
+  const tsB = getRunTimestampMs(b);
+  if (tsA === tsB) return 0;
+  return tsA < tsB ? -1 : 1;
+}
+
+function compareRunsBySort(a, b) {
+  const direction = runSortDir === "asc" ? 1 : -1;
+  let primary = 0;
+  if (runSortBy === "category") primary = compareMaybeNumericText(a.category, b.category);
+  else if (runSortBy === "name") primary = compareMaybeNumericText(a.run, b.run);
+  else primary = compareRunTimestamps(a, b);
+  if (primary !== 0) return primary * direction;
+
+  const tsFallback = compareRunTimestamps(b, a); // Keep fallback recency first.
+  if (tsFallback !== 0) return tsFallback;
+  const categoryFallback = compareMaybeNumericText(a.category, b.category);
+  if (categoryFallback !== 0) return categoryFallback;
+  return compareMaybeNumericText(a.run, b.run);
+}
+
+function getRunTimestampMs(run) {
+  const candidates = [
+    run?.metadata?.generated_at_iso,
+    run?.metadata?.generated_at,
+    run?.metadataFlat?.generated_at_iso,
+    run?.metadataFlat?.generated_at,
+    run?.metadataFlat?.["context.generated_at_iso"],
+    run?.metadataFlat?.["context.generated_at"],
+  ];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const ms = Date.parse(String(candidate));
+    if (Number.isFinite(ms)) return ms;
+  }
+  return Number.NEGATIVE_INFINITY;
+}
+
+function formatRunTimestamp(run) {
+  const ms = getRunTimestampMs(run);
+  if (!Number.isFinite(ms) || ms === Number.NEGATIVE_INFINITY) return "no timestamp";
+  return new Date(ms).toLocaleString(undefined, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  });
+}
+
+function getRunSortIndicator(column) {
+  if (runSortBy !== column) return "-";
+  return runSortDir === "asc" ? "^" : "v";
+}
+
+function describeRunSort() {
+  const label = runSortBy === "name" ? "name" : runSortBy;
+  return `${label} ${runSortDir}`;
+}
+
+function firstMetaValue(flat, keys) {
+  for (const key of keys) {
+    const value = flat[key];
+    if (value != null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function countListish(value) {
+  if (value == null) return 0;
+  if (Array.isArray(value)) return value.filter(Boolean).length;
+  const str = String(value).trim();
+  if (!str) return 0;
+  return str.split(/\s*,\s*/).filter(Boolean).length;
+}
+
+function previewListish(value, maxItems = 2) {
+  if (value == null) return "";
+  const items = Array.isArray(value)
+    ? value.map(x => String(x).trim()).filter(Boolean)
+    : String(value).split(/\s*,\s*/).map(x => x.trim()).filter(Boolean);
+  if (!items.length) return "";
+  if (items.length <= maxItems) return items.join(", ");
+  return `${items.slice(0, maxItems).join(", ")} +${items.length - maxItems}`;
+}
+
+function tailPath(value) {
+  if (value == null) return "";
+  const normalized = String(value).replace(/\\/g, "/").trim();
+  if (!normalized) return "";
+  const parts = normalized.split("/").filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : normalized;
+}
+
+function summarizeRunBubbles(run) {
+  const flat = run.metadataFlat || {};
+  const bubbles = [];
+  const MAX_ROW_BUBBLES = 5;
+  const push = (label, rawValue, tone = "") => {
+    if (rawValue == null || rawValue === "") return;
+    const value = typeof rawValue === "object" ? JSON.stringify(rawValue) : String(rawValue);
+    const compact = value.length > 24 ? `${value.slice(0, 21)}...` : value;
+    bubbles.push({ label, value: compact, tone });
+  };
+  if (run.category === "calibration") {
+    push("mode", firstMetaValue(flat, ["mode", "context.mode"]), "cal-primary");
+    push("profile", firstMetaValue(flat, ["profile", "context.profile"]), "cal-secondary");
+    push("score", firstMetaValue(flat, ["rank_score", "context.rank_score"]), "cal-warn");
+    push("cycles", flat["context.cycle_scaling"]);
+    push("tune", flat["context.tune_cycles"]);
+    push("validate", flat["context.validate_cycles"]);
+    push("window", firstMetaValue(flat, ["context.window_hours", "context.target_window_hours"]));
+    push("events", firstMetaValue(flat, ["context.events", "context.total_events"]));
+  } else if (run.category === "comparisons") {
+    const policies = firstMetaValue(flat, ["context.policies"]);
+    const policyCount = countListish(policies);
+    if (policyCount <= 1) push("policy", previewListish(policies, 1), "cmp-primary");
+    else push("policies", `${policyCount} (${previewListish(policies, 2)})`, "cmp-primary");
+    push("scenario", tailPath(firstMetaValue(flat, ["context.scenario", "context.base_scenario"])), "cmp-secondary");
+    push("cycles", flat["context.cycles"]);
+    push("limit", flat["context.limit"]);
+    push("ticks", flat["context.ticks_per_cycle"]);
+    const metricsFiles = firstMetaValue(flat, ["context.policy_metrics_files"]);
+    const metricsCount = countListish(metricsFiles);
+    push("metrics", metricsCount ? `${metricsCount} file(s)` : "");
+    push("comparison", firstMetaValue(flat, ["context.comparison_file"]));
+  } else if (run.category === "discrimination") {
+    const lhs = firstMetaValue(flat, ["context.lhs_policy"]);
+    const rhs = firstMetaValue(flat, ["context.rhs_policy"]);
+    if (lhs || rhs) push("duel", `${lhs || "?"} vs ${rhs || "?"}`, "dis-primary");
+    push("baseline", firstMetaValue(flat, ["context.baseline_policy"]), "dis-secondary");
+    const policies = firstMetaValue(flat, ["context.policies"]);
+    const variants = firstMetaValue(flat, ["context.variants"]);
+    const variantCount = countListish(variants);
+    const policyCount = countListish(policies);
+    push("policies", policyCount ? `${policyCount} (${previewListish(policies, 2)})` : "");
+    push("variants", variantCount ? `${variantCount} (${previewListish(variants, 2)})` : "");
+    push("scenario", tailPath(firstMetaValue(flat, ["context.base_scenario", "context.scenario"])));
+    push("cycles", flat["context.cycles"]);
+    push("limit", flat["context.limit"]);
+  } else if (run.category === "monte-carlo") {
+    const policySet = firstMetaValue(flat, ["context.policy_set"]);
+    const policies = firstMetaValue(flat, ["context.policies"]);
+    const policyCount = countListish(policies);
+    push("set", policySet || "custom", "mc-primary");
+    push("scenario", tailPath(firstMetaValue(flat, ["context.scenario", "context.base_scenario"])), "mc-secondary");
+    push("policies", policyCount ? `${policyCount} (${previewListish(policies, 2)})` : "");
+    push("trials", firstMetaValue(flat, ["context.trials"]));
+    push("cycles", flat["context.cycles"]);
+    push("limit", flat["context.limit"]);
+    push("ticks", flat["context.ticks_per_cycle"]);
+  } else {
+    push("script", tailPath(firstMetaValue(flat, ["script"])), "meta-primary");
+    push("host", firstMetaValue(flat, ["hostname"]));
+  }
+  if (!bubbles.length && run.subRun) push("leaf", run.subRun);
+  push("files", pickLoadFilesForRun(run).length);
+  if (bubbles.length <= MAX_ROW_BUBBLES) return bubbles;
+  const extra = bubbles.length - MAX_ROW_BUBBLES;
+  return [
+    ...bubbles.slice(0, MAX_ROW_BUBBLES),
+    { label: "more", value: `+${extra}`, tone: "meta-primary" },
+  ];
+}
+
+function renderRunBrowserControls() {
+  const categories = [...new Set(runCatalog.map(r => r.category))];
+  const prevCategory = runCategorySelect.value;
+  runCategorySelect.innerHTML = `<option value="">all</option>` + categories.map(c => `<option value="${mqEscapeHtml(c)}">${mqEscapeHtml(c)}</option>`).join("");
+  if (categories.includes(prevCategory)) runCategorySelect.value = prevCategory;
+
+  const keyMap = new Map();
+  runCatalog.forEach(run => {
+    Object.keys(run.metadataFlat).forEach(key => {
+      if (!keyMap.has(key)) keyMap.set(key, new Set());
+      keyMap.get(key).add(run.metadataFlat[key]);
+    });
+  });
+  const prevKey = runMetaKeySelect.value;
+  const keys = Array.from(keyMap.keys()).sort((a, b) => a.localeCompare(b));
+  runMetaKeySelect.innerHTML = `<option value="">any</option>` + keys.map(k => `<option value="${mqEscapeHtml(k)}">${mqEscapeHtml(k)}</option>`).join("");
+  if (keys.includes(prevKey)) runMetaKeySelect.value = prevKey;
+
+  const names = [...new Set(runCatalog.map(r => r.run))].sort((a, b) => b.localeCompare(a));
+  const prevRunName = runNameFilterSelect.value;
+  runNameFilterSelect.innerHTML = `<option value="">any</option>` + names.map(n => `<option value="${mqEscapeHtml(n)}">${mqEscapeHtml(n)}</option>`).join("");
+  if (names.includes(prevRunName)) runNameFilterSelect.value = prevRunName;
+
+  renderMetaValueOptions(keyMap);
+  renderRunChips();
+}
+
+function renderMetaValueOptions(keyMap = null) {
+  const activeKey = runMetaKeySelect.value;
+  const map = keyMap || (() => {
+    const m = new Map();
+    runCatalog.forEach(run => {
+      if (!run.metadataFlat[activeKey]) return;
+      if (!m.has(activeKey)) m.set(activeKey, new Set());
+      m.get(activeKey).add(run.metadataFlat[activeKey]);
+    });
+    return m;
+  })();
+  const values = activeKey && map.has(activeKey)
+    ? Array.from(map.get(activeKey)).sort((a, b) => a.localeCompare(b))
+    : [];
+  const prev = runMetaValueSelect.value;
+  runMetaValueSelect.innerHTML = `<option value="">any</option>` + values.map(v => `<option value="${mqEscapeHtml(v)}">${mqEscapeHtml(v)}</option>`).join("");
+  if (values.includes(prev)) runMetaValueSelect.value = prev;
+}
+
+function getRunByKey(key) {
+  if (!key) return null;
+  return runCatalog.find(r => r.key === key) || null;
+}
+
+function pruneEmpty(value) {
+  if (Array.isArray(value)) {
+    const items = value.map(pruneEmpty).filter(v => v != null);
+    return items.length ? items : undefined;
+  }
+  if (value && typeof value === "object") {
+    const out = {};
+    Object.entries(value).forEach(([k, v]) => {
+      const pruned = pruneEmpty(v);
+      if (pruned != null && pruned !== "") out[k] = pruned;
+    });
+    return Object.keys(out).length ? out : undefined;
+  }
+  if (value == null || value === "") return undefined;
+  return value;
+}
+
+function buildRunMetadataSummary(run, loadableCount) {
+  const flat = run?.metadataFlat || {};
+  const policies = firstMetaValue(flat, ["context.policies"]);
+  const variants = firstMetaValue(flat, ["context.variants"]);
+  const summary = {
+    category: run?.category,
+    run: run?.run,
+    timestamp: formatRunTimestamp(run),
+    sub_run: run?.subRun || "",
+    highlights: {
+      mode: firstMetaValue(flat, ["mode", "context.mode"]),
+      profile: firstMetaValue(flat, ["profile", "context.profile"]),
+      policy_set: firstMetaValue(flat, ["context.policy_set"]),
+      policy_count: countListish(policies) || "",
+      variant_count: countListish(variants) || "",
+      scenario: tailPath(firstMetaValue(flat, ["context.scenario", "context.base_scenario"])),
+      cycles: firstMetaValue(flat, ["context.cycles", "context.tune_cycles"]),
+      validate_cycles: firstMetaValue(flat, ["context.validate_cycles"]),
+      limit: firstMetaValue(flat, ["context.limit"]),
+      ticks_per_cycle: firstMetaValue(flat, ["context.ticks_per_cycle"]),
+      trials: firstMetaValue(flat, ["context.trials"]),
+      score: firstMetaValue(flat, ["rank_score", "context.rank_score"]),
+    },
+    outputs: {
+      indexed_files: Array.isArray(run?.files) ? run.files.length : 0,
+      loadable_files: loadableCount,
+    },
+    metadata_keys: Object.keys(flat).length,
+  };
+  return pruneEmpty(summary) || {};
+}
+
+function updateRunDetailPane() {
+  const selected = getSelectedRunEntries();
+  const run = getRunByKey(activeRunKey) || selected[0] || null;
+  if (!run) {
+    runMetadataView.textContent = "{}";
+    runOutputFiles.textContent = "";
+    return;
+  }
+  const loadable = pickLoadFilesForRun(run);
+  const compactSummary = buildRunMetadataSummary(run, loadable.length);
+  runMetadataView.textContent = JSON.stringify(compactSummary, null, 2);
+  const preview = loadable
+    .slice(0, 8)
+    .map(f => `<code>${mqEscapeHtml(f.webkitRelativePath || f.name)}</code>`)
+    .join(", ");
+  runOutputFiles.innerHTML = loadable.length
+    ? `Loadable outputs (${loadable.length}): ${preview}${loadable.length > 8 ? ", ..." : ""}`
+    : "No loadable NDJSON/CSV/YAML outputs for this run.";
+}
+
+function renderRunChips() {
+  const filtered = getFilteredRuns();
+  const filteredKeys = new Set(filtered.map(r => r.key));
+  if (activeRunKey && !filteredKeys.has(activeRunKey)) activeRunKey = null;
+  if (!activeRunKey && filtered.length) activeRunKey = filtered[0].key;
+  if (!filtered.length) {
+    runChipList.innerHTML = `<div class="run-list-empty">${runCatalog.length ? "No runs match the current filters." : "No run folder indexed yet."}</div>`;
+  } else {
+    const rows = filtered.map(run => {
+      const selected = selectedRunKeys.has(run.key);
+      const active = run.key === activeRunKey;
+      const rowClass = `run-row${selected ? " selected" : ""}${active ? " active" : ""}`;
+      const bubbles = summarizeRunBubbles(run);
+      const bubblesHtml = bubbles.map(b => `<span class="run-bubble${b.tone ? ` ${mqEscapeHtml(b.tone)}` : ""}"><b>${mqEscapeHtml(b.label)}</b>: ${mqEscapeHtml(b.value)}</span>`).join("");
+      const sub = run.subRun ? `<div class="run-subpath">${mqEscapeHtml(run.subRun)}</div>` : "";
+      return `<tr class="${rowClass}" data-run-key="${mqEscapeHtml(run.key)}" title="${mqEscapeHtml(run.category)} / ${mqEscapeHtml(run.run)}">
+        <td class="col-category">${mqEscapeHtml(run.category)}</td>
+        <td class="col-timestamp">${mqEscapeHtml(formatRunTimestamp(run))}</td>
+        <td class="col-name"><div class="run-name">${mqEscapeHtml(run.run)}</div>${sub}</td>
+        <td class="col-bubbles"><div class="run-bubbles">${bubblesHtml || '<span class="run-bubble">no metadata bubbles</span>'}</div></td>
+      </tr>`;
+    }).join("");
+    runChipList.innerHTML = `<table class="run-list-table">
+      <thead>
+        <tr>
+          <th class="col-category run-sortable${runSortBy === "category" ? " sorted" : ""}" data-sort-col="category">Category <span class="sort-ind">${getRunSortIndicator("category")}</span></th>
+          <th class="col-timestamp run-sortable${runSortBy === "timestamp" ? " sorted" : ""}" data-sort-col="timestamp">Timestamp <span class="sort-ind">${getRunSortIndicator("timestamp")}</span></th>
+          <th class="col-name run-sortable${runSortBy === "name" ? " sorted" : ""}" data-sort-col="name">Name <span class="sort-ind">${getRunSortIndicator("name")}</span></th>
+          <th class="col-bubbles">Bubbles</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+  }
+
+  const selectedVisible = filtered.filter(r => selectedRunKeys.has(r.key)).length;
+  const selectedTotal = selectedRunKeys.size;
+  runBrowserStatus.textContent = filtered.length
+    ? `${filtered.length} run(s) shown (sorted by ${describeRunSort()}) · ${selectedVisible} selected (total selected: ${selectedTotal}). Max one selected per non-calibration category. Press Enter to load selected.`
+    : (runCatalog.length ? "No runs match the current filters." : "No run folder indexed yet.");
+  updateRunDetailPane();
+}
+
+function getSelectedRunEntries() {
+  if (!selectedRunKeys.size) return [];
+  return runCatalog.filter(r => selectedRunKeys.has(r.key));
+}
+
+function pickLoadFilesForRun(run) {
+  if (!run) return [];
+  const byExt = run.files.filter(x => /\.(ndjson|jsonl|json|csv|ya?ml)$/i.test(x.file.name));
+  if (run.category === "comparisons") return byExt.filter(x => /\.ndjson$/i.test(x.file.name) || /\.ya?ml$/i.test(x.file.name)).map(x => x.file);
+  if (run.category === "discrimination") return byExt.filter(x => /discrimination-summary\.csv$/i.test(x.file.name)).map(x => x.file);
+  if (run.category === "monte-carlo") return byExt.filter(x => /monte-carlo-summary\.csv$/i.test(x.file.name)).map(x => x.file);
+  if (run.category === "calibration") return byExt.filter(x => /calibration-.*\.csv$/i.test(x.file.name) || /-grid\.csv$/i.test(x.file.name) || /-validation\.csv$/i.test(x.file.name) || /adaptive-vs-fixed-summary\.csv$/i.test(x.file.name) || /selected-scenario\.ya?ml$/i.test(x.file.name) || /scenario.*\.ya?ml$/i.test(x.file.name)).map(x => x.file);
+  return byExt.map(x => x.file);
+}
+
+dropZone.addEventListener("click", () => fileInput.click());
+dropZone.addEventListener("dragover", e => e.preventDefault());
+dropZone.addEventListener("drop", e => { e.preventDefault(); if (e.dataTransfer.files) loadFiles(e.dataTransfer.files); });
+fileInput.addEventListener("change", () => { if (fileInput.files) loadFiles(fileInput.files); });
+runDirInput.addEventListener("change", () => { if (runDirInput.files) indexRunDirectory(runDirInput.files); });
+btnBrowseFiles.addEventListener("click", () => fileInput.click());
+btnBrowseRunFolder.addEventListener("click", () => runDirInput.click());
+if (btnUnload) btnUnload.addEventListener("click", unloadAllData);
+runCategorySelect.addEventListener("change", () => renderRunChips());
+runMetaKeySelect.addEventListener("change", () => { renderMetaValueOptions(); renderRunChips(); });
+runMetaValueSelect.addEventListener("change", () => renderRunChips());
+runNameFilterSelect.addEventListener("change", () => renderRunChips());
+
+runChipList.addEventListener("click", e => {
+  const sortHeader = e.target.closest(".run-sortable[data-sort-col]");
+  if (sortHeader) {
+    const column = sortHeader.getAttribute("data-sort-col") || "";
+    if (!RUN_SORTABLE_COLUMNS.has(column)) return;
+    if (runSortBy === column) {
+      runSortDir = runSortDir === "asc" ? "desc" : "asc";
+    } else {
+      runSortBy = column;
+      runSortDir = column === "timestamp" ? "desc" : "asc";
+    }
+    renderRunChips();
+    return;
+  }
+  const row = e.target.closest(".run-row");
+  if (!row) return;
+  const key = row.getAttribute("data-run-key");
+  if (!key) return;
+  const clicked = getRunByKey(key);
+  if (!clicked) return;
+  activeRunKey = key;
+  if (selectedRunKeys.has(key)) {
+    selectedRunKeys.delete(key);
+  } else {
+    // Enforce one selected run per non-calibration category.
+    if (clicked.category !== "calibration") {
+      Array.from(selectedRunKeys).forEach(existingKey => {
+        const existing = getRunByKey(existingKey);
+        if (existing?.category === clicked.category) selectedRunKeys.delete(existingKey);
+      });
+    }
+    selectedRunKeys.add(key);
+  }
+  renderRunChips();
+});
+
+function loadSelectedRunsFromBrowser() {
+  const selectedRuns = getSelectedRunEntries();
+  if (!selectedRuns.length) {
+    runBrowserStatus.textContent = "Select one or more run rows first.";
+    return;
+  }
+  const uniq = new Map();
+  selectedRuns.forEach(run => {
+    pickLoadFilesForRun(run).forEach(file => {
+      const rel = file.webkitRelativePath || file.name;
+      const key = `${rel}|${file.size}|${file.lastModified}`;
+      if (!uniq.has(key)) uniq.set(key, file);
+    });
+  });
+  const files = Array.from(uniq.values());
+  if (!files.length) {
+    runBrowserStatus.textContent = "Selected runs have no loadable NDJSON/CSV/YAML outputs.";
+    return;
+  }
+  const nextMeta = { ...loadedRunMetadataByCategory };
+  selectedRuns.forEach(run => { nextMeta[run.category] = run.metadata || {}; });
+  loadedRunMetadataByCategory = nextMeta;
+  loadFiles(files, { replaceByCategory: true });
+  const categories = [...new Set(selectedRuns.map(r => r.category))].join(", ");
+  runBrowserStatus.textContent = `Loaded ${files.length} file(s) from ${selectedRuns.length} selected run(s). Replaced loaded data for: ${categories}.`;
+}
+
+btnLoadSelectedRun.addEventListener("click", () => {
+  loadSelectedRunsFromBrowser();
+});
+document.addEventListener("keydown", e => {
+  if (e.key !== "Enter") return;
+  if (!document.getElementById("panelLoad").classList.contains("active")) return;
+  if (isTypingTarget(e.target)) return;
+  if (!selectedRunKeys.size) return;
+  e.preventDefault();
+  loadSelectedRunsFromBrowser();
+});
+
+function enableTabs(tabNames) {
+  tabNames.forEach(name => {
+    const btn = document.querySelector(`.nav-tab[data-tab="${name}"]`);
+    if (btn) btn.classList.remove("disabled");
+  });
+}
+
+function disableTabs(tabNames) {
+  tabNames.forEach(name => {
+    const btn = document.querySelector(`.nav-tab[data-tab="${name}"]`);
+    if (btn) btn.classList.add("disabled");
+  });
+}
+
+function unloadAllData() {
+  stop();
+  clearAllSwimLocks();
+
+  mqDestroyChartIfPresent(chartInstL);
+  chartInstL = null;
+  mqDestroyChartIfPresent(chartInstR);
+  chartInstR = null;
+  barCharts.forEach(ch => mqDestroyChartIfPresent(ch));
+  barCharts.clear();
+
+  if (typeof destroyExperimentCharts === "function") destroyExperimentCharts();
+  mqDestroyChartIfPresent(mcBoxChart);
+  mcBoxChart = null;
+  mqDestroyChartIfPresent(mcCIChart);
+  mcCIChart = null;
+
+  filesData = [];
+  loadedScenarioDocs = [];
+  loadedRunMetadataByCategory = {};
+  expData = {
+    discrimination: null,
+    discriminationMeta: null,
+    calibrationGrid: [],
+    calibrationValidation: [],
+    calibrationSummary: [],
+  };
+  mcData = null;
+
+  selectedSeries = null;
+  statsExtendedMode = false;
+  activeIndex = 0;
+  chartIdxL = 0;
+  chartIdxR = 1;
+  swimIdx = 0;
+  playhead = 0;
+  xRange = [0, 0];
+  kanbanVisibleIdxs = new Set();
+  barVisibleIdxs = new Set();
+  mcVisiblePolicies = new Set();
+
+  BARS_LEGEND_KEYS.forEach(key => { barsLegendVisibility[key] = true; });
+  barsStatsMode = "peak";
+  barsStatsSeriesKey = "Idle";
+  barsStatsEnabled = true;
+
+  const scrub = document.getElementById("scrub");
+  if (scrub) {
+    scrub.max = 0;
+    scrub.value = 0;
+  }
+  const playLabel = document.getElementById("playLabel");
+  if (playLabel) playLabel.textContent = "Step 0 / 0";
+
+  const mcContent = document.getElementById("mcContent");
+  if (mcContent) mcContent.style.display = "none";
+
+  if (fileInput) fileInput.value = "";
+  if (runDirInput) runDirInput.value = "";
+
+  disableTabs(DATA_TABS);
+  renderFileList();
+  updateRefreshUiButtonState();
+  switchTab("load");
+  runBrowserStatus.textContent = "Unloaded all loaded files and metrics. Run browser index is still available.";
+}
+
+function loadFiles(fl, opts = {}) {
+  const replaceByCategory = opts.replaceByCategory !== false;
+  const a = Array.from(fl); if (!a.length) return;
+  const ndjsonFiles = a.filter(f => /\.(ndjson|jsonl|json)$/i.test(f.name));
+  const csvFiles = a.filter(f => /\.csv$/i.test(f.name));
+  const yamlFiles = a.filter(f => /\.ya?ml$/i.test(f.name));
+
+  let ndjsonLoaded = false;
+  let csvMonteLoaded = false;
+  let csvExpLoaded = false;
+  let yamlLoaded = false;
+  const tasks = [];
+  if (ndjsonFiles.length) {
+    tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
+      filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
+      applyLoadedScenariosToFilesData();
+      activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); swimIdx = 0; stop();
+      filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
+      kanbanVisibleIdxs = new Set(filesData.map((_, i) => i));
+      barVisibleIdxs = new Set(filesData.map((_, i) => i));
+      const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
+      document.getElementById("playLabel").textContent = "Step 0 / " + mx;
+      document.getElementById("scrub").max = mx;
+      document.getElementById("scrub").value = 0;
+      enableTabs(["stats", "simulation", "kanban", "composition", "bars", "swimlane"]);
+      ndjsonLoaded = true;
+    }));
+  }
+  if (yamlFiles.length) {
+    tasks.push(Promise.all(yamlFiles.map(F => new Promise((R, N) => {
+      const r = new FileReader();
+      r.onload = () => R({ fileName: F.name, text: String(r.result || "") });
+      r.onerror = N;
+      r.readAsText(F);
+    }))).then(items => {
+      const parsed = items
+        .map(item => ({ ...item, doc: parseYamlDoc(item.text) }))
+        .filter(item => item.doc && typeof item.doc === "object");
+      if (parsed.length) {
+        loadedScenarioDocs = parsed.map(item => ({ fileName: item.fileName, doc: item.doc }));
+        yamlLoaded = true;
+        applyLoadedScenariosToFilesData();
+        enableTabs(["simulation"]);
+      }
+    }));
+  }
+  if (csvFiles.length) {
+    tasks.push(Promise.all(csvFiles.map(F => new Promise((R, N) => {
+      const r = new FileReader();
+      r.onload = () => R({ name: F.name, text: r.result });
+      r.onerror = N;
+      r.readAsText(F);
+    }))).then(items => {
+      const parsedItems = items.map(({ name, text }) => ({
+        name,
+        text: String(text),
+        kind: mqDetectCsvType(String(text)),
+      }));
+      if (replaceByCategory) {
+        if (parsedItems.some(x => x.kind === "monteCarlo")) {
+          mcData = null;
+        }
+        if (parsedItems.some(x => x.kind === "discrimination")) {
+          expData.discrimination = null;
+          expData.discriminationMeta = null;
+        }
+        if (parsedItems.some(x => x.kind === "calibration" || x.kind === "calibrationSummary")) {
+          expData.calibrationGrid = [];
+          expData.calibrationValidation = [];
+          expData.calibrationSummary = [];
+        }
+      }
+      parsedItems.forEach(({ name, text, kind }) => {
+        if (kind === "monteCarlo") {
+          loadMcCSVText(text);
+          csvMonteLoaded = true;
+        } else if (kind === "discrimination") {
+          loadDiscriminationCSVText(text);
+          csvExpLoaded = true;
+        } else if (kind === "calibration") {
+          loadCalibrationCSVText(text, name);
+          csvExpLoaded = true;
+        } else if (kind === "calibrationSummary") {
+          loadCalibrationSummaryCSVText(text, name);
+          csvExpLoaded = true;
+        }
+      });
+      if (csvMonteLoaded) enableTabs(["monteCarlo"]);
+      if (csvExpLoaded) enableTabs(["experiments"]);
+    }));
+  }
+
+  Promise.all(tasks).then(() => {
+    renderFileList();
+    updateRefreshUiButtonState();
+    if (ndjsonLoaded || yamlLoaded) {
+      if (filesData.length) switchTab("stats");
+      else switchTab("simulation");
+    }
+    else if (csvExpLoaded) switchTab("experiments");
+    else if (csvMonteLoaded) switchTab("monteCarlo");
+  });
+}
+function renderFileList() {
+  const el = document.getElementById("fileList"); el.innerHTML = "";
+  filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>📊 ${mqEscapeHtml(d.name)}.ndjson</span></div>`; });
+  loadedScenarioDocs.forEach(s => { el.innerHTML += `<div class="file-item"><span>🧩 ${mqEscapeHtml(s.fileName)} (scenario)</span></div>`; });
+  if (mcData) { el.innerHTML += `<div class="file-item"><span>📈 monte-carlo-summary.csv (${mcData.policies.length} policies, ${mcData.metrics.length} metrics)</span></div>`; }
+  if (expData.discrimination) { el.innerHTML += `<div class="file-item"><span>🧪 discrimination-summary.csv (${expData.discrimination.length} variants)</span></div>`; }
+  if (expData.calibrationGrid.length || expData.calibrationValidation.length || expData.calibrationSummary.length) {
+    el.innerHTML += `<div class="file-item"><span>🧭 calibration csv (${expData.calibrationGrid.length} tune / ${expData.calibrationValidation.length} validation / ${expData.calibrationSummary.length} summary)</span></div>`;
+  }
+}
+
+// --- Statistics Tab ---
+let selectedSeries = null; // null = all selected
+let statsExtendedMode = false; // false=standard, true=extended
+
+const METRIC_TOOLTIPS = {
+  total_time_ticks: "Total simulation duration in discrete time steps",
+  mrs_merged: "Number of merge requests successfully merged during the simulation",
+  throughput: "Merge rate: MRs merged divided by total time steps",
+  throughput_hour: "Merge rate normalized by scenario tick length (MRs/hour)",
+  tick_seconds: "Scenario tick duration in seconds used to convert tick-based rates to wall-clock rates",
+  time_to_first: "Steps elapsed before the first MR was merged",
+  time_to_10: "Steps elapsed before 10 MRs were merged",
+  avg_int: "Average number of steps between successive merges",
+  queue_drain: "Percentage of the initial open queue that was merged (can exceed 100% if new MRs arrive)",
+  rebase_calls: "Total number of rebase operations triggered by housekeeping",
+  rebase_errors: "Total rebase API failures observed",
+  merge_errors: "Total merge API failures observed",
+  pipeline_cancels: "Pipelines canceled due to invalidation after target changes",
+  peak: "Maximum number of CI pipelines running concurrently at any step",
+  dup: "Rebases that were wasted because the MR needed rebasing again before merge",
+  ci_min: "Shortest CI pipeline duration observed (in ticks)",
+  ci_avg: "Average CI pipeline duration across all runs (in ticks)",
+  ci_max: "Longest CI pipeline duration observed (in ticks)",
+  srp_p95: "95th percentile of same-root success pool size (MRs sharing a base SHA)",
+  srp_max: "Maximum same-root success pool size observed",
+  merge_rounds: "Number of distinct ticks where at least one merge occurred",
+  avg_mrs_per_round: "Average number of MRs merged per merge round (batch efficiency)",
+  mr_count: "Total unique MRs that appeared in the simulation",
+  force_merges: "Number of MRs that bypassed the queue via operator force-merge",
+  ci_failures: "Total pipeline failures observed during the simulation",
+  modeled_hours: "Modeled wall-clock duration derived from total ticks and tick length",
+  total_arrivals: "Total arriving MRs in the modeled timeline",
+  throughput_24h_mph: "Overall throughput normalized to merges/hour over the full modeled window",
+  throughput_active_mph: "Throughput during active merge hours only (hours with at least one merge)",
+  throughput_peak8_mph: "Best moving 8-hour throughput average (merges/hour)",
+  throughput_peak8_p90_mph: "90th percentile throughput across the best 8-hour peak slice",
+  throughput_peak_window_mph: "Throughput during configured peak UTC hours only",
+  throughput_offpeak_window_mph: "Throughput during off-peak UTC hours",
+  arrivals_peak_window_per_hour: "Average MR arrivals per hour during peak UTC window",
+  arrivals_offpeak_window_per_hour: "Average MR arrivals per hour during off-peak UTC window",
+  peak_offpeak_throughput_ratio: "Peak throughput divided by off-peak throughput (higher means stronger daytime burst)",
+  merge_interval_p50_seconds: "Median merge interval in seconds (derived from merge events)",
+  merge_interval_p95_seconds: "95th percentile merge interval in seconds"
+};
+const METRIC_HIGHER_IS_BETTER = {
+  mrs_merged: true, throughput: true, throughput_hour: true, queue_drain: true, merge_rounds: true, avg_mrs_per_round: true,
+  total_time_ticks: null, time_to_first: false, time_to_10: false, avg_int: false,
+  tick_seconds: null, rebase_calls: false, rebase_errors: false, merge_errors: false,
+  pipeline_cancels: false, peak: false, dup: false, ci_min: null, ci_avg: null, ci_max: null,
+  srp_p95: false, srp_max: false, mr_count: true,
+  force_merges: null, ci_failures: false,
+  modeled_hours: null, total_arrivals: true,
+  throughput_24h_mph: true, throughput_active_mph: true, throughput_peak8_mph: true, throughput_peak8_p90_mph: true,
+  throughput_peak_window_mph: true, throughput_offpeak_window_mph: true,
+  arrivals_peak_window_per_hour: true, arrivals_offpeak_window_per_hour: true,
+  peak_offpeak_throughput_ratio: true,
+  merge_interval_p50_seconds: false, merge_interval_p95_seconds: false
+};
+
+function getSelectedIndices() {
+  if (!selectedSeries || selectedSeries.length === 0) return filesData.map((_, i) => i);
+  return selectedSeries;
+}
+function getSelectedIndexSet() {
+  return new Set(getSelectedIndices());
+}
+function toggleSeriesSelection(idx) {
+  const i = Number(idx);
+  if (!Number.isInteger(i) || i < 0 || i >= filesData.length) return;
+  const set = getSelectedIndexSet();
+  if (set.has(i)) set.delete(i);
+  else set.add(i);
+  if (set.size === 0 || set.size === filesData.length) {
+    selectedSeries = null;
+    return;
+  }
+  selectedSeries = Array.from(set).sort((a, b) => a - b);
+}
+function normalizeSelectedSeries() {
+  if (!Array.isArray(selectedSeries)) return;
+  const max = filesData.length - 1;
+  const next = selectedSeries
+    .map(n => Number(n))
+    .filter(n => Number.isInteger(n) && n >= 0 && n <= max)
+    .sort((a, b) => a - b);
+  if (!next.length || next.length === filesData.length) selectedSeries = null;
+  else selectedSeries = [...new Set(next)];
+}
+
+const ALL_HERO_METRICS = [
+  { key: "mrs_merged", label: "MRs Merged", higher: true, fmt: v => Math.round(v) },
+  { key: "throughput", label: "Throughput", higher: true, fmt: v => v.toFixed(3) },
+  { key: "throughput_hour", label: "Throughput (hour)", higher: true, fmt: v => v.toFixed(2) },
+  { key: "throughput_24h_mph", label: "Throughput (24h mph)", higher: true, fmt: v => v.toFixed(2) },
+  { key: "throughput_active_mph", label: "Throughput (active mph)", higher: true, fmt: v => v.toFixed(2) },
+  { key: "throughput_peak8_mph", label: "Peak8 throughput", higher: true, fmt: v => v.toFixed(2) },
+  { key: "throughput_peak_window_mph", label: "Peak-window mph", higher: true, fmt: v => v.toFixed(2) },
+  { key: "throughput_offpeak_window_mph", label: "Off-peak mph", higher: true, fmt: v => v.toFixed(2) },
+  { key: "peak_offpeak_throughput_ratio", label: "Peak/Off-peak ratio", higher: true, fmt: v => v.toFixed(2) + "x" },
+  { key: "queue_drain", label: "Queue Drain %", higher: true, fmt: v => Math.round(v) + "%" },
+  { key: "ci_avg", label: "Avg CI Time", higher: false, fmt: v => v.toFixed(1) },
+  { key: "peak", label: "Peak Pipelines", higher: false, fmt: v => v },
+  { key: "dup", label: "Wasted Rebases", higher: false, fmt: v => v },
+  { key: "time_to_first", label: "Time to 1st Merge", higher: false, fmt: v => Math.round(v) },
+  { key: "time_to_10", label: "Time to 10 Merges", higher: false, fmt: v => Math.round(v) },
+  { key: "avg_int", label: "Avg Merge Interval", higher: false, fmt: v => v.toFixed(1) },
+  { key: "rebase_calls", label: "Total Rebases", higher: false, fmt: v => Math.round(v) },
+  { key: "merge_errors", label: "Merge Errors", higher: false, fmt: v => Math.round(v) },
+  { key: "rebase_errors", label: "Rebase Errors", higher: false, fmt: v => Math.round(v) },
+  { key: "merge_interval_p95_seconds", label: "Merge p95 (s)", higher: false, fmt: v => v.toFixed(1) },
+  { key: "srp_p95", label: "Same-root p95", higher: false, fmt: v => v },
+  { key: "srp_max", label: "Same-root max", higher: false, fmt: v => v },
+  { key: "merge_rounds", label: "Merge Rounds", higher: true, fmt: v => Math.round(v) },
+  { key: "avg_mrs_per_round", label: "MRs/Round", higher: true, fmt: v => v.toFixed(3) },
+];
+const EXTENDED_ONLY_METRIC_KEYS = new Set([
+  "throughput_24h_mph",
+  "throughput_active_mph",
+  "throughput_peak8_mph",
+  "throughput_peak_window_mph",
+  "throughput_offpeak_window_mph",
+  "peak_offpeak_throughput_ratio",
+  "merge_interval_p95_seconds",
+]);
+const STANDARD_DEFAULT_HERO_METRIC_KEYS = ["mrs_merged", "throughput_hour", "queue_drain", "dup", "time_to_10", "rebase_calls"];
+const EXTENDED_DEFAULT_HERO_METRIC_KEYS = ["mrs_merged", "throughput_peak8_mph", "throughput_peak_window_mph", "throughput_offpeak_window_mph", "peak_offpeak_throughput_ratio", "merge_interval_p95_seconds"];
+let heroMetricKeysStandard = [...STANDARD_DEFAULT_HERO_METRIC_KEYS];
+let heroMetricKeysExtended = [...EXTENDED_DEFAULT_HERO_METRIC_KEYS];
+function getActiveHeroMetricKeys() {
+  return statsExtendedMode ? heroMetricKeysExtended : heroMetricKeysStandard;
+}
+function setActiveHeroMetricKeys(nextKeys) {
+  if (statsExtendedMode) heroMetricKeysExtended = nextKeys;
+  else heroMetricKeysStandard = nextKeys;
+}
+function getVisibleHeroMetrics() {
+  if (statsExtendedMode) return ALL_HERO_METRICS;
+  return ALL_HERO_METRICS.filter(m => !EXTENDED_ONLY_METRIC_KEYS.has(m.key));
+}
+
+function renderScenarioInfoCard() {
+  const el = document.getElementById("scenarioInfoCard");
+  if (!el) return;
+  normalizeSelectedSeries();
+  const meta = filesData.map(d => (d.events || []).find(e => e.event === "scenario_meta")).filter(Boolean);
+  const m = meta[0] || {};
+  const selectedSet = getSelectedIndexSet();
+  const chips = filesData.map((d, i) => (
+    `<button class="si-policy-chip${selectedSet.has(i) ? " active" : ""}" data-series-idx="${i}" title="${mqEscapeHtml(d.name)}">${mqEscapeHtml(d.name)}</button>`
+  )).join("");
+  const mergePct = (Number(m?.operation_failure_rate?.merge || 0) * 100).toFixed(2);
+  const rebasePct = (Number(m?.operation_failure_rate?.rebase || 0) * 100).toFixed(2);
+  const hasOpsFail = Number(mergePct) > 0 || Number(rebasePct) > 0;
+  const modeOffCls = statsExtendedMode ? "" : " active";
+  const modeOnCls = statsExtendedMode ? " active" : "";
+  const modeSwitchCls = statsExtendedMode ? " on" : "";
+
+  let mainItems = `<span class="si-title">Scenario</span>`;
+  if (Number.isFinite(Number(m.total_mrs))) mainItems += `<span class="si-item"><span class="si-label">MRs:</span><span class="si-val">${m.total_mrs}</span></span>`;
+  mainItems += `<span class="si-item"><span class="si-label">Tick:</span><span class="si-val">${m.tick_seconds || 60}s</span></span>`;
+  if (m.pipeline_duration) mainItems += `<span class="si-item"><span class="si-label">CI Duration:</span><span class="si-val">${m.pipeline_duration.min}–${m.pipeline_duration.max} ticks</span></span>`;
+  if (m.failure_rate != null) mainItems += `<span class="si-item"><span class="si-label">Failure Rate:</span><span class="si-val${m.failure_rate > 0 ? " danger" : ""}">${(Number(m.failure_rate) * 100).toFixed(1)}%</span></span>`;
+  if (m.operation_failure_rate) {
+    mainItems += `<span class="si-item"><span class="si-label">Op failures:</span><span class="si-val${hasOpsFail ? " danger" : ""}">merge ${mergePct}% / rebase ${rebasePct}%</span></span>`;
+  }
+  if (m.arrivals && m.arrivals.length) {
+    mainItems += `<span class="si-item"><span class="si-label">Arrivals:</span><span class="si-val">${m.arrivals.length}</span></span>`;
+  }
+
+  el.innerHTML = `
+    <div class="scenario-info">
+      <div class="si-main">${mainItems}</div>
+      <div class="si-controls">
+        <div class="si-policy-row">
+          <span class="si-controls-label">Select Policies</span>
+          <div class="si-policy-chips">${chips}</div>
+        </div>
+        <div class="si-mode-toggle">
+          <span class="si-mode-label${modeOffCls}">standard</span>
+          <button id="statsViewModeToggle" class="si-mode-switch${modeSwitchCls}" type="button" role="switch" aria-checked="${statsExtendedMode ? "true" : "false"}" title="Toggle extended metrics view">
+            <span class="si-mode-knob"></span>
+          </button>
+          <span class="si-mode-label${modeOnCls}">extended</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const chipsEl = el.querySelector(".si-policy-chips");
+  if (chipsEl) {
+    chipsEl.addEventListener("click", evt => {
+      const btn = evt.target.closest("button[data-series-idx]");
+      if (!btn) return;
+      toggleSeriesSelection(btn.dataset.seriesIdx);
+      renderStats();
+    });
+  }
+  const modeToggleEl = document.getElementById("statsViewModeToggle");
+  if (modeToggleEl) {
+    modeToggleEl.addEventListener("click", () => {
+      statsExtendedMode = !statsExtendedMode;
+      renderStats();
+    });
+  }
+}
+
+function fmtSim(v, digits = 3) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return String(v ?? "");
+  return n.toFixed(digits);
+}
+
+function fmtHoursLabel(hours) {
+  const h = Number(hours);
+  if (!Number.isFinite(h) || h < 0) return "—";
+  const days = h / 24;
+  if (days >= 2) return `${h.toFixed(1)}h (${days.toFixed(2)}d)`;
+  return `${h.toFixed(1)}h`;
+}
+
+function classForDeltaPct(deltaPctAbs) {
+  if (!Number.isFinite(deltaPctAbs)) return "";
+  if (deltaPctAbs <= 10) return "sim-delta-good";
+  if (deltaPctAbs <= 25) return "sim-delta-warn";
+  return "sim-delta-bad";
+}
+
+function formatDeltaCell(measured, target, digits = 1) {
+  const m = Number(measured);
+  const t = Number(target);
+  if (!Number.isFinite(m) || !Number.isFinite(t) || t === 0) {
+    return `<span class="sim-delta-warn">—</span>`;
+  }
+  const deltaPct = ((m - t) / t) * 100;
+  const cls = classForDeltaPct(Math.abs(deltaPct));
+  const sign = deltaPct >= 0 ? "+" : "";
+  return `<span class="${cls}">${sign}${deltaPct.toFixed(digits)}%</span>`;
+}
+
+function parsePeakWindowHours(arrivalProfile) {
+  const out = new Set();
+  const list = Array.isArray(arrivalProfile?.peak_window_hours_utc)
+    ? arrivalProfile.peak_window_hours_utc
+    : [];
+  list.forEach(h => {
+    const n = Number(h);
+    if (Number.isFinite(n)) out.add(((n % 24) + 24) % 24);
+  });
+  return out;
+}
+
+function collectArrivalTicks(events, scenarioMeta) {
+  const ticks = [];
+  const fromMeta = Array.isArray(scenarioMeta?.arrivals) ? scenarioMeta.arrivals : [];
+  fromMeta.forEach(a => {
+    const t = Number(a?.tick);
+    if (Number.isFinite(t) && t >= 0) ticks.push(Math.floor(t));
+  });
+  events.forEach(e => {
+    if (e.event !== "tick" || !Array.isArray(e.arrivals)) return;
+    const tick = Number(e.tick);
+    if (!Number.isFinite(tick) || tick < 0) return;
+    e.arrivals.forEach(() => ticks.push(Math.floor(tick)));
+  });
+  return ticks;
+}
+
+function percentileFromSorted(sortedValues, percentileValue) {
+  if (!sortedValues.length) return 0;
+  const idx = Math.min(sortedValues.length - 1, Math.floor((sortedValues.length * percentileValue) / 100));
+  return sortedValues[idx];
+}
+
+function computeHourlyTimeline({ events, scenarioMeta, arrivalProfile, tickSeconds, totalTicks }) {
+  const ts = Math.max(1, Number(tickSeconds) || 60);
+  const maxTickSeen = (events || []).reduce((mx, e) => {
+    const t = Number(e?.tick);
+    return Number.isFinite(t) ? Math.max(mx, t) : mx;
+  }, 0);
+  const baseTicks = Math.max(0, Number(totalTicks) || 0, maxTickSeen + 1);
+  const tickDerivedHours = (baseTicks * ts) / 3600;
+  const hintHours = Number(scenarioMeta?.scenario_metadata?.window_hours);
+  const modeledHours = Number.isFinite(hintHours) && hintHours > 0
+    ? hintHours
+    : tickDerivedHours;
+  // Bucket count is rounded to avoid +1 visual inflation from tick-zero indexing.
+  const modeledHourBuckets = Math.max(1, Math.round(modeledHours));
+  const mergesByHour = Array.from({ length: modeledHourBuckets }, () => 0);
+  const arrivalsByHour = Array.from({ length: modeledHourBuckets }, () => 0);
+  const mergeTicks = [];
+
+  (events || []).forEach(e => {
+    if (e.event !== "merge") return;
+    const tick = Number(e.tick);
+    if (!Number.isFinite(tick) || tick < 0) return;
+    mergeTicks.push(Math.floor(tick));
+    const hour = Math.min(
+      modeledHourBuckets - 1,
+      Math.max(0, Math.floor((tick * ts) / 3600)),
+    );
+    mergesByHour[hour] += 1;
+  });
+
+  collectArrivalTicks(events || [], scenarioMeta).forEach(tick => {
+    const hour = Math.min(
+      modeledHourBuckets - 1,
+      Math.max(0, Math.floor((tick * ts) / 3600)),
+    );
+    arrivalsByHour[hour] += 1;
+  });
+
+  const startHour = Number(arrivalProfile?.scenario_start_hour);
+  const baseHour = Number.isFinite(startHour) ? ((startHour % 24) + 24) % 24 : 0;
+  const peakHours = parsePeakWindowHours(arrivalProfile);
+
+  const rows = mergesByHour.map((m, i) => {
+    const utcHour = (baseHour + i) % 24;
+    return {
+      hour_index: i,
+      utc_hour: utcHour,
+      merges: m,
+      arrivals: arrivalsByHour[i] || 0,
+      throughput_mph: m,
+      is_peak: peakHours.has(utcHour),
+    };
+  });
+
+  const activeRows = rows.filter(r => r.merges > 0);
+  const peakRows = rows.filter(r => r.is_peak);
+  const offPeakRows = rows.filter(r => !r.is_peak);
+
+  const peakWindow = Math.min(8, rows.length);
+  let bestPeak8Avg = 0;
+  let bestPeak8Slice = rows.slice(0, peakWindow).map(r => r.merges);
+  for (let i = 0; i <= rows.length - peakWindow; i++) {
+    const slice = rows.slice(i, i + peakWindow).map(r => r.merges);
+    const avg = slice.reduce((a, b) => a + b, 0) / Math.max(1, peakWindow);
+    if (avg > bestPeak8Avg) {
+      bestPeak8Avg = avg;
+      bestPeak8Slice = slice;
+    }
+  }
+
+  const sortedIntervals = mergeTicks
+    .sort((a, b) => a - b)
+    .slice(1)
+    .map((tick, i) => (tick - mergeTicks[i]) * ts)
+    .filter(v => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+
+  const totalMerges = rows.reduce((a, r) => a + r.merges, 0);
+  const totalArrivals = rows.reduce((a, r) => a + r.arrivals, 0);
+
+  return {
+    modeled_hours: modeledHours,
+    modeled_hour_buckets: modeledHourBuckets,
+    modeled_ticks: baseTicks,
+    total_merges: totalMerges,
+    total_arrivals: totalArrivals,
+    throughput_24h_mph: totalMerges / Math.max(1, modeledHours),
+    throughput_active_mph: activeRows.length
+      ? totalMerges / activeRows.length
+      : 0,
+    throughput_peak8_mph: bestPeak8Avg,
+    throughput_peak8_p90_mph: percentileFromSorted(
+      [...bestPeak8Slice].sort((a, b) => a - b),
+      90,
+    ),
+    throughput_peak_window_mph: peakRows.length
+      ? peakRows.reduce((a, r) => a + r.merges, 0) / peakRows.length
+      : 0,
+    throughput_offpeak_window_mph: offPeakRows.length
+      ? offPeakRows.reduce((a, r) => a + r.merges, 0) / offPeakRows.length
+      : 0,
+    arrivals_peak_window_per_hour: peakRows.length
+      ? peakRows.reduce((a, r) => a + r.arrivals, 0) / peakRows.length
+      : 0,
+    arrivals_offpeak_window_per_hour: offPeakRows.length
+      ? offPeakRows.reduce((a, r) => a + r.arrivals, 0) / offPeakRows.length
+      : 0,
+    merge_interval_p50_seconds: percentileFromSorted(sortedIntervals, 50),
+    merge_interval_p95_seconds: percentileFromSorted(sortedIntervals, 95),
+    rows,
+    peak_hours: peakHours,
+  };
+}
+
+function buildPolicyExtended(fileData, scenarioMeta, arrivalProfile) {
+  const m = fileData?.metrics || {};
+  const tickSeconds = Number(m.tick_seconds) || Number(scenarioMeta.tick_seconds) || 60;
+  const totalTicks = Number(m.total_time_ticks)
+    || Number(scenarioMeta.total_time_ticks)
+    || Number(scenarioMeta.scenario_metadata?.window_ticks)
+    || 0;
+  const timeline = computeHourlyTimeline({
+    events: fileData?.events || [],
+    scenarioMeta,
+    arrivalProfile,
+    tickSeconds,
+    totalTicks,
+  });
+  const merges = Number(m.mrs_merged) || 0;
+  const rebases = Number(m.rebase_calls) || 0;
+  return {
+    policy: fileData?.name || "unknown",
+    tick_seconds: tickSeconds,
+    total_ticks: Number(m.total_time_ticks) || timeline.modeled_ticks,
+    modeled_hours: timeline.modeled_hours,
+    merged: merges,
+    rebases,
+    rebase_per_merge: merges > 0 ? rebases / merges : 0,
+    peak_pipelines: Number(m.peak) || Number(m.peak_active_pipelines) || 0,
+    avg_ci_ticks: Number(m.ci_avg) || 0,
+    throughput_24h_mph: timeline.throughput_24h_mph,
+    throughput_active_mph: timeline.throughput_active_mph,
+    throughput_peak8_mph: timeline.throughput_peak8_mph,
+    throughput_peak8_p90_mph: timeline.throughput_peak8_p90_mph,
+    throughput_peak_window_mph: timeline.throughput_peak_window_mph,
+    throughput_offpeak_window_mph: timeline.throughput_offpeak_window_mph,
+    arrivals_peak_window_per_hour: timeline.arrivals_peak_window_per_hour,
+    arrivals_offpeak_window_per_hour: timeline.arrivals_offpeak_window_per_hour,
+    merge_interval_p50_seconds: timeline.merge_interval_p50_seconds,
+    merge_interval_p95_seconds: timeline.merge_interval_p95_seconds,
+    total_arrivals: timeline.total_arrivals,
+    hourly: timeline.rows,
+  };
+}
+
+function renderSimulationTab() {
+  const el = document.getElementById("simulationContent");
+  if (!el) return;
+  if (!filesData.length && !loadedScenarioDocs.length && !Object.keys(loadedRunMetadataByCategory).length) {
+    el.innerHTML = `<div class="sim-card full sim-empty">Load NDJSON traces (and optionally a run folder metadata.json) to view simulation parameters.</div>`;
+    return;
+  }
+
+  const ownerFile = filesData[0] || null;
+  const scenarioDocEntry = ownerFile
+    ? resolveScenarioDocForTrace(ownerFile.events || [], ownerFile.name)
+    : (loadedScenarioDocs[0] || null);
+  const scenarioMeta = ownerFile
+    ? ((ownerFile.events || []).find(e => e.event === "scenario_meta") || {})
+    : (scenarioDocEntry ? scenarioMetaFromYaml(scenarioDocEntry.doc, scenarioDocEntry.fileName) : {});
+
+  const scenarioCards = [];
+  const calibrationCards = [];
+  const runtimeCards = [];
+  const metadataCards = [];
+
+  if (ownerFile || scenarioDocEntry) {
+    const rawScenario = scenarioDocEntry?.doc || {};
+    const embeddedScenarioMetadata = scenarioMeta.scenario_metadata || {};
+    const cal = embeddedScenarioMetadata.calibration_targets || {};
+    const perfDims = cal.performance_dimensions || {};
+    const arrivalProfile = cal.arrival_profile || {};
+    const opFail = scenarioMeta.operation_failure_rate || {};
+    const tickSeconds = Number(scenarioMeta.tick_seconds)
+      || Number(embeddedScenarioMetadata.tick_seconds)
+      || 60;
+    const modeledWindowTicks = Number(embeddedScenarioMetadata.window_ticks)
+      || Number(scenarioMeta.total_time_ticks)
+      || Number(ownerFile?.metrics?.total_time_ticks)
+      || 0;
+    const timelineBase = computeHourlyTimeline({
+      events: ownerFile?.events || [],
+      scenarioMeta,
+      arrivalProfile,
+      tickSeconds,
+      totalTicks: modeledWindowTicks,
+    });
+
+    const mrCatalog = scenarioMeta.mr_catalog && typeof scenarioMeta.mr_catalog === "object" ? scenarioMeta.mr_catalog : {};
+    const catalogEntries = Object.values(mrCatalog).filter(x => x && typeof x === "object");
+    const forceCount = Array.isArray(scenarioMeta.force_merges) ? scenarioMeta.force_merges.length : 0;
+    const cancelCount = Array.isArray(scenarioMeta.cancellations) ? scenarioMeta.cancellations.length : 0;
+    const arrivalCount = Array.isArray(scenarioMeta.arrivals) ? scenarioMeta.arrivals.length : 0;
+    const rawMrs = Array.isArray(rawScenario.merge_requests) ? rawScenario.merge_requests : [];
+    const initialOpenCount = rawMrs.filter(mr => Number(mr?.arrival_tick) <= 0).length;
+
+    const priorityCounts = {};
+    const serviceCounts = {};
+    catalogEntries.forEach(entry => {
+      const p = String(entry.priority_label || "").trim() || "none";
+      priorityCounts[p] = (priorityCounts[p] || 0) + 1;
+      const services = Array.isArray(entry.service_labels) ? entry.service_labels : [];
+      services.forEach(lbl => {
+        const key = String(lbl).trim();
+        if (!key) return;
+        serviceCounts[key] = (serviceCounts[key] || 0) + 1;
+      });
+    });
+    const priorityRows = Object.entries(priorityCounts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${mqEscapeHtml(v)}</td></tr>`)
+      .join("");
+    const serviceRows = Object.entries(serviceCounts)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 14)
+      .map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${mqEscapeHtml(v)}</td></tr>`)
+      .join("");
+
+    const scenarioPeakHours = Array.isArray(arrivalProfile.peak_window_hours_utc)
+      ? arrivalProfile.peak_window_hours_utc.join(", ")
+      : "";
+    const profileName = embeddedScenarioMetadata.profile
+      || embeddedScenarioMetadata.calibration_profile
+      || "—";
+    scenarioCards.push(`
+      <div class="sim-card full">
+        <h3>Scenario Overview <span class="sim-badge">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></h3>
+        <div class="sim-strip">
+          <div class="sim-pill"><span class="k">Scenario</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.name || "—")}</span></div>
+          <div class="sim-pill"><span class="k">Profile</span><span class="v">${mqEscapeHtml(profileName)}</span></div>
+          <div class="sim-pill"><span class="k">Trace</span><span class="v">${mqEscapeHtml(ownerFile?.name || "scenario-only")}</span></div>
+          <div class="sim-pill"><span class="k">Modeled hours</span><span class="v">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></div>
+          <div class="sim-pill"><span class="k">Window ticks</span><span class="v">${mqEscapeHtml(modeledWindowTicks || "—")}</span></div>
+          <div class="sim-pill"><span class="k">Tick seconds</span><span class="v">${mqEscapeHtml(tickSeconds)}</span></div>
+          <div class="sim-pill"><span class="k">Modeled arrivals</span><span class="v">${mqEscapeHtml(timelineBase.total_arrivals || arrivalCount)}</span></div>
+          <div class="sim-pill"><span class="k">Modeled merges</span><span class="v">${mqEscapeHtml(timelineBase.total_merges)}</span></div>
+          <div class="sim-pill"><span class="k">Peak-window mph</span><span class="v">${fmtSim(timelineBase.throughput_peak_window_mph, 3)}</span></div>
+          <div class="sim-pill"><span class="k">Off-peak mph</span><span class="v">${fmtSim(timelineBase.throughput_offpeak_window_mph, 3)}</span></div>
+          <div class="sim-pill"><span class="k">Peak8 mph</span><span class="v">${fmtSim(timelineBase.throughput_peak8_mph, 3)}</span></div>
+          <div class="sim-pill"><span class="k">Merge p95 (s)</span><span class="v">${fmtSim(timelineBase.merge_interval_p95_seconds, 1)}</span></div>
+        </div>
+        <div class="sim-subtle">Dense overview: key modeled-time and throughput profile metrics are prioritized first; detailed metadata is available below on demand.</div>
+        <details class="sim-collapse" open>
+          <summary>Scenario metadata details</summary>
+          <div class="sim-collapse-body">
+            <div class="sim-kv">
+              <span class="k">Scenario file</span><span class="v">${mqEscapeHtml(scenarioDocEntry?.fileName || scenarioMeta.scenario_source_file || "embedded only")}</span>
+              <span class="k">Project filter</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.project_filter || "")}</span>
+              <span class="k">Seed</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.seed ?? "")}</span>
+              <span class="k">Catalog entries</span><span class="v">${mqEscapeHtml(catalogEntries.length)}</span>
+              <span class="k">Initial open MRs</span><span class="v">${mqEscapeHtml(initialOpenCount || "")}</span>
+              <span class="k">Total MRs</span><span class="v">${mqEscapeHtml(scenarioMeta.total_mrs ?? "")}</span>
+              <span class="k">Pipeline duration (ticks)</span><span class="v">${mqEscapeHtml(scenarioMeta.pipeline_duration?.min ?? "")} - ${mqEscapeHtml(scenarioMeta.pipeline_duration?.max ?? "")}</span>
+              <span class="k">Pipeline failure rate</span><span class="v">${fmtSim((Number(scenarioMeta.failure_rate) || 0) * 100, 2)}%</span>
+              <span class="k">Operation failure rate</span><span class="v">merge ${fmtSim((Number(opFail.merge) || 0) * 100, 2)}% / rebase ${fmtSim((Number(opFail.rebase) || 0) * 100, 2)}%</span>
+              <span class="k">Force-merges / cancellations</span><span class="v">${mqEscapeHtml(forceCount)} / ${mqEscapeHtml(cancelCount)}</span>
+              <span class="k">Scenario start (UTC)</span><span class="v">${mqEscapeHtml(arrivalProfile.scenario_start_hour ?? "0")}:00 ${mqEscapeHtml(arrivalProfile.scenario_start_weekday || "—")}</span>
+              <span class="k">Peak window (UTC)</span><span class="v">${mqEscapeHtml(scenarioPeakHours || "—")} ${scenarioPeakHours ? `<span class="sim-badge peak">peak</span>` : ""}</span>
+            </div>
+            ${(priorityRows || serviceRows) ? `
+              <div class="sim-split" style="margin-top:0.45rem;">
+                <div class="sim-table-wrap">
+                  <table class="sim-table dense">
+                    <thead><tr><th>Priority label</th><th>MRs</th></tr></thead>
+                    <tbody>${priorityRows || `<tr><td colspan="2">No priority labels found.</td></tr>`}</tbody>
+                  </table>
+                </div>
+                <div class="sim-table-wrap">
+                  <table class="sim-table dense">
+                    <thead><tr><th>Tenant label</th><th>MRs</th></tr></thead>
+                    <tbody>${serviceRows || `<tr><td colspan="2">No tenant labels found.</td></tr>`}</tbody>
+                  </table>
+                </div>
+              </div>
+            ` : ""}
+          </div>
+        </details>
+      </div>
+    `);
+
+    const hourlyRows = timelineBase.rows.map(r => `
+      <tr>
+        <td>h${mqEscapeHtml(r.hour_index)}</td>
+        <td>${mqEscapeHtml(String(r.utc_hour).padStart(2, "0"))}:00</td>
+        <td>${mqEscapeHtml(r.is_peak ? "peak" : "off-peak")}</td>
+        <td>${mqEscapeHtml(r.arrivals)}</td>
+        <td>${mqEscapeHtml(r.merges)}</td>
+        <td>${fmtSim(r.throughput_mph, 3)}</td>
+      </tr>
+    `).join("");
+    scenarioCards.push(`
+      <div class="sim-card full">
+        <h3>Hourly Scenario Timeline <span class="sim-badge">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></h3>
+        <div class="sim-subtle">Per-hour modeled timeline showing arrivals and throughput. This is the easy-read modeled time view (hour-by-hour), not just full-window averages.</div>
+        <div class="sim-table-wrap">
+          <table class="sim-table dense">
+            <thead>
+              <tr>
+                <th>Hour bucket</th>
+                <th>UTC hour</th>
+                <th>Window</th>
+                <th>Added MRs</th>
+                <th>Merged MRs</th>
+                <th>Throughput/h</th>
+              </tr>
+            </thead>
+            <tbody>${hourlyRows || `<tr><td colspan="6">No hourly rows available.</td></tr>`}</tbody>
+          </table>
+        </div>
+      </div>
+    `);
+
+    const policyExtended = filesData.map(d => buildPolicyExtended(d, scenarioMeta, arrivalProfile));
+    const primaryPolicy = policyExtended[0] || null;
+
+    if (Object.keys(perfDims).length && primaryPolicy) {
+      const targetRows = [
+        ["merge_per_hour_24h", "merge_per_hour_24h", primaryPolicy.throughput_24h_mph],
+        ["merge_per_hour_active_hours", "merge_per_hour_active_hours", primaryPolicy.throughput_active_mph],
+        ["merge_per_hour_peak8", "merge_per_hour_peak8", primaryPolicy.throughput_peak8_mph],
+        ["merge_per_hour_peak8_p90", "merge_per_hour_peak8_p90", primaryPolicy.throughput_peak8_p90_mph],
+        ["rebase_per_merge_global", "rebase_per_merge_global", primaryPolicy.rebase_per_merge],
+        ["merge_interval_seconds_p95", "merge_interval_seconds_p95", primaryPolicy.merge_interval_p95_seconds],
+      ].filter(([k]) => Number.isFinite(Number(perfDims[k])));
+      const rows = targetRows.map(([key, label, measured]) => {
+        const target = Number(perfDims[key]);
+        return `<tr>
+          <td>${mqEscapeHtml(label)}</td>
+          <td>${fmtSim(target, 4)}</td>
+          <td>${fmtSim(measured, 4)}</td>
+          <td>${formatDeltaCell(measured, target, 1)}</td>
+        </tr>`;
+      }).join("");
+      calibrationCards.push(`
+        <div class="sim-card">
+          <h3>Calibration: Target vs Measured</h3>
+          <div class="sim-subtle">Primary policy under view: <strong>${mqEscapeHtml(primaryPolicy.policy)}</strong>. Target and measured values are shown side-by-side per dimension.</div>
+          <div class="sim-table-wrap">
+            <table class="sim-table dense">
+              <thead><tr><th>Dimension</th><th>Target</th><th>Measured</th><th>Delta</th></tr></thead>
+              <tbody>${rows}</tbody>
+            </table>
+          </div>
+        </div>
+      `);
+    }
+
+    if (policyExtended.length) {
+      const peakTarget = Number(perfDims.merge_per_hour_peak8);
+      const offPeakTarget = Number(perfDims.merge_per_hour_24h);
+      const runtimeRows = policyExtended.map(p => `<tr>
+        <td class="sticky-col">${mqEscapeHtml(p.policy)}</td>
+        <td>${mqEscapeHtml(fmtHoursLabel(p.modeled_hours))}</td>
+        <td>${fmtSim(p.throughput_24h_mph, 3)}</td>
+        <td>${fmtSim(p.throughput_active_mph, 3)}</td>
+        <td>${fmtSim(p.throughput_peak8_mph, 3)}</td>
+        <td>${fmtSim(p.throughput_peak8_p90_mph, 3)}</td>
+        <td>${fmtSim(p.throughput_peak_window_mph, 3)} ${Number.isFinite(peakTarget) ? `<span class="sim-badge peak">${formatDeltaCell(p.throughput_peak_window_mph, peakTarget, 1)}</span>` : ""}</td>
+        <td>${fmtSim(p.throughput_offpeak_window_mph, 3)} ${Number.isFinite(offPeakTarget) ? `<span class="sim-badge offpeak">${formatDeltaCell(p.throughput_offpeak_window_mph, offPeakTarget, 1)}</span>` : ""}</td>
+        <td>${fmtSim(p.rebases, 0)}</td>
+        <td>${fmtSim(p.rebase_per_merge, 3)}</td>
+        <td>${fmtSim(p.merge_interval_p95_seconds, 1)}</td>
+        <td>${fmtSim(p.merged, 0)}</td>
+        <td>${fmtSim(p.total_arrivals, 0)}</td>
+        <td>${fmtSim(p.total_ticks, 0)}</td>
+      </tr>`).join("");
+      runtimeCards.push(`
+        <div class="sim-card full">
+          <h3>Per-Policy Runtime Metrics (Extended + Peak/Off-peak Matching)</h3>
+          <div class="sim-subtle">Expanded per-policy view includes hourly-derived extended metrics, modeled time in hours, and peak/off-peak target matching indicators.</div>
+          <div class="sim-table-wrap">
+            <table class="sim-table dense">
+              <thead>
+                <tr>
+                  <th class="sticky-col">Policy</th>
+                  <th>Modeled window</th>
+                  <th>Throughput/h (24h)</th>
+                  <th>Active h throughput</th>
+                  <th>Peak8 throughput</th>
+                  <th>Peak8 p90</th>
+                  <th>Peak-window avg</th>
+                  <th>Off-peak avg</th>
+                  <th>Rebases</th>
+                  <th>Rebase/Merge</th>
+                  <th>Merge p95 (s)</th>
+                  <th>Merged</th>
+                  <th>Added MRs</th>
+                  <th>Total ticks</th>
+                </tr>
+              </thead>
+              <tbody>${runtimeRows}</tbody>
+            </table>
+          </div>
+        </div>
+      `);
+    }
+  }
+
+  const categories = Object.keys(loadedRunMetadataByCategory);
+  if (categories.length) {
+    const rows = categories
+      .sort((a, b) => a.localeCompare(b))
+      .map(cat => {
+        const meta = loadedRunMetadataByCategory[cat] || {};
+        const ctx = meta.context || {};
+        return `<tr>
+          <td>${mqEscapeHtml(cat)}</td>
+          <td>${mqEscapeHtml(meta.generated_at_iso || "")}</td>
+          <td>${mqEscapeHtml(ctx.policy || ctx.policy_set || "")}</td>
+          <td>${mqEscapeHtml(ctx.scenario || "")}</td>
+        </tr>`;
+      })
+      .join("");
+    metadataCards.push(`
+      <div class="sim-table-wrap">
+        <table class="sim-table dense">
+          <thead><tr><th>Category</th><th>Generated</th><th>Policy/Set</th><th>Scenario</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    `);
+  }
+
+  const sectionHtml = [
+    `<div class="sim-section">
+      <div class="sim-section-title">Scenario Model & Timeline</div>
+      <div class="sim-grid compact">${scenarioCards.join("") || `<div class="sim-card full sim-empty">Load a scenario YAML or NDJSON trace to view modeled-time and hourly scenario details.</div>`}</div>
+    </div>`,
+    `<div class="sim-section">
+      <div class="sim-section-title calibration">Calibration (Target vs Measured)</div>
+      <div class="sim-grid compact">${calibrationCards.join("") || `<div class="sim-card full sim-empty">No calibration targets loaded.</div>`}</div>
+    </div>`,
+    `<div class="sim-section">
+      <div class="sim-section-title runtime">Per-Policy Runtime (Extended Metrics)</div>
+      <div class="sim-grid runtime">${runtimeCards.join("") || `<div class="sim-card full sim-empty">Load one or more NDJSON policy traces to view extended runtime metrics.</div>`}</div>
+    </div>`,
+  ];
+  if (metadataCards.length) {
+    sectionHtml.push(`
+      <div class="sim-section">
+        <div class="sim-section-title">Run Metadata</div>
+        <div class="sim-grid compact">
+          <div class="sim-card full">
+              <details class="sim-collapse" open>
+              <summary>Loaded run metadata context</summary>
+              <div class="sim-collapse-body">${metadataCards.join("")}</div>
+            </details>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+  el.innerHTML = sectionHtml.join("");
+}
+
+function renderStats() {
+  if (!filesData.length) return;
+  renderScenarioInfoCard();
+  renderMetricPicker();
+  const metrics = filesData.map(d => d.metrics);
+  renderHeroCards(metrics);
+  renderStatsExtended(metrics);
+  renderCmpTable();
+}
+function renderStatsExtended(metrics) {
+  const el = document.getElementById("statsExtended");
+  if (!el) return;
+  if (!statsExtendedMode) {
+    el.innerHTML = "";
+    return;
+  }
+  const sel = getSelectedIndices();
+  if (!sel.length) { el.innerHTML = ""; return; }
+  const rows = sel.map(i => ({ name: filesData[i].name, m: metrics[i] || {} }));
+  const bestBy = (key, higher = true) => {
+    let best = null;
+    rows.forEach(r => {
+      const value = Number(r.m[key]);
+      if (!Number.isFinite(value)) return;
+      if (!best) {
+        best = { ...r, value };
+        return;
+      }
+      if (higher ? value > best.value : value < best.value) best = { ...r, value };
+    });
+    return best;
+  };
+  const bestPeak = bestBy("throughput_peak_window_mph", true);
+  const bestOffPeak = bestBy("throughput_offpeak_window_mph", true);
+  const bestRatio = bestBy("peak_offpeak_throughput_ratio", true);
+  const bestInterval = bestBy("merge_interval_p95_seconds", false);
+  const bestActive = bestBy("throughput_active_mph", true);
+  const longestModeled = bestBy("modeled_hours", true);
+  const mean = key => {
+    const vals = rows.map(r => Number(r.m[key])).filter(Number.isFinite);
+    if (!vals.length) return 0;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  };
+  el.innerHTML = `
+    <div class="stats-extended-card">
+      <h3>Extended Throughput Profile</h3>
+      <div class="stats-extended-kv">
+        <span class="k">Peak window best</span><span class="v">${bestPeak ? `${fmtSim(bestPeak.value, 3)} mph (${mqEscapeHtml(bestPeak.name)})` : "—"}</span>
+        <span class="k">Off-peak best</span><span class="v">${bestOffPeak ? `${fmtSim(bestOffPeak.value, 3)} mph (${mqEscapeHtml(bestOffPeak.name)})` : "—"}</span>
+        <span class="k">Active-hour best</span><span class="v">${bestActive ? `${fmtSim(bestActive.value, 3)} mph (${mqEscapeHtml(bestActive.name)})` : "—"}</span>
+        <span class="k">Peak/off-peak ratio best</span><span class="v">${bestRatio ? `${fmtSim(bestRatio.value, 3)}x (${mqEscapeHtml(bestRatio.name)})` : "—"}</span>
+        <span class="k">Mean peak-window mph</span><span class="v">${fmtSim(mean("throughput_peak_window_mph"), 3)}</span>
+        <span class="k">Mean off-peak mph</span><span class="v">${fmtSim(mean("throughput_offpeak_window_mph"), 3)}</span>
+      </div>
+    </div>
+    <div class="stats-extended-card">
+      <h3>Modeled Window & Arrivals</h3>
+      <div class="stats-extended-kv">
+        <span class="k">Longest modeled window</span><span class="v">${longestModeled ? `${fmtHoursLabel(longestModeled.value)} (${mqEscapeHtml(longestModeled.name)})` : "—"}</span>
+        <span class="k">Mean modeled window</span><span class="v">${fmtHoursLabel(mean("modeled_hours"))}</span>
+        <span class="k">Mean arrivals</span><span class="v">${fmtSim(mean("total_arrivals"), 0)}</span>
+        <span class="k">Peak arrivals/h (mean)</span><span class="v">${fmtSim(mean("arrivals_peak_window_per_hour"), 2)}</span>
+        <span class="k">Off-peak arrivals/h (mean)</span><span class="v">${fmtSim(mean("arrivals_offpeak_window_per_hour"), 2)}</span>
+        <span class="k">24h throughput (mean)</span><span class="v">${fmtSim(mean("throughput_24h_mph"), 3)} mph</span>
+      </div>
+    </div>
+    <div class="stats-extended-card">
+      <h3>Merge Interval & Reliability</h3>
+      <div class="stats-extended-kv">
+        <span class="k">Best p95 merge interval</span><span class="v">${bestInterval ? `${fmtSim(bestInterval.value, 1)}s (${mqEscapeHtml(bestInterval.name)})` : "—"}</span>
+        <span class="k">Mean p50 merge interval</span><span class="v">${fmtSim(mean("merge_interval_p50_seconds"), 1)}s</span>
+        <span class="k">Mean p95 merge interval</span><span class="v">${fmtSim(mean("merge_interval_p95_seconds"), 1)}s</span>
+        <span class="k">Mean rebases</span><span class="v">${fmtSim(mean("rebase_calls"), 0)}</span>
+        <span class="k">Mean CI failures</span><span class="v">${fmtSim(mean("ci_failures"), 1)}</span>
+        <span class="k">Mean queue drain</span><span class="v">${fmtSim(mean("queue_drain"), 0)}%</span>
+      </div>
+      <div class="stats-extended-note">Extended metrics are computed from per-hour timeline slices + event intervals.</div>
+    </div>
+  `;
+}
+function renderMetricPicker() {
+  const el = document.getElementById("metricPicker"); el.innerHTML = "";
+  el.innerHTML = `<span class="mp-label">Hero cards:</span>`;
+  const activeKeys = getActiveHeroMetricKeys();
+  getVisibleHeroMetrics().forEach(m => {
+    const active = activeKeys.includes(m.key) ? " active" : "";
+    el.innerHTML += `<button data-key="${m.key}" class="${active}" title="${mqEscapeHtml(METRIC_TOOLTIPS[m.key] || m.label)}">${m.label}</button>`;
+  });
+}
+document.getElementById("metricPicker").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-key]");
+  if (!btn) return;
+  const k = btn.dataset.key;
+  const current = [...getActiveHeroMetricKeys()];
+  if (current.includes(k)) setActiveHeroMetricKeys(current.filter(x => x !== k));
+  else setActiveHeroMetricKeys([...current, k]);
+  renderStats();
+});
+function renderHeroCards(metrics) {
+  const activeKeys = getActiveHeroMetricKeys();
+  const cards = getVisibleHeroMetrics().filter(m => activeKeys.includes(m.key));
+  const sel = getSelectedIndices();
+  const el = document.getElementById("heroCards"); el.innerHTML = "";
+  cards.forEach(c => {
+    const numericRows = sel
+      .map(i => ({ idx: i, val: Number(metrics[i][c.key]) }))
+      .filter(r => Number.isFinite(r.val));
+    if (!numericRows.length) {
+      el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">—</div><div class="winner">no data</div><div class="sub">load NDJSON traces with this metric</div></div>`;
+      return;
+    }
+    let best = numericRows[0];
+    numericRows.forEach(r => { if (c.higher ? r.val > best.val : r.val < best.val) best = r; });
+    const worstVal = numericRows.reduce((w, r) => c.higher ? Math.min(w, r.val) : Math.max(w, r.val), best.val);
+    el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">${c.fmt(best.val)}</div><div class="winner">${mqEscapeHtml(filesData[best.idx].name)}</div><div class="sub">${c.higher ? "worst" : "max"}: ${c.fmt(worstVal)}</div></div>`;
+  });
+}
+function renderCmpTable() {
+  const sel = getSelectedIndices();
+  const heads = sel.map(i => filesData[i].name);
+  const metrics = sel.map(i => filesData[i].metrics);
+  const fmt = (x, f) => (f === "d3" ? (typeof x === "number" ? x.toFixed(3) : x) : f === "d1" ? (typeof x === "number" ? x.toFixed(1) : x) : f === "d0" ? String(Math.round(x)) : x);
+  const rows = [
+    ["s", "── Throughput & Time ──"], ["total_time_ticks", "Total time (steps)", "d0"], ["tick_seconds", "Tick length (seconds)", "d0"], ["mrs_merged", "MRs merged", "d0"], ["throughput", "Throughput (merges/step)", "d3"], ["throughput_hour", "Throughput (merges/hour)", "d3"],
+    ["time_to_first", "Time to first merge", "d0"], ["time_to_10", "Time to merge 10", "d0"], ["avg_int", "Avg merge interval", "d0"], ["queue_drain", "Queue drain %", "d0"], ["modeled_hours", "Modeled duration (hours)", "d1"], ["total_arrivals", "Modeled arrivals", "d0"],
+    ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"], ["ci_failures", "CI Failures", "d0"],
+    ["s", "── Events ──"], ["force_merges", "Force-merges", "d0"], ["merge_errors", "Merge errors", "d0"], ["rebase_errors", "Rebase errors", "d0"], ["pipeline_cancels", "Pipeline cancels", "d0"],
+    ["s", "── Pool ──"], ["srp_p95", "Same-root p95", "d0"], ["srp_max", "Same-root max", "d0"],
+    ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"], ["mr_count", "Total MRs seen", "d0"]
+  ];
+  if (statsExtendedMode) {
+    const extendedRows = [
+      ["s", "── Extended Throughput ──"], ["throughput_24h_mph", "Throughput/h (24h window)", "d3"], ["throughput_active_mph", "Throughput/h (active merge hours)", "d3"], ["throughput_peak8_mph", "Throughput/h (peak8 avg)", "d3"], ["throughput_peak8_p90_mph", "Throughput/h (peak8 p90)", "d3"], ["throughput_peak_window_mph", "Throughput/h (peak window)", "d3"], ["throughput_offpeak_window_mph", "Throughput/h (off-peak window)", "d3"], ["peak_offpeak_throughput_ratio", "Peak/off-peak throughput ratio", "d3"], ["arrivals_peak_window_per_hour", "Arrivals/h (peak window)", "d3"], ["arrivals_offpeak_window_per_hour", "Arrivals/h (off-peak window)", "d3"], ["merge_interval_p50_seconds", "Merge interval p50 (s)", "d1"], ["merge_interval_p95_seconds", "Merge interval p95 (s)", "d1"],
+    ];
+    const ciIdx = rows.findIndex(r => r[0] === "s" && r[1] === "── CI ──");
+    if (ciIdx >= 0) rows.splice(ciIdx, 0, ...extendedRows);
+    else rows.push(...extendedRows);
+  }
+  let h = "<thead><tr><th>Metric</th>" + heads.map(n => `<th>${mqEscapeHtml(n)}</th>`).join("") + "</tr></thead><tbody>";
+  rows.forEach(r => {
+    if (r[0] === "s") { h += `<tr class="section"><td colspan="${heads.length + 1}">${r[1]}</td></tr>`; return; }
+    const key = r[0], tip = METRIC_TOOLTIPS[key] || "", hib = METRIC_HIGHER_IS_BETTER[key];
+    const vals = metrics.map(M => M[key]);
+    const bestSet = new Set();
+    if (hib !== null && vals.some(v => typeof v === "number")) {
+      let bv = hib ? -Infinity : Infinity;
+      vals.forEach((v) => { if (typeof v !== "number") return; if (hib ? v > bv : v < bv) bv = v; });
+      vals.forEach((v, i) => { if (v === bv) bestSet.add(i); });
+      if (bestSet.size === vals.length) bestSet.clear();
+    }
+    h += `<tr class="data-row"><td class="metric-name" data-tip="${mqEscapeHtml(tip)}">${r[1]}</td>` + metrics.map((M, i) => {
+      const v = M[key], cls = bestSet.has(i) ? ' class="best"' : "";
+      return `<td${cls}>${r[2] && v != null && typeof v === "number" ? fmt(v, r[2]) : (v == null ? "—" : v)}</td>`;
+    }).join("") + "</tr>";
+  });
+  h += "</tbody>";
+  document.getElementById("cmpTable").innerHTML = h;
+}
+
+// --- Kanban Tab ---
+function renderKanbanPolicyTabs() {
+  const el = document.getElementById("kanbanPolicyTabs");
+  el.innerHTML = "";
+  filesData.forEach((d, i) => {
+    const b = document.createElement("button");
+    b.className = "cp-tab" + (kanbanVisibleIdxs.has(i) ? " active" : "");
+    b.textContent = d.name;
+    b.onclick = () => {
+      if (kanbanVisibleIdxs.has(i)) kanbanVisibleIdxs.delete(i);
+      else kanbanVisibleIdxs.add(i);
+      renderKanbanPolicyTabs();
+      renderKanbanTab();
+    };
+    el.appendChild(b);
+  });
+}
+function renderKanbanTab() {
+  if (!filesData.length) return;
+  renderKanbanPolicyTabs();
+  renderSnapshot();
+  renderTraces();
+}
+function renderSnapshot() {
+  const el = document.getElementById("kSnap");
+  const t = playhead;
+  const visible = filesData.filter((_, i) => kanbanVisibleIdxs.has(i));
+  const parts = visible.map(d => {
+    if (!d.packed) return "";
+    const i = Math.min(t, d.packed.series.open.length - 1);
+    return `<span><b>${d.packed.series.open[i] || 0}</b></span>`;
+  });
+  const f = normalizeEventsForAnalysis(filesData[0]?.events || []);
+  const story = buildNarrativeAtTick(f, t);
+  if (!visible.length) {
+    el.innerHTML = `<span style="font-weight:600">Step ${t}</span> <span class="story-tip">Select one or more policies to render Kanban boards.</span>`;
+    return;
+  }
+  el.innerHTML = `<span style="font-weight:600">Step ${t}</span> <span><b>Queue:</b></span> ` + parts.join(" ") + ` <span class="story-tip" title="${mqEscapeHtml(story.join("; "))}">${mqEscapeHtml(story[0] || "")}</span>`;
+}
+function renderTraces() {
+  const container = document.getElementById("tracesContainer");
+  container.innerHTML = "";
+  if (!kanbanVisibleIdxs.size) {
+    container.innerHTML = `<div class="kanban-empty">No policies selected. Use the bubbles above to choose what to render.</div>`;
+    return;
+  }
+  filesData.forEach((d, i) => {
+    if (!kanbanVisibleIdxs.has(i)) return;
+    if (!d.packed) return;
+    const f = normalizeEventsForAnalysis(d.events);
+    const t = playhead;
+    const w = buildKanbanState(d.packed, f, t);
+    const trace = document.createElement("div");
+    trace.className = "trace";
+
+    const hdr = document.createElement("div");
+    hdr.className = "trace-header";
+    hdr.innerHTML = `<span class="tname">${mqEscapeHtml(d.name)}</span><span class="tcounts">Q:${w.queue.length} R:${w.rebase.length} CI:${w.ci.length} Rdy:${w.ready.length} St:${w.stale.length} M:${w.merged.length}</span>`;
+    trace.appendChild(hdr);
+
+    const body = document.createElement("div");
+    body.className = "trace-body";
+    const colHdr = document.createElement("div");
+    colHdr.className = "trace-cols";
+    ["Queue", "Rebasing", "CI", "Ready", "Stale", "Merged"].forEach(n => { colHdr.innerHTML += `<div class="col-hd">${n}</div>`; });
+    body.appendChild(colHdr);
+
+    const rebasedRecent = new Set(), mergedRecent = new Set(), forceMergedRecent = new Set(), ciFailedRecent = new Set();
+    const visitedFirstTick = new Map();
+    const markVisited = (mr, at) => {
+      if (mr == null || at == null || at > t) return;
+      const mid = String(mr);
+      const prev = visitedFirstTick.get(mid);
+      if (prev == null || at < prev) visitedFirstTick.set(mid, at);
+    };
+    f.forEach(e => {
+      if (e.tick == null || e.tick > t) return;
+      if (e.event === "rebase" || e.event === "merge") markVisited(e.mr_iid, e.tick);
+      if (e.event === "tick") {
+        (e.transitions || []).forEach(tr => markVisited(tr.mr_iid, e.tick));
+      }
+    });
+    for (let dt = 0; dt < HIGHLIGHT_TICKS; dt++) { const tt = t - dt; f.forEach(e => {
+      if (e.tick === tt && e.mr_iid != null) {
+        const mid = String(e.mr_iid);
+        if (e.event === "rebase") rebasedRecent.add(mid);
+        if (e.event === "merge" && e.force_merge) forceMergedRecent.add(mid);
+        else if (e.event === "merge") mergedRecent.add(mid);
+      }
+      if (e.event === "tick" && e.tick === tt) {
+        (e.transitions || []).forEach(tr => {
+          if ((tr.to || "").toLowerCase() === "failed" && tr.mr_iid != null) {
+            ciFailedRecent.add(String(tr.mr_iid));
+          }
+        });
+      }
+    }); }
+
+    const cards = document.createElement("div");
+    cards.className = "trace-cards";
+    const colData = [w.queue, w.rebase, w.ci, w.ready, w.stale, w.merged];
+    const mTickMap = mergeTickByMr(f);
+    colData.forEach((arr, ci) => {
+      const col = document.createElement("div");
+      col.className = "tcol";
+      if (ci === 5) {
+        const byMT = new Map();
+        arr.forEach(m => { const mt = mTickMap.get(m) ?? 0; if (!byMT.has(mt)) byMT.set(mt, []); byMT.get(mt).push(m); });
+        Array.from(byMT.keys()).sort((a, b) => b - a).forEach(mt => {
+          const mrs = byMT.get(mt), isRecent = (t - mt) < HIGHLIGHT_TICKS;
+          if (mrs.length > 1) {
+            const grp = document.createElement("div");
+            grp.className = "merge-group" + (isRecent ? " recent" : "");
+            grp.innerHTML = `<span class="mg-label">t=${mt} (${mrs.length})</span>`;
+            mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
+            col.appendChild(grp);
+          } else {
+            mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; col.appendChild(c); });
+          }
+        });
+      } else if (ci === 0) {
+        arr.forEach(m => {
+          const c = document.createElement("div");
+          const firstVisited = visitedFirstTick.get(String(m));
+          let cls = "kcard";
+          if (firstVisited == null) cls += " queue-unvisited";
+          else if ((t - firstVisited) < HIGHLIGHT_TICKS) cls += " queue-visited-new";
+          else cls += " queue-visited";
+          c.className = cls;
+          c.textContent = "!" + m;
+          col.appendChild(c);
+        });
+      } else {
+        arr.forEach(m => {
+          const c = document.createElement("div");
+          let cls = "kcard";
+          if (forceMergedRecent.has(m)) cls += " force-merged";
+          else if (mergedRecent.has(m)) cls += " just-merged";
+          else if (ciFailedRecent.has(m)) cls += " ci-failed";
+          else if (rebasedRecent.has(m)) cls += " just-rebased";
+          c.className = cls; c.textContent = "!" + m; col.appendChild(c);
+        });
+      }
+      cards.appendChild(col);
+    });
+    body.appendChild(cards);
+    trace.appendChild(body);
+    container.appendChild(trace);
+  });
+}
+
+// --- Composition Tab ---
+let chartIdxL = 0, chartIdxR = 1, chartInstL = null, chartInstR = null;
+let chartViewMode = "single";
+const barCharts = new Map();
+const BARS_LEGEND_KEYS = ["Idle", "Open (total)", "Stale", "CI", "Ready"];
+const barsLegendVisibility = Object.fromEntries(BARS_LEGEND_KEYS.map(k => [k, true]));
+const BARS_LEGEND_COLORS = {
+  "Idle": C0.other,
+  "Open (total)": "rgba(180,186,194,0.9)",
+  "Stale": C0.stale,
+  "CI": C0.active,
+  "Ready": C0.pool,
+};
+const BARS_STATS_MODES = ["peak", "avg"];
+let barsStatsMode = "peak";
+let barsStatsSeriesKey = "Idle";
+let barsStatsEnabled = true;
+
+document.getElementById("chartViewToggle").addEventListener("click", e => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  chartViewMode = btn.dataset.mode;
+  document.querySelectorAll("#chartViewToggle button").forEach(b => b.classList.toggle("active", b === btn));
+  const pair = document.getElementById("chartPair");
+  pair.classList.toggle("single-view", chartViewMode === "single");
+  document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
+  document.getElementById("pickerL").querySelector(".cp-label").textContent = chartViewMode === "single" ? "Policy:" : "Left:";
+  setTimeout(refreshCharts, 30);
+});
+
+function renderChartPolicyTabs() {
+  [["chartPolicyTabsL", chartIdxL, "L"], ["chartPolicyTabsR", chartIdxR, "R"]].forEach(([elId, sel, side]) => {
+    const el = document.getElementById(elId); el.innerHTML = "";
+    filesData.forEach((d, i) => {
+      const b = document.createElement("button");
+      b.className = "cp-tab" + (i === sel ? " active" : "");
+      b.textContent = d.name;
+      b.onclick = () => { if (side === "L") chartIdxL = i; else chartIdxR = i; renderChartPolicyTabs(); refreshCharts(); };
+      el.appendChild(b);
+    });
+  });
+  document.getElementById("pickerR").style.display = chartViewMode === "single" ? "none" : "";
+}
+function refreshCharts() {
+  const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+  document.getElementById("chartTitleL").textContent = filesData[chartIdxL]?.name || "";
+  document.getElementById("chartTitleR").textContent = filesData[chartIdxR]?.name || "";
+  const yMax = getSharedYMax();
+  if (pL) {
+    doChart(pL, "chartCanvasL", "L", yMax);
+    dSwim(pL, "swimAreaL", { forceFullRange: true });
+  }
+  if (chartViewMode === "compare" && pR) {
+    doChart(pR, "chartCanvasR", "R", yMax);
+    dSwim(pR, "swimAreaR", { forceFullRange: true });
+  }
+}
+
+function destroyBarCharts() {
+  barCharts.forEach(ch => mqDestroyChartIfPresent(ch));
+  barCharts.clear();
+}
+
+function barsLegendKeyFromDataset(ds) {
+  return String(ds?.seriesKey || ds?.label || "");
+}
+
+function getBarsSeriesValues(packed, key) {
+  const s = packed?.series;
+  if (!s) return [];
+  const src = (
+    key === "Idle" ? s.rest
+      : key === "Open (total)" ? s.open
+        : key === "Stale" ? s.stale
+          : key === "CI" ? s.active
+            : key === "Ready" ? s.pool
+              : []
+  );
+  return Array.isArray(src)
+    ? src.map(v => Number(v)).filter(v => Number.isFinite(v))
+    : [];
+}
+
+function computeBarsStatValue(packed, key, mode) {
+  const values = getBarsSeriesValues(packed, key);
+  if (!values.length) return null;
+  if (mode === "avg") {
+    return values.reduce((sum, v) => sum + v, 0) / values.length;
+  }
+  return Math.max(...values);
+}
+
+function formatBarsStatLabelValue(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return "n/a";
+  if (Math.abs(n) >= 100) return n.toFixed(1);
+  if (Math.abs(n) >= 10) return n.toFixed(2);
+  return n.toFixed(3);
+}
+
+function plBarsStatLine(packed) {
+  return {
+    id: "barsStatLine",
+    afterDatasetsDraw(chart) {
+      if (!barsStatsEnabled) return;
+      const key = barsStatsSeriesKey;
+      const mode = barsStatsMode;
+      if (!key || !BARS_LEGEND_KEYS.includes(key) || !BARS_STATS_MODES.includes(mode)) return;
+      if (barsLegendVisibility[key] === false) return;
+
+      const value = computeBarsStatValue(packed, key, mode);
+      if (!Number.isFinite(value)) return;
+
+      const yScale = chart?.scales?.y;
+      const area = chart?.chartArea;
+      if (!yScale || !area) return;
+
+      const y = yScale.getPixelForValue(value);
+      if (!Number.isFinite(y) || y < area.top || y > area.bottom) return;
+
+      const color = BARS_LEGEND_COLORS[key] || "#8b949e";
+      const label = `${key} ${mode.toUpperCase()}: ${formatBarsStatLabelValue(value)}`;
+
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.setLineDash([6, 4]);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.75;
+      ctx.beginPath();
+      ctx.moveTo(area.left, y);
+      ctx.lineTo(area.right, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.font = "12px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif";
+      const textW = ctx.measureText(label).width;
+      const padX = 6;
+      const boxH = 18;
+      const boxW = Math.ceil(textW + (padX * 2));
+      const boxX = Math.max(area.left + 4, area.right - boxW - 4);
+      const boxY = Math.min(Math.max(area.top + 4, y - boxH - 4), area.bottom - boxH - 2);
+
+      ctx.fillStyle = "rgba(13,17,23,0.86)";
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.rect(boxX, boxY, boxW, boxH);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = "#e6edf3";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, boxX + padX, boxY + (boxH / 2));
+      ctx.restore();
+    }
+  };
+}
+
+function renderBarsLegendControls() {
+  const traceHost = document.getElementById("barsTraceControls");
+  const statsHost = document.getElementById("barsStatsControls");
+  const legendHost = document.getElementById("barsLegendSeriesControls");
+  if (!traceHost || !statsHost || !legendHost) return;
+
+  traceHost.innerHTML = `<span class="bars-legend-title">Traces</span>` + filesData.map((d, i) => (
+    `<button class="bars-trace-btn${barVisibleIdxs.has(i) ? " active" : ""}" data-bars-trace-idx="${i}">${mqEscapeHtml(d.name)}</button>`
+  )).join("");
+
+  const statsBodyCls = barsStatsEnabled ? "bars-stat-body" : "bars-stat-body off";
+  statsHost.innerHTML = `<span class="bars-legend-title">Stats</span>`
+    + `<button class="bars-stat-power-btn${barsStatsEnabled ? "" : " active"}" data-bars-stat-enabled="off">OFF</button>`
+    + `<button class="bars-stat-power-btn${barsStatsEnabled ? " active" : ""}" data-bars-stat-enabled="on">ON</button>`
+    + `<span class="${statsBodyCls}">`
+    + `<span class="bars-legend-subtitle">Mode</span>`
+    + BARS_STATS_MODES.map(mode => (
+      `<button class="bars-stat-mode-btn${barsStatsMode === mode ? " active" : ""}" data-bars-stat-mode="${mode}">${mode.toUpperCase()}</button>`
+    )).join("")
+    + `<span class="bars-legend-subtitle">Trace</span>`
+    + BARS_LEGEND_KEYS.map(key => {
+      const color = BARS_LEGEND_COLORS[key] || "#8b949e";
+      const swatchCls = key === "Open (total)" ? "bars-legend-swatch line" : "bars-legend-swatch";
+      const activeCls = barsStatsSeriesKey === key ? " active" : "";
+      return `<button class="bars-stat-trace-btn${activeCls}" style="--series-color:${color}" data-bars-stat-trace="${mqEscapeHtml(key)}"><span class="${swatchCls}" aria-hidden="true"></span>${mqEscapeHtml(key)}</button>`;
+    }).join("")
+    + `</span>`;
+
+  legendHost.innerHTML = `<span class="bars-legend-title">Legend</span>` + BARS_LEGEND_KEYS.map(key => {
+    const color = BARS_LEGEND_COLORS[key] || "#8b949e";
+    const swatchCls = key === "Open (total)" ? "bars-legend-swatch line" : "bars-legend-swatch";
+    const activeCls = barsLegendVisibility[key] !== false ? " active" : "";
+    return `<button class="bars-legend-btn${activeCls}" style="--series-color:${color}" data-bars-legend-key="${mqEscapeHtml(key)}"><span class="${swatchCls}" aria-hidden="true"></span>${mqEscapeHtml(key)}</button>`;
+  }).join("");
+}
+
+function applyBarsLegendVisibility(updateMode = "none") {
+  barCharts.forEach(ch => {
+    ch.data.datasets.forEach((ds, idx) => {
+      const key = barsLegendKeyFromDataset(ds);
+      const visible = barsLegendVisibility[key] !== false;
+      ch.setDatasetVisibility(idx, visible);
+    });
+    ch.update(updateMode);
+  });
+}
+
+function renderBarsTab() {
+  if (!filesData.length) return;
+  renderBarsLegendControls();
+  const host = document.getElementById("barsPanels");
+  host.innerHTML = "";
+  destroyBarCharts();
+  const selected = Array.from(barVisibleIdxs).sort((a, b) => a - b);
+  if (!selected.length) {
+    host.innerHTML = `<div class="kanban-empty">No policies selected. Use the bubbles above to choose composition charts.</div>`;
+    return;
+  }
+  const single = selected.length === 1;
+  const computeSeriesMax = (arr) => (Array.isArray(arr) && arr.length ? Math.max(...arr.map(v => Number(v) || 0)) : 0);
+  const sharedYMax = (() => {
+    if (!selected.length) return null;
+    let maxAcross = 0;
+    selected.forEach(idx => {
+      const packed = filesData[idx]?.packed;
+      if (!packed?.series) return;
+      const s = packed.series;
+      const stackMax = Math.max(
+        0,
+        ...s.labels.map((_, i) => (
+          (Number(s.pool[i]) || 0)
+          + (Number(s.active[i]) || 0)
+          + (Number(s.stale[i]) || 0)
+          + (Number(s.rest[i]) || 0)
+        ))
+      );
+      const openMax = computeSeriesMax(s.open);
+      maxAcross = Math.max(maxAcross, stackMax, openMax);
+    });
+    // Keep a little headroom so line/legend never clips.
+    return maxAcross > 0 ? Math.ceil(maxAcross * 1.05) : 1;
+  })();
+  selected.forEach((idx, n) => {
+    const d = filesData[idx];
+    if (!d?.packed) return;
+    const panel = document.createElement("div");
+    panel.className = "bars-panel" + (single ? " single" : "");
+    panel.innerHTML = `<h3>${mqEscapeHtml(d.name)}</h3><canvas id="barsCanvas${idx}-${n}"></canvas>`;
+    host.appendChild(panel);
+    const ctx = panel.querySelector("canvas").getContext("2d");
+    const ch = new Chart(ctx, {
+      type: "bar",
+      data: {
+        labels: d.packed.series.labels,
+        datasets: [{
+          label: "Ready",
+          seriesKey: "Ready",
+          data: d.packed.series.pool,
+          backgroundColor: C0.pool,
+          stack: "a",
+          order: 3,
+          borderWidth: 0
+        }, {
+          label: "CI",
+          seriesKey: "CI",
+          data: d.packed.series.active,
+          backgroundColor: C0.active,
+          stack: "a",
+          order: 2,
+          borderWidth: 0
+        }, {
+          label: "Stale",
+          seriesKey: "Stale",
+          data: d.packed.series.stale,
+          backgroundColor: C0.stale,
+          stack: "a",
+          order: 1,
+          borderWidth: 0
+        }, {
+          label: "Idle",
+          seriesKey: "Idle",
+          data: d.packed.series.rest,
+          backgroundColor: C0.other,
+          stack: "a",
+          order: 0,
+          borderWidth: 0
+        }, {
+          label: "Open (total)",
+          seriesKey: "Open (total)",
+          data: d.packed.series.open,
+          type: "line",
+          borderColor: "rgba(180,186,194,0.9)",
+          borderWidth: 2,
+          pointRadius: 0,
+          borderDash: [5, 4]
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: { enabled: isTooltipEnabled("bars") }
+        },
+        scales: {
+          x: { min: 0, max: d.packed.maxTick, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } },
+          y: { stacked: true, beginAtZero: true, max: sharedYMax }
+        }
+      },
+      plugins: [plMergePlay(d.packed), plCrosshair(), plBarsStatLine(d.packed)]
+    });
+    ch.data.datasets.forEach((ds, datasetIdx) => {
+      const key = barsLegendKeyFromDataset(ds);
+      ch.setDatasetVisibility(datasetIdx, barsLegendVisibility[key] !== false);
+    });
+    ch.update("none");
+    barCharts.set(`bars-${idx}-${n}`, ch);
+  });
+}
+
+function renderSwimPolicyTabs() {
+  const el = document.getElementById("swimPolicyTabs");
+  el.innerHTML = "";
+  filesData.forEach((d, i) => {
+    const b = document.createElement("button");
+    b.className = "cp-tab" + (i === swimIdx ? " active" : "");
+    b.textContent = d.name;
+    b.onclick = () => {
+      swimIdx = i;
+      renderSwimlaneTab();
+    };
+    el.appendChild(b);
+  });
+}
+
+function renderSwimlaneTab() {
+  if (!filesData.length) return;
+  if (swimIdx >= filesData.length) swimIdx = 0;
+  renderSwimPolicyTabs();
+  const d = filesData[swimIdx];
+  document.getElementById("swimSingleTitle").textContent = d?.name ? `${d.name} swimlane` : "";
+  const area = document.getElementById("swimAreaSingle");
+  if (!d?.packed) {
+    area.innerHTML = `<div class="kanban-empty">No data for selected policy.</div>`;
+    return;
+  }
+  dSwim(d.packed, "swimAreaSingle", { forceFullRange: true });
+}
+
+const segmentColorForKind = kind => (
+  kind === "pending" ? C0.pending
+    : kind === "running" ? C0.running
+      : kind === "success" ? C0.success
+        : kind === "stale" ? C0.stale
+          : kind === "merged" ? C0.merged
+            : kind === "failed" ? C0.failed
+              : kind === "force_merge" ? C0.force_merge
+                : C0.other
+);
+
+let showMergeLines = true;
+function syncMergeLineControls() {
+  const c = document.getElementById("btnMergeLinesComposition");
+  const b = document.getElementById("btnMergeLinesBars");
+  if (c) {
+    c.classList.toggle("active", showMergeLines);
+    c.setAttribute("aria-pressed", showMergeLines ? "true" : "false");
+    c.textContent = showMergeLines ? "ON" : "OFF";
+  }
+  if (b) {
+    b.classList.toggle("active", showMergeLines);
+    b.setAttribute("aria-pressed", showMergeLines ? "true" : "false");
+    b.textContent = showMergeLines ? "ON" : "OFF";
+  }
+}
+function applyMergeLinesSetting() {
+  if (chartInstL) chartInstL.update("none");
+  if (chartInstR) chartInstR.update("none");
+  barCharts.forEach(ch => ch.update("none"));
+}
+function onMergeLineControlChange(checked) {
+  showMergeLines = !!checked;
+  syncMergeLineControls();
+  applyMergeLinesSetting();
+}
+const btnMergeLinesComposition = document.getElementById("btnMergeLinesComposition");
+if (btnMergeLinesComposition) {
+  btnMergeLinesComposition.addEventListener("click", () => onMergeLineControlChange(!showMergeLines));
+}
+const btnMergeLinesBars = document.getElementById("btnMergeLinesBars");
+if (btnMergeLinesBars) {
+  btnMergeLinesBars.addEventListener("click", () => onMergeLineControlChange(!showMergeLines));
+}
+syncMergeLineControls();
+const barsLegendControlsEl = document.getElementById("barsLegendControls");
+if (barsLegendControlsEl) {
+  barsLegendControlsEl.addEventListener("click", e => {
+    const traceBtn = e.target.closest("button[data-bars-trace-idx]");
+    if (traceBtn) {
+      const idx = Number(traceBtn.dataset.barsTraceIdx);
+      if (!Number.isFinite(idx) || idx < 0 || idx >= filesData.length) return;
+      if (barVisibleIdxs.has(idx)) barVisibleIdxs.delete(idx);
+      else barVisibleIdxs.add(idx);
+      renderBarsTab();
+      return;
+    }
+
+    const statsEnabledBtn = e.target.closest("button[data-bars-stat-enabled]");
+    if (statsEnabledBtn) {
+      const next = String(statsEnabledBtn.dataset.barsStatEnabled || "").toLowerCase();
+      if (next !== "on" && next !== "off") return;
+      barsStatsEnabled = next === "on";
+      renderBarsLegendControls();
+      barCharts.forEach(ch => ch.update("none"));
+      return;
+    }
+
+    const statsModeBtn = e.target.closest("button[data-bars-stat-mode]");
+    if (statsModeBtn) {
+      const mode = String(statsModeBtn.dataset.barsStatMode || "").toLowerCase();
+      if (!BARS_STATS_MODES.includes(mode)) return;
+      barsStatsMode = mode;
+      renderBarsLegendControls();
+      barCharts.forEach(ch => ch.update("none"));
+      return;
+    }
+
+    const statsTraceBtn = e.target.closest("button[data-bars-stat-trace]");
+    if (statsTraceBtn) {
+      const key = String(statsTraceBtn.dataset.barsStatTrace || "");
+      if (!BARS_LEGEND_KEYS.includes(key)) return;
+      barsStatsSeriesKey = key;
+      if (isShiftPressed(e)) {
+        // Shift-click on STATS trace means "force isolate" this legend series.
+        BARS_LEGEND_KEYS.forEach(k => {
+          barsLegendVisibility[k] = (k === key);
+        });
+        applyBarsLegendVisibility("none");
+      }
+      renderBarsLegendControls();
+      barCharts.forEach(ch => ch.update("none"));
+      return;
+    }
+
+    const btn = e.target.closest("button[data-bars-legend-key]");
+    if (!btn) return;
+    const key = String(btn.dataset.barsLegendKey || "");
+    if (!BARS_LEGEND_KEYS.includes(key)) return;
+    if (isShiftPressed(e)) {
+      const visibleKeys = BARS_LEGEND_KEYS.filter(k => barsLegendVisibility[k] !== false);
+      const onlyTargetVisible = visibleKeys.length === 1 && visibleKeys[0] === key;
+      BARS_LEGEND_KEYS.forEach(k => {
+        barsLegendVisibility[k] = onlyTargetVisible ? true : (k === key);
+      });
+    } else {
+      const visible = barsLegendVisibility[key] !== false;
+      barsLegendVisibility[key] = !visible;
+    }
+    renderBarsLegendControls();
+    applyBarsLegendVisibility("none");
+  });
+}
+
+function plMergePlay(p) {
+  return { id: "mp", afterDatasetsDraw(chart) {
+    const anyVisible = chart.data.datasets.some((ds, i) => chart.isDatasetVisible(i));
+    if (!anyVisible) return;
+    const s = chart.scales.x, ctx = chart.ctx, g = chart.chartArea; if (!s) return; ctx.save();
+    if (showMergeLines) {
+      (p.merges || []).forEach(ev => { const px = s.getPixelForValue(ev.tick); if (g && px >= g.left && px <= g.right) { ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.beginPath(); ctx.moveTo(px, g.top); ctx.lineTo(px, g.bottom); ctx.stroke(); } });
+    }
+    ctx.restore();
+  }};
+}
+const tooltipPrefs = { composition: true, bars: true, swimlane: true };
+const swimTipStates = Object.create(null);
+const SWIM_COL_LABELS = { wait: "Idle", rebase: "Rebasing", ci: "CI", ready: "Ready", stale: "Stale", merged: "Merged" };
+
+function getTooltipScopeForSwim(swimId) {
+  return swimId === "swimAreaSingle" ? "swimlane" : "composition";
+}
+
+function isTooltipEnabled(scope) {
+  return tooltipPrefs[scope] !== false;
+}
+
+function applyCompositionTooltipPref() {
+  const enabled = isTooltipEnabled("composition");
+  if (chartInstL) { chartInstL.options.plugins.tooltip.enabled = enabled; chartInstL.update("none"); }
+  if (chartInstR) { chartInstR.options.plugins.tooltip.enabled = enabled; chartInstR.update("none"); }
+}
+
+function applyBarsTooltipPref() {
+  const enabled = isTooltipEnabled("bars");
+  barCharts.forEach(ch => {
+    ch.options.plugins.tooltip.enabled = enabled;
+    ch.update("none");
+  });
+}
+
+function toggleTooltipScope(scope) {
+  tooltipPrefs[scope] = !isTooltipEnabled(scope);
+  if (scope === "composition") applyCompositionTooltipPref();
+  else if (scope === "bars") applyBarsTooltipPref();
+}
+
+function getSwimTipState(swimId) {
+  if (!swimTipStates[swimId]) {
+    swimTipStates[swimId] = {
+      hover: null, locked: false, expanded: false, fileKey: null,
+      lockMr: null, lockTick: null, lockSeg: null, lockKind: null,
+      eventTicks: [], mrEventTicks: [], maxTick: 0,
+      lockMinTick: 0, lockMaxTick: 0,
+      lockX: null, lockY: null, lockPlacement: "tr",
+      tooltipX: null, tooltipY: null,
+      lockLaneCenterY: null, lockLaneRowPx: null
+    };
+  }
+  return swimTipStates[swimId];
+}
+
+function getActiveSwimLock(preferredSwimId = null) {
+  if (preferredSwimId && swimTipStates[preferredSwimId]?.locked) {
+    return { swimId: preferredSwimId, state: swimTipStates[preferredSwimId] };
+  }
+  for (const [swimId, st] of Object.entries(swimTipStates)) {
+    if (st.locked) return { swimId, state: st };
+  }
+  return null;
+}
+
+function getSwimOwner(swimId) {
+  if (swimId === "swimAreaL") return filesData[chartIdxL] || null;
+  if (swimId === "swimAreaR") return filesData[chartIdxR] || null;
+  if (swimId === "swimAreaSingle") return filesData[swimIdx] || null;
+  return null;
+}
+
+function getPackedForSwim(swimId) {
+  const owner = getSwimOwner(swimId);
+  if (owner?.packed) return owner.packed;
+  return null;
+}
+
+function getEventsForSwim(swimId) {
+  const owner = getSwimOwner(swimId);
+  return normalizeEventsForAnalysis(owner?.events || []);
+}
+
+function getPageScroll() {
+  return { x: window.scrollX || window.pageXOffset || 0, y: window.scrollY || window.pageYOffset || 0 };
+}
+
+function getPanelScroll(swimId) {
+  const swimEl = document.getElementById(swimId);
+  const pane = swimEl?.closest(".chart-pair");
+  if (!pane) return null;
+  return { el: pane, left: pane.scrollLeft, top: pane.scrollTop };
+}
+
+function restorePanelScroll(pos) {
+  if (!pos || !pos.el) return;
+  pos.el.scrollLeft = pos.left;
+  pos.el.scrollTop = pos.top;
+}
+
+function getSwimViewportRect(swimId) {
+  const swimEl = document.getElementById(swimId);
+  if (!swimEl) return null;
+  const r = swimEl.getBoundingClientRect();
+  const inset = 8;
+  const left = Math.max(inset, r.left);
+  const right = Math.min(window.innerWidth - inset, r.right);
+  const top = Math.max(inset, r.top);
+  const bottom = Math.min(window.innerHeight - inset, r.bottom);
+  if (right <= left || bottom <= top) return null;
+  return { left, right, top, bottom };
+}
+
+function restorePageScroll(pos) {
+  if (!pos) return;
+  const dx = Math.abs((window.scrollX || 0) - pos.x);
+  const dy = Math.abs((window.scrollY || 0) - pos.y);
+  if (dx > 1 || dy > 1) window.scrollTo(pos.x, pos.y);
+}
+
+function positionLockedTip(tip, swimId, st, lockWidth) {
+  const node = tip.node();
+  if (!node) return;
+  const margin = 12;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const local = getSwimViewportRect(swimId);
+  let left = margin, top = margin;
+  if (st.tooltipX != null && st.tooltipY != null) {
+    left = st.tooltipX;
+    top = st.tooltipY;
+  } else {
+    const w0 = node.offsetWidth || lockWidth;
+    const h0 = node.offsetHeight || 420;
+    const baseX = st.lockX ?? (local ? (local.left + margin) : margin);
+    const baseY = st.lockY ?? (local ? (local.top + margin) : margin);
+    const candidates = [
+      { left: baseX + 18, top: baseY + 18 },
+      { left: baseX + 18, top: baseY - h0 - 18 },
+      { left: baseX - w0 - 18, top: baseY + 18 },
+      { left: baseX - w0 - 18, top: baseY - h0 - 18 },
+    ];
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(v, hi));
+    const laneCenter = st.lockLaneCenterY;
+    const laneHalfBand = Math.max(16, (st.lockLaneRowPx || 14) * 4);
+    let best = null;
+    candidates.forEach(c => {
+      const cLeft = clamp(c.left, margin, vw - w0 - margin);
+      const cTop = clamp(c.top, margin, vh - h0 - margin);
+      const cRight = cLeft + w0;
+      const cBottom = cTop + h0;
+      const overlapSwimX = local
+        ? (cRight > local.left && cLeft < local.right)
+        : true;
+      const avoidTop = laneCenter != null ? (laneCenter - laneHalfBand) : null;
+      const avoidBottom = laneCenter != null ? (laneCenter + laneHalfBand) : null;
+      const overlapLaneBand = (
+        avoidTop != null &&
+        avoidBottom != null &&
+        cBottom > avoidTop &&
+        cTop < avoidBottom
+      );
+      const forbidden = overlapSwimX && overlapLaneBand;
+      const distPenalty = Math.abs(cLeft - baseX) + Math.abs(cTop - baseY);
+      const laneOverlapPx = overlapLaneBand
+        ? Math.max(0, Math.min(cBottom, avoidBottom) - Math.max(cTop, avoidTop))
+        : 0;
+      const score = distPenalty + (forbidden ? (100000 + laneOverlapPx * 50) : 0);
+      if (!best || score < best.score) best = { left: cLeft, top: cTop, score };
+    });
+    left = best?.left ?? clamp(baseX + 18, margin, vw - w0 - margin);
+    top = best?.top ?? clamp(baseY + 18, margin, vh - h0 - margin);
+  }
+  const w = node.offsetWidth || lockWidth;
+  const h = node.offsetHeight || 320;
+  left = Math.max(margin, Math.min(left, vw - w - margin));
+  top = Math.max(margin, Math.min(top, vh - h - margin));
+  tip.style("left", left + "px").style("top", top + "px");
+}
+
+function clearSwimLock(swimId) {
+  const st = swimTipStates[swimId];
+  if (!st) return;
+  st.locked = false; st.expanded = false; st.lockMr = null; st.lockTick = null; st.lockSeg = null; st.lockKind = null;
+  st.mrEventTicks = []; st.lockMinTick = 0; st.lockMaxTick = 0;
+  st.lockPlacement = "tr";
+  st.tooltipX = null; st.tooltipY = null;
+  st.lockX = null; st.lockY = null;
+  st.lockLaneCenterY = null; st.lockLaneRowPx = null;
+}
+
+function unlockActiveSwimLock(preferredSwimId = null) {
+  const active = getActiveSwimLock(preferredSwimId);
+  if (!active) return false;
+  const unlockedSwimId = active.swimId;
+  clearSwimLock(unlockedSwimId);
+  swimTipDrag.active = false;
+  swimTipDrag.swimId = null;
+  const tip = getGlobalSwimTipEl();
+  if (!getActiveSwimLock()) {
+    tip.style("display", "none").style("pointer-events", "none").classed("locked", false);
+  }
+  refreshLockedSwimOnly(unlockedSwimId, { skipTipRender: true });
+  return true;
+}
+
+function clearAllSwimLocks() {
+  swimTipDrag.active = false;
+  swimTipDrag.swimId = null;
+  Object.keys(swimTipStates).forEach(clearSwimLock);
+  getGlobalSwimTipEl().style("display", "none").style("pointer-events", "none").classed("locked", false);
+}
+
+function shortSha(sha) {
+  if (!sha) return "n/a";
+  const s = String(sha);
+  return s.length > 12 ? s.slice(0, 10) + "…" : s;
+}
+
+function mrLaneAtTick(packed, evs, tick, mr) {
+  const w = buildKanbanState(packed, evs, tick);
+  const isMr = v => String(v) === String(mr);
+  for (const k of ["wait", "rebase", "ci", "ready", "stale", "merged"]) {
+    if ((w[k] || []).some(isMr)) return k;
+  }
+  return "wait";
+}
+
+function getSwimEventTicks(evs, maxTick) {
+  const ticks = new Set([0, maxTick]);
+  evs.forEach(e => {
+    if (e.tick == null) return;
+    if (e.event === "rebase" || e.event === "merge") { ticks.add(e.tick); return; }
+    if (e.event === "tick") {
+      if ((e.transitions && e.transitions.length) ||
+          (e.arrivals && e.arrivals.length) ||
+          (e.pushes && e.pushes.length) ||
+          (e.cancellations && e.cancellations.length) ||
+          (e.force_merges && e.force_merges.length)) ticks.add(e.tick);
+    }
+  });
+  return Array.from(ticks).sort((a, b) => a - b);
+}
+
+function getMrEventTicks(evs, mr, maxTick, packed = null) {
+  const isMr = v => String(v) === String(mr);
+  const ticks = new Set();
+  let mergeTick = null;
+  evs.forEach(e => {
+    if (e.tick == null) return;
+    if (e.event === "merge" && isMr(e.mr_iid)) {
+      if (mergeTick == null || e.tick < mergeTick) mergeTick = e.tick;
+      ticks.add(e.tick);
+      return;
+    }
+    if (e.event === "rebase" && isMr(e.mr_iid)) {
+      ticks.add(e.tick);
+      return;
+    }
+    if (e.event !== "tick") return;
+    if ((e.transitions || []).some(tr => isMr(tr.mr_iid))) ticks.add(e.tick);
+    if (Array.isArray(e.arrivals) && e.arrivals.some(isMr)) ticks.add(e.tick);
+    if (Array.isArray(e.pushes) && e.pushes.some(isMr)) ticks.add(e.tick);
+    if (Array.isArray(e.cancellations) && e.cancellations.some(isMr)) ticks.add(e.tick);
+    if (Array.isArray(e.force_merges) && e.force_merges.some(isMr)) ticks.add(e.tick);
+  });
+  if (packed && Array.isArray(packed.segs)) {
+    packed.segs.forEach(s => {
+      if (!isMr(s.mr)) return;
+      if (mergeTick != null && s.start != null && Number(s.start) > mergeTick) return;
+      if (s.start != null) ticks.add(Math.max(0, Math.min(maxTick, Number(s.start) || 0)));
+    });
+  }
+  let out = Array.from(ticks).sort((a, b) => a - b);
+  if (mergeTick != null) {
+    out = out.filter(t => t <= mergeTick);
+    if (!out.includes(mergeTick)) out.push(mergeTick);
+    out.sort((a, b) => a - b);
+  }
+  if (out.length) return out;
+  return [0, maxTick];
+}
+
+function segmentAtTick(packed, mr, tick) {
+  if (!packed) return null;
+  const isMr = v => String(v) === String(mr);
+  const rank = { success: 0, running: 1, pending: 2, stale: 3, failed: 4, merged: 5, force_merge: 6 };
+  const cand = packed.segs
+    .filter(s => isMr(s.mr) && s.kind !== "to_running" && s.start <= tick && s.end > tick)
+    .sort((a, b) => (rank[a.kind] ?? 99) - (rank[b.kind] ?? 99));
+  return cand[0] || null;
+}
+
+function buildMrHistory(evs, mr, tick) {
+  const isMr = v => String(v) === String(mr);
+  const hist = [];
+  let rebases = 0, merges = 0, transOk = 0, transFail = 0;
+  const add = (at, msg) => hist.push({ tick: at, msg });
+  evs.forEach(e => {
+    if (e.tick == null || e.tick > tick) return;
+    if (e.event === "rebase" && isMr(e.mr_iid)) {
+      rebases++;
+      add(e.tick, `Rebase → ${shortSha(e.new_sha)} (pipeline ${e.pipeline_outcome || "n/a"}${e.pipeline_id != null ? ", id " + e.pipeline_id : ""})`);
+    } else if (e.event === "merge" && isMr(e.mr_iid)) {
+      merges++;
+      add(e.tick, `${e.force_merge ? "Force-merge" : "Merge"} → target ${e.new_target_head || "n/a"}`);
+    } else if (e.event === "tick") {
+      (e.transitions || []).forEach(tr => {
+        if (!isMr(tr.mr_iid)) return;
+        const from = (tr.from || "unknown").toLowerCase();
+        const to = (tr.to || "unknown").toLowerCase();
+        if (to === "success") transOk++;
+        if (to === "failed") transFail++;
+        add(e.tick, `Transition ${from} → ${to}${tr.pipeline_id != null ? " (pipeline " + tr.pipeline_id + ")" : ""}`);
+      });
+      if (Array.isArray(e.arrivals) && e.arrivals.some(isMr)) add(e.tick, "Arrived in queue");
+      if (Array.isArray(e.pushes) && e.pushes.some(isMr)) add(e.tick, "Source branch push (SHA changed)");
+      if (Array.isArray(e.cancellations) && e.cancellations.some(isMr)) add(e.tick, "Cancelled");
+    }
+  });
+  // Show newest events first in the tooltip history.
+  hist.sort((a, b) => b.tick - a.tick);
+  return { rebases, merges, transOk, transFail, recent: hist.slice(0, 14) };
+}
+
+function getMrScenarioLabels(evs, mr, traceName = "") {
+  const meta = (evs || []).find(e => e.event === "scenario_meta") || {};
+  let catalog = meta.mr_catalog;
+  if ((!catalog || typeof catalog !== "object") && loadedScenarioDocs.length) {
+    const docEntry = resolveScenarioDocForTrace(evs, traceName);
+    if (docEntry) catalog = buildScenarioCatalog(docEntry.doc);
+  }
+  if (!catalog || typeof catalog !== "object") return { priorityLabel: "n/a", serviceLabels: "n/a" };
+  const entry = catalog[String(mr)] || catalog[Number(mr)];
+  if (!entry || typeof entry !== "object") {
+    return { priorityLabel: "n/a", serviceLabels: "n/a" };
+  }
+  const priorityLabel = entry.priority_label || "n/a";
+  const serviceLabelsArr = Array.isArray(entry.service_labels)
+    ? entry.service_labels
+    : [];
+  const serviceLabels = serviceLabelsArr.length
+    ? serviceLabelsArr.join(", ")
+    : "n/a";
+  return { priorityLabel, serviceLabels };
+}
+
+const swimTipDrag = { active: false, swimId: null, dx: 0, dy: 0 };
+
+function getGlobalSwimTipEl() {
+  const tip = d3.select("body").selectAll(".swim-tip.swim-tip-global").data([0]).join("div")
+    .classed("swim-tip", true)
+    .classed("swim-tip-global", true);
+  if (!tip.attr("data-bound")) {
+    tip.attr("data-bound", "1")
+      .on("click", event => {
+        const active = getActiveSwimLock(tip.attr("data-swim-id") || null);
+        if (!active) return;
+        event.stopPropagation();
+        if (event.shiftKey) { unlockActiveSwimLock(active.swimId); return; }
+      })
+      .on("input", event => {
+        const active = getActiveSwimLock(tip.attr("data-swim-id") || null);
+        if (!active) return;
+        if (!(event.target && event.target.classList && event.target.classList.contains("lock-scrub"))) return;
+        const st = active.state;
+        const lo = st.lockMinTick ?? 0;
+        const hi = st.lockMaxTick ?? (st.maxTick || 0);
+        const v = Math.max(lo, Math.min(hi, Number(event.target.value) || 0));
+        st.lockTick = v;
+        const packed = getPackedForSwim(active.swimId);
+        st.lockSeg = segmentAtTick(packed, st.lockMr, v);
+        refreshLockedSwimOnly(active.swimId, { skipTipRender: true });
+        const tickVal = tip.node()?.querySelector(".tick-val");
+        if (tickVal) tickVal.textContent = `t${v}`;
+      })
+      .on("change", event => {
+        const active = getActiveSwimLock(tip.attr("data-swim-id") || null);
+        if (!active) return;
+        if (!(event.target && event.target.classList && event.target.classList.contains("lock-scrub"))) return;
+        const pagePos = getPageScroll();
+        const panelPos = getPanelScroll(active.swimId);
+        const swimEl = document.getElementById(active.swimId);
+        const swimLeft = swimEl ? swimEl.scrollLeft : 0;
+        const swimTop = swimEl ? swimEl.scrollTop : 0;
+        renderLockedSwimTip(active.swimId);
+        if (swimEl) {
+          swimEl.scrollLeft = swimLeft;
+          swimEl.scrollTop = swimTop;
+        }
+        restorePanelScroll(panelPos);
+        restorePageScroll(pagePos);
+      })
+      .on("mousedown", event => {
+        const active = getActiveSwimLock(tip.attr("data-swim-id") || null);
+        if (!active) return;
+        if (!(event.target && event.target.closest && event.target.closest(".head"))) return;
+        const rect = tip.node()?.getBoundingClientRect();
+        if (!rect) return;
+        swimTipDrag.active = true;
+        swimTipDrag.swimId = active.swimId;
+        swimTipDrag.dx = event.clientX - rect.left;
+        swimTipDrag.dy = event.clientY - rect.top;
+        active.state.tooltipX = rect.left;
+        active.state.tooltipY = rect.top;
+        event.preventDefault();
+        event.stopPropagation();
+      });
+    window.addEventListener("mousemove", event => {
+      if (!swimTipDrag.active) return;
+      const active = getActiveSwimLock(swimTipDrag.swimId || null);
+      if (!active || active.swimId !== swimTipDrag.swimId) {
+        swimTipDrag.active = false;
+        return;
+      }
+      active.state.tooltipX = event.clientX - swimTipDrag.dx;
+      active.state.tooltipY = event.clientY - swimTipDrag.dy;
+      positionLockedTip(tip, active.swimId, active.state, 680);
+    });
+    window.addEventListener("mouseup", () => {
+      swimTipDrag.active = false;
+    });
+  }
+  return tip;
+}
+
+function renderLockedSwimTip(preferredSwimId = null) {
+  const pagePos = getPageScroll();
+  const active = getActiveSwimLock(preferredSwimId);
+  const tip = getGlobalSwimTipEl();
+  if (!active) {
+    tip.style("display", "none").style("pointer-events", "none").classed("locked", false);
+    restorePageScroll(pagePos);
+    return;
+  }
+  const { swimId, state: st } = active;
+  const panelPos = getPanelScroll(swimId);
+  const swimEl = document.getElementById(swimId);
+  const swimLeft = swimEl ? swimEl.scrollLeft : 0;
+  const swimTop = swimEl ? swimEl.scrollTop : 0;
+  const packed = getPackedForSwim(swimId);
+  const evs = getEventsForSwim(swimId);
+  if (!packed || st.lockMr == null || st.lockTick == null) {
+    clearSwimLock(swimId);
+    if (!getActiveSwimLock()) {
+      tip.style("display", "none").style("pointer-events", "none").classed("locked", false);
+    }
+    restorePageScroll(pagePos);
+    return;
+  }
+  st.lockSeg = segmentAtTick(packed, st.lockMr, st.lockTick);
+  const lane = mrLaneAtTick(packed, evs, st.lockTick, st.lockMr);
+  const hist = buildMrHistory(evs, st.lockMr, st.lockTick);
+  const ownerName = getSwimOwner(swimId)?.name || "policy";
+  const mrLabels = getMrScenarioLabels(evs, st.lockMr, ownerName);
+  const tickE = evs.find(e => e.event === "tick" && e.tick === st.lockTick);
+  const snapE = evs.find(e => e.event === "snapshot" && e.tick === st.lockTick);
+  const seg = st.lockSeg;
+  const segTxt = seg ? `${seg.kind} ${seg.start}→${seg.end}` : "n/a";
+  const mrTicks = st.mrEventTicks && st.mrEventTicks.length ? st.mrEventTicks : [st.lockMinTick, st.lockMaxTick];
+  const eventIdx = mrTicks.indexOf(st.lockTick);
+  const lo = st.lockMinTick ?? 0;
+  const hi = st.lockMaxTick ?? (st.maxTick || packed.maxTick);
+  let html = `<div class="head">` +
+    `<span class="head-title">MR !${st.lockMr}</span>` +
+    `<span class="head-sub">${ownerName} lane</span></div>`;
+  html += `<div class="sum">Lane: <strong>${SWIM_COL_LABELS[lane] || lane}</strong><br>Segment: ${mqEscapeHtml(segTxt)}</div>`;
+  html += `<div class="scrub"><div class="k">Lock tick scrubber (${lo}→${hi}${eventIdx >= 0 ? `, MR event ${eventIdx + 1}/${mrTicks.length}` : ""})</div>` +
+    `<div class="scrub-row"><input class="lock-scrub" type="range" min="${lo}" max="${hi}" value="${st.lockTick}" step="1" />` +
+    `<span class="tick-val">t${st.lockTick}</span></div></div>`;
+  html += `<div class="details"><div class="grid">` +
+    `<div class="k">Target head</div><div class="v">${mqEscapeHtml(snapE?.target_head || "n/a")}</div>` +
+    `<div class="k">Open MRs</div><div class="v">${snapE?.open_mrs ?? tickE?.open_mrs ?? "n/a"}</div>` +
+    `<div class="k">Active pipelines</div><div class="v">${tickE?.active_pipelines ?? snapE?.active_pipelines ?? "n/a"}</div>` +
+    `<div class="k">Same-root pool</div><div class="v">${tickE?.same_root_success_pool ?? "n/a"}</div>` +
+    `<div class="k">Priority label</div><div class="v">${mqEscapeHtml(mrLabels.priorityLabel)}</div>` +
+    `<div class="k">Service label(s)</div><div class="v">${mqEscapeHtml(mrLabels.serviceLabels)}</div>` +
+    `<div class="k">Rebases (<=t)</div><div class="v">${hist.rebases}</div>` +
+    `<div class="k">Merges (<=t)</div><div class="v">${hist.merges}</div>` +
+    `<div class="k">Transitions success</div><div class="v">${hist.transOk}</div>` +
+    `<div class="k">Transitions failed</div><div class="v">${hist.transFail}</div>` +
+    `</div>`;
+  html += `<div class="k">Recent PR history / transitions</div>`;
+  html += `<div class="history-scroll"><ul>${hist.recent.length ? hist.recent.map(h => `<li><strong>t${h.tick}</strong> ${mqEscapeHtml(h.msg)}</li>`).join("") : "<li>No events up to this tick.</li>"}</ul></div>`;
+  html += `</div>`;
+  html += `<div class="hint">Drag the header to move. Arrow Left/Right jumps event ticks. Arrow Up/Down switches lane. Shift+click or Esc unlocks.</div>`;
+  const lockWidth = 860;
+  tip.html(html)
+    .style("display", "block")
+    .style("pointer-events", "auto")
+    .attr("data-swim-id", swimId)
+    .classed("locked", true);
+  positionLockedTip(tip, swimId, st, lockWidth);
+  if (swimEl) {
+    swimEl.scrollLeft = swimLeft;
+    swimEl.scrollTop = swimTop;
+  }
+  restorePanelScroll(panelPos);
+  restorePageScroll(pagePos);
+}
+
+function refreshLockedSwimOnly(swimId, opts = {}) {
+  const skipTipRender = !!opts.skipTipRender;
+  const pagePos = getPageScroll();
+  const panelPos = getPanelScroll(swimId);
+  if (swimId === "swimAreaL") {
+    const p = filesData[chartIdxL]?.packed;
+    if (p) dSwim(p, "swimAreaL", { skipTipRender, forceFullRange: true });
+  } else if (swimId === "swimAreaR") {
+    const p = filesData[chartIdxR]?.packed;
+    if (chartViewMode === "compare" && p) dSwim(p, "swimAreaR", { skipTipRender, forceFullRange: true });
+  } else if (swimId === "swimAreaSingle") {
+    const p = filesData[swimIdx]?.packed;
+    if (p) dSwim(p, "swimAreaSingle", { skipTipRender });
+  }
+  restorePanelScroll(panelPos);
+  restorePageScroll(pagePos);
+}
+
+function stepLockedTick(direction, preferredSwimId = null) {
+  const active = getActiveSwimLock(preferredSwimId);
+  if (!active || (direction !== -1 && direction !== 1)) return false;
+  const st = active.state;
+  const lo = st.lockMinTick ?? 0;
+  const hi = st.lockMaxTick ?? (st.maxTick || 0);
+  const ticks = (st.mrEventTicks && st.mrEventTicks.length ? st.mrEventTicks : [lo, hi]).filter(t => t >= lo && t <= hi);
+  const cur = st.lockTick ?? 0;
+  let nxt = cur;
+  if (direction > 0) {
+    const f = ticks.find(t => t > cur);
+    nxt = f == null ? cur : f;
+  } else {
+    for (let i = ticks.length - 1; i >= 0; i--) {
+      if (ticks[i] < cur) { nxt = ticks[i]; break; }
+    }
+  }
+  if (nxt === cur) return true;
+  st.lockTick = nxt;
+  const packed = getPackedForSwim(active.swimId);
+  st.lockSeg = segmentAtTick(packed, st.lockMr, nxt);
+  refreshLockedSwimOnly(active.swimId);
+  renderLockedSwimTip(active.swimId);
+  return true;
+}
+
+function stepLockedLane(direction, preferredSwimId = null) {
+  const active = getActiveSwimLock(preferredSwimId);
+  if (!active || (direction !== -1 && direction !== 1)) return false;
+  const st = active.state;
+  const packed = getPackedForSwim(active.swimId);
+  const evs = getEventsForSwim(active.swimId);
+  if (!packed || st.lockMr == null) return false;
+  const mrList = Array.from(new Set((packed.segs || []).map(s => s.mr))).sort((a, b) => a - b);
+  if (!mrList.length) return false;
+
+  const curIdx = mrList.findIndex(m => String(m) === String(st.lockMr));
+  const baseIdx = curIdx >= 0 ? curIdx : 0;
+  const nextIdx = Math.max(0, Math.min(mrList.length - 1, baseIdx + direction));
+  if (nextIdx === baseIdx) return true;
+
+  const nextMr = mrList[nextIdx];
+  const oldTick = st.lockTick ?? 0;
+  const mrTicks = getMrEventTicks(evs, nextMr, packed.maxTick, packed);
+  const lo = mrTicks[0];
+  const hi = mrTicks[mrTicks.length - 1];
+  const nextTick = Math.max(lo, Math.min(hi, oldTick));
+
+  st.lockMr = nextMr;
+  st.mrEventTicks = mrTicks;
+  st.lockMinTick = lo;
+  st.lockMaxTick = hi;
+  st.lockTick = nextTick;
+  st.lockSeg = segmentAtTick(packed, nextMr, nextTick);
+  st.lockKind = st.lockSeg?.kind || null;
+  if (st.lockLaneCenterY != null && st.lockLaneRowPx != null) {
+    st.lockLaneCenterY += direction * st.lockLaneRowPx;
+  }
+  refreshLockedSwimOnly(active.swimId);
+  return true;
+}
+
+function getSharedYMax() {
+  if (chartViewMode !== "compare") return undefined;
+  const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+  if (!pL || !pR) return undefined;
+  const x0 = 0;
+  const x1L = pL.maxTick;
+  const x1R = pR.maxTick;
+  let mx = 0;
+  for (const p of [pL, pR]) {
+    const hi = p === pL ? x1L : x1R;
+    for (let t = Math.max(0, Math.floor(x0)); t <= Math.min(p.maxTick, Math.ceil(hi)); t++) {
+      const stack = (p.series.pool[t] || 0) + (p.series.active[t] || 0) + (p.series.stale[t] || 0) + (p.series.rest[t] || 0);
+      const line = p.series.open[t] || 0;
+      mx = Math.max(mx, stack, line);
+    }
+  }
+  return mx > 0 ? mx : undefined;
+}
+
+function doChart(p, canvasId, side, sharedYMax) {
+  const cvs = document.getElementById(canvasId); if (!cvs) return;
+  if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
+  const x0 = 0;
+  const x1 = p.maxTick;
+  const yOpts = { stacked: true, beginAtZero: true };
+  if (sharedYMax != null) { yOpts.max = sharedYMax; }
+  const inst = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
+    { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
+    { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
+    { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
+    { label: "Idle", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
+    { label: "Open (total)", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
+  ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+    plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: MQSIM_LEGEND_FONT_SIZE } }, onClick: handleLegendToggle }, tooltip: { enabled: isTooltipEnabled("composition") } },
+    scales: { x: { min: x0, max: x1, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
+  }, plugins: [plMergePlay(p), plCrosshair()] });
+  if (side === "L") chartInstL = inst; else chartInstR = inst;
+}
+
+function plCrosshair() {
+  return { id: "crosshair",
+    afterEvent(chart, args) {
+      const prev = chart._crosshairX;
+      chart._crosshairX = (args.event.type === "mousemove") ? args.event.x : null;
+      if (args.event.type === "mouseout") chart._crosshairX = null;
+      if (prev !== chart._crosshairX) chart.draw();
+    },
+    afterDatasetsDraw(chart) {
+      if (chart._crosshairX == null) return;
+      const g = chart.chartArea; if (!g) return;
+      const ctx = chart.ctx; ctx.save();
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(chart._crosshairX - 1, g.top, 2, g.bottom - g.top);
+      ctx.restore();
+    }
+  };
+}
+function syncWindow() {
+  const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
+  const yMax = getSharedYMax();
+  if (pL) {
+    doChart(pL, "chartCanvasL", "L", yMax);
+    dSwim(pL, "swimAreaL", { forceFullRange: true });
+  }
+  if (chartViewMode === "compare" && pR) {
+    doChart(pR, "chartCanvasR", "R", yMax);
+    dSwim(pR, "swimAreaR", { forceFullRange: true });
+  }
+  const pS = filesData[swimIdx]?.packed;
+  if (pS) dSwim(pS, "swimAreaSingle", { forceFullRange: true });
+}
+
+function dSwim(p, swimId, opts = {}) {
+  const skipTipRender = !!opts.skipTipRender;
+  const forceFullRange = !!opts.forceFullRange;
+  const x0 = 0;
+  const x1 = p.maxTick;
+  const swimEl = document.getElementById(swimId);
+  const prevScrollLeft = swimEl ? swimEl.scrollLeft : 0;
+  const prevScrollTop = swimEl ? swimEl.scrollTop : 0;
+  const panelPos = getPanelScroll(swimId);
+  const pagePos = getPageScroll();
+  const sw = d3.select("#" + swimId).html(""); const t = p.maxTick;
+  const list = new Set(); p.segs.forEach(s => list.add(s.mr));
+  const mrL = Array.from(list).sort((a, b) => a - b);
+  if (!mrL.length) { sw.append("p").text("No segments."); return; }
+  const owner = filesData.find(d => d.packed === p);
+  const evs = normalizeEventsForAnalysis(owner?.events || []);
+  const st = getSwimTipState(swimId);
+  const tip = getGlobalSwimTipEl();
+  const tooltipScope = getTooltipScopeForSwim(swimId);
+  const kindLabel = k => k === "running" ? "CI Running" : k === "success" ? "Ready" : k === "pending" ? "CI Queued" : k === "stale" ? "Stale" : k === "failed" ? "CI Failed" : k === "merged" ? "Merged" : k === "force_merge" ? "Force-merged" : k;
+  st.fileKey = owner?.name || st.fileKey;
+  st.maxTick = p.maxTick;
+  st.eventTicks = getSwimEventTicks(evs, p.maxTick);
+  function showHoverTip(event, s) {
+    st.hover = { seg: s, clientX: event.clientX, clientY: event.clientY };
+    if (!isTooltipEnabled(tooltipScope)) return;
+    if (getActiveSwimLock(swimId)) return;
+    const dur = s.end - s.start;
+    const labels = getMrScenarioLabels(evs, s.mr, owner?.name || "");
+    tip.html(
+      `<div class="sum"><strong>MR !${s.mr}</strong><br>` +
+      `State: ${kindLabel(s.kind)}<br>` +
+      `Priority: ${mqEscapeHtml(labels.priorityLabel)}<br>` +
+      `Service: ${mqEscapeHtml(labels.serviceLabels)}<br>` +
+      `Ticks ${s.start}→${s.end} (${dur} tick${dur > 1 ? "s" : ""})` +
+      `</div>`
+    )
+      .style("display", "block")
+      .style("left", (event.clientX + 12) + "px")
+      .style("top", (event.clientY - 10) + "px")
+      .style("pointer-events", "none")
+      .classed("locked", false);
+  }
+  function moveHoverTip(event) {
+    if (!st.hover || !isTooltipEnabled(tooltipScope) || getActiveSwimLock(swimId)) return;
+    st.hover.clientX = event.clientX; st.hover.clientY = event.clientY;
+    tip.style("left", (event.clientX + 12) + "px").style("top", (event.clientY - 10) + "px");
+  }
+  function clearHoverTip() {
+    st.hover = null;
+    if (!getActiveSwimLock()) tip.style("display", "none");
+  }
+
+  const chartCol = document.getElementById(swimId).closest(".chart-col");
+  const chartWrap = chartCol ? chartCol.querySelector(".chart-wrap") : null;
+  const isStandalone = swimId === "swimAreaSingle";
+  const pad = { t: 4, l: 36, b: 18, r: 4 };
+  const w = Math.max(300, (chartWrap?.clientWidth || document.getElementById(swimId).clientWidth || 400) - 8);
+  const targetHeight = isStandalone ? Math.max(280, Math.min(w, window.innerHeight * 0.78)) : 0;
+  const rowH = isStandalone
+    ? Math.max(16, Math.min(52, Math.floor(targetHeight / Math.max(1, mrL.length))))
+    : 14;
+  const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
+  const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
+  const svg = sw.append("svg").attr("width", w).attr("height", H).style("outline", "none");
+  svg.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
+  if (st.locked && st.lockMr != null) {
+    const activeY = y(String(st.lockMr));
+    const activeBw = y.bandwidth();
+    if (activeY != null) {
+      svg.append("rect")
+        .attr("x", pad.l)
+        .attr("y", Math.max(pad.t, activeY - 1))
+        .attr("width", Math.max(0, (w - pad.r) - pad.l))
+        .attr("height", Math.max(2, activeBw + 2))
+        .attr("fill", "rgba(88,166,255,0.12)")
+        .attr("stroke", "rgba(88,166,255,0.4)")
+        .attr("stroke-width", 1)
+        .attr("rx", 3);
+    }
+  }
+  if (st.locked && st.lockTick != null && st.lockTick >= x0 && st.lockTick <= x1) {
+    const lx = x(st.lockTick);
+    const bandY = y(String(st.lockMr));
+    const cy = bandY != null ? (bandY + rowH / 2) : ((pad.t + H - pad.b) / 2);
+    const half = rowH * 2.5; // cap indicator to ~5 swimlane heights
+    const y1Lock = Math.max(pad.t, cy - half);
+    const y2Lock = Math.min(H - pad.b, cy + half);
+    svg.append("line").attr("x1", lx).attr("x2", lx).attr("y1", y1Lock).attr("y2", y2Lock)
+      .attr("stroke", "rgba(255,208,102,0.45)").attr("stroke-width", 6);
+    svg.append("line").attr("x1", lx).attr("x2", lx).attr("y1", y1Lock).attr("y2", y2Lock)
+      .attr("stroke", "#ffd166").attr("stroke-width", 2);
+  }
+  const visible = p.segs.filter(s => s.end > x0 && s.start < x1 && s.kind !== "to_running")
+    .map(s => { if (s.start > t) return null; if (s.kind === "merged" || s.kind === "force_merge") return s.start <= t ? s : null; if (s.end <= t) return s; if (s.start < t && s.end > t) return { ...s, end: t, _p: 1 }; return null; })
+    .filter(s => s && s.end > s.start);
+  const bw = y.bandwidth(), barH = bw * 0.75, barOff = (bw - barH) / 2;
+
+  visible.filter(s => s.kind !== "merged" && s.kind !== "force_merge").forEach(s => {
+    const sx = x(Math.max(s.start, x0)), segW = Math.max(0, x(Math.min(s.end, x1)) - sx);
+    const sy = y(String(s.mr));
+    svg.append("rect").attr("x", sx).attr("y", sy + barOff).attr("height", barH)
+      .attr("width", segW).attr("fill", segmentColorForKind(s.kind)).attr("opacity", s._p ? 0.5 : 0.85).attr("rx", 2);
+    svg.append("rect").attr("x", sx).attr("y", sy).attr("height", bw).attr("width", segW)
+      .attr("fill", "transparent").style("cursor", "default")
+      .on("mouseover", event => showHoverTip(event, s))
+      .on("mousemove", moveHoverTip)
+      .on("mouseout", clearHoverTip);
+  });
+  // Merged markers — full row height line + circle
+  visible.filter(s => s.kind === "merged").forEach(s => {
+    const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr));
+    svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
+      .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
+    svg.append("circle").attr("cx", mx).attr("cy", yt + bw / 2).attr("r", Math.max(3, bw * 0.5))
+      .attr("fill", "#58a6ff").attr("stroke", "#0d1117").attr("stroke-width", 1)
+      .style("cursor", "default")
+      .on("mouseover", event => showHoverTip(event, s))
+      .on("mousemove", moveHoverTip)
+      .on("mouseout", clearHoverTip);
+  });
+  // Force-merge markers — full row height diamond (no spanning dashed lines)
+  visible.filter(s => s.kind === "force_merge").forEach(s => {
+    const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr)), cy = yt + bw / 2;
+    const r = Math.max(5, bw * 0.6);
+    svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
+      .attr("stroke", C0.force_merge).attr("stroke-width", 2).attr("opacity", 0.9);
+    svg.append("polygon")
+      .attr("points", `${mx},${cy - r} ${mx + r},${cy} ${mx},${cy + r} ${mx - r},${cy}`)
+      .attr("fill", C0.force_merge).attr("stroke", "#0d1117").attr("stroke-width", 1)
+      .style("cursor", "default")
+      .on("mouseover", event => showHoverTip(event, s))
+      .on("mousemove", moveHoverTip)
+      .on("mouseout", clearHoverTip);
+  });
+  // Crosshair on hover
+  const hLine = svg.append("line").attr("y1", pad.t).attr("y2", H - pad.b)
+    .attr("stroke", "rgba(255,255,255,0.15)").attr("stroke-width", 1).style("display", "none");
+  svg.on("mousemove", function(event) {
+    const [mx] = d3.pointer(event);
+    hLine.attr("x1", mx).attr("x2", mx).style("display", null);
+  }).on("mouseleave", () => hLine.style("display", "none"))
+  .on("click", event => {
+    if (getActiveSwimLock(swimId)) { unlockActiveSwimLock(swimId); return; }
+    const [mx, my] = d3.pointer(event, svg.node());
+    const inRows = mx >= pad.l && mx <= (w - pad.r) && my >= pad.t && my <= (pad.t + rowH * mrL.length);
+    if (inRows) {
+      const rowIdx = Math.max(0, Math.min(mrL.length - 1, Math.floor((my - pad.t) / rowH)));
+      const mr = mrL[rowIdx];
+      const rawTick = Math.max(0, Math.min(p.maxTick, Math.round(x.invert(mx))));
+      const mrTicks = getMrEventTicks(evs, mr, p.maxTick, p);
+      const lockMin = mrTicks[0];
+      const lockMax = mrTicks[mrTicks.length - 1];
+      const tick = Math.max(lockMin, Math.min(lockMax, rawTick));
+      st.locked = true;
+      st.expanded = true;
+      st.fileKey = owner?.name || null;
+      st.lockMr = mr;
+      st.lockTick = tick;
+      st.lockSeg = segmentAtTick(p, mr, tick);
+      st.lockKind = st.lockSeg?.kind || null;
+      st.lockX = event.clientX + 12;
+      st.lockY = event.clientY - 10;
+      st.lockLaneCenterY = event.clientY;
+      st.lockLaneRowPx = rowH;
+      st.lockPlacement = mx >= ((pad.l + (w - pad.r)) / 2) ? "tr" : "bl";
+      st.tooltipX = null;
+      st.tooltipY = null;
+      st.eventTicks = getSwimEventTicks(evs, p.maxTick);
+      st.mrEventTicks = mrTicks;
+      st.maxTick = p.maxTick;
+      st.lockMinTick = lockMin;
+      st.lockMaxTick = lockMax;
+      renderLockedSwimTip(swimId);
+      dSwim(p, swimId, { skipTipRender: true, forceFullRange }); // repaint indicator at locked tick
+      restorePageScroll(pagePos);
+      return;
+    }
+    toggleTooltipScope(tooltipScope);
+    if (!isTooltipEnabled(tooltipScope) && !getActiveSwimLock(swimId)) {
+      tip.style("display", "none");
+    }
+  });
+
+  if (swimEl) {
+    swimEl.scrollLeft = prevScrollLeft;
+    swimEl.scrollTop = prevScrollTop;
+  }
+  restorePanelScroll(panelPos);
+  restorePageScroll(pagePos);
+  if (st.locked && !skipTipRender) renderLockedSwimTip(swimId);
+  else if (!getActiveSwimLock()) tip.style("display", "none");
+}
+
+// --- Playback ---
+function stop() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.getElementById("btnPlay").textContent = "Play"; }
+function updatePlayLabel() {
+  document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick();
+}
+function tick() { const mx = globalMaxTick(); if (!mx) { stop(); return; } playhead++;
+  if (playhead > mx) { if (document.getElementById("chkLoop").checked) playhead = 0; else { playhead = mx; stop(); return; } }
+  document.getElementById("scrub").value = playhead;
+  updatePlayLabel(); onPlayheadChange(); }
+function play() { if (playTimer) { stop(); return; } document.getElementById("btnPlay").textContent = "Pause";
+  const s = +document.getElementById("selSpeed").value || 1; playTimer = setInterval(tick, BASE_MS / s); }
+function stepOnce() {
+  stop();
+  const mx = globalMaxTick();
+  if (!mx) return;
+  if (playhead >= mx) playhead = document.getElementById("chkLoop").checked ? 0 : mx;
+  else playhead++;
+  document.getElementById("scrub").value = playhead;
+  updatePlayLabel();
+  onPlayheadChange();
+}
+function resetP() { stop(); playhead = 0; document.getElementById("scrub").value = 0; updatePlayLabel(); onPlayheadChange(); }
+
+function onPlayheadChange() {
+  const active = document.querySelector(".tab-panel.active");
+  if (!active) return;
+  if (active.id === "panelKanban") { renderSnapshot(); renderTraces(); }
+}
+
+document.getElementById("btnPlay").addEventListener("click", play);
+document.getElementById("btnStep").addEventListener("click", stepOnce);
+document.getElementById("btnReset").addEventListener("click", resetP);
+document.getElementById("scrub").addEventListener("input", e => {
+  stop();
+  playhead = +e.target.value;
+  updatePlayLabel();
+  onPlayheadChange();
+});
+document.getElementById("selSpeed").addEventListener("change", () => { if (!playTimer) return; const s = +document.getElementById("selSpeed").value || 1; clearInterval(playTimer); playTimer = setInterval(tick, BASE_MS / s); });
+document.addEventListener("keydown", e => {
+  if (isTypingTarget(e.target)) return;
+  let tabName = null;
+  const active = document.querySelector(".tab-panel.active");
+  if (active?.id === "panelComposition") tabName = "composition";
+  else if (active?.id === "panelBars") tabName = "compositionCharts";
+  else if (active?.id === "panelSwimlane") tabName = "swimlane";
+  if (!tabName) return;
+  const lock = getActiveSwimLockForTab(tabName);
+  if (!lock) return;
+  if (e.key === "Escape") {
+    unlockActiveSwimLock(lock.swimId);
+    e.preventDefault();
+    return;
+  }
+  if ((e.key === "ArrowRight" || e.key === "ArrowLeft") && !e.shiftKey) {
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    if (stepLockedTick(dir, lock.swimId)) {
+      e.preventDefault();
+      return;
+    }
+  }
+  if ((e.key === "ArrowUp" || e.key === "ArrowDown") && !e.shiftKey) {
+    const dir = e.key === "ArrowDown" ? 1 : -1;
+    if (stepLockedLane(dir, lock.swimId)) {
+      e.preventDefault();
+      return;
+    }
+  }
+});
+
+// =========================================================================

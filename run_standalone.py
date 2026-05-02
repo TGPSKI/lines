@@ -18,9 +18,13 @@ from __future__ import annotations
 
 import argparse
 import csv
+import getpass
+import json
 import logging
 import math
 import os
+import platform
+import socket
 import subprocess
 import sys
 import time
@@ -43,17 +47,21 @@ from gitlab_hk_sim.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
 # Policy set presets for Monte Carlo and comparison runs
 # ---------------------------------------------------------------------------
 POLICY_SETS: dict[str, list[str]] = {
-    "phase0": ["top-k", "active-cap", "old-burst"],
-    "phase1": ["top-k", "active-cap", "old-burst", "cap+phase1"],
+    "phase0": ["old-burst", "top-k", "active-cap"],
+    "phase1": ["old-burst", "top-k", "active-cap", "cap+phase1"],
     "all": [
         "top-k",
-        "top-k-no-insist",
+        "top-k-wait",
+        "top-k-wait-insist",
         "active-cap",
-        "active-cap-no-insist",
+        "active-cap-wait",
+        "active-cap-wait-insist",
         "old-burst",
-        "old-burst-no-insist",
+        "old-burst-wait",
+        "old-burst-wait-insist",
         "cap+phase1",
-        "cap+phase1-NI",
+        "cap+phase1-wait",
+        "cap+phase1-wait-insist",
     ],
 }
 
@@ -65,6 +73,192 @@ def _percentile(sorted_vals: list, pct: int) -> int:
     idx = int(len(sorted_vals) * pct / 100)
     idx = min(idx, len(sorted_vals) - 1)
     return sorted_vals[idx]
+
+
+def _percentile_float(values: list[float], pct: int) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    idx = min(len(ordered) - 1, int(len(ordered) * pct / 100))
+    return float(ordered[idx])
+
+
+def _compute_hourly_throughput_dims(
+    *,
+    merge_ticks: list[int],
+    total_time_ticks: int,
+    tick_seconds: int,
+) -> dict[str, float]:
+    if total_time_ticks <= 0:
+        return {
+            "throughput_active_merges_per_hour": 0.0,
+            "throughput_peak8_merges_per_hour": 0.0,
+            "throughput_peak8_p90_merges_per_hour": 0.0,
+            "merge_interval_p50_seconds": 0.0,
+            "merge_interval_p95_seconds": 0.0,
+        }
+
+    hour_count = max(1, int(math.ceil((total_time_ticks * tick_seconds) / 3600.0)))
+    hourly_merges = [0 for _ in range(hour_count)]
+    for tick in merge_ticks:
+        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
+        hourly_merges[bucket] += 1
+
+    active_hourly = [v for v in hourly_merges if v > 0]
+    active_mph = sum(active_hourly) / len(active_hourly) if active_hourly else 0.0
+    peak_window = min(8, hour_count)
+    best_avg = 0.0
+    best_slice = hourly_merges[:peak_window] if peak_window else []
+    for start in range(0, hour_count - peak_window + 1):
+        window_vals = hourly_merges[start : start + peak_window]
+        avg = sum(window_vals) / peak_window
+        if avg > best_avg:
+            best_avg = avg
+            best_slice = window_vals
+
+    merge_ticks_sorted = sorted(merge_ticks)
+    merge_intervals_seconds = [
+        (b - a) * tick_seconds
+        for a, b in zip(merge_ticks_sorted, merge_ticks_sorted[1:], strict=False)
+        if b > a
+    ]
+    return {
+        "throughput_active_merges_per_hour": active_mph,
+        "throughput_peak8_merges_per_hour": best_avg,
+        "throughput_peak8_p90_merges_per_hour": _percentile_float(best_slice, 90),
+        "merge_interval_p50_seconds": _percentile_float(merge_intervals_seconds, 50),
+        "merge_interval_p95_seconds": _percentile_float(merge_intervals_seconds, 95),
+    }
+
+
+def _load_ndjson_events(path: str | None) -> list[dict[str, Any]]:
+    if not path or not os.path.exists(path):
+        return []
+    events: list[dict[str, Any]] = []
+    with open(path) as f:
+        for raw in f:
+            line = raw.strip()
+            if not line:
+                continue
+            try:
+                evt = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(evt, dict):
+                events.append(evt)
+    return events
+
+
+def _extract_hourly_event_profile(
+    *,
+    events: list[dict[str, Any]],
+    tick_seconds: int,
+    total_time_ticks: int,
+) -> dict[str, Any]:
+    if not events or total_time_ticks <= 0:
+        return {
+            "modeled_hours": 0.0,
+            "total_arrivals": 0,
+            "throughput_peak_window_merges_per_hour": 0.0,
+            "throughput_offpeak_merges_per_hour": 0.0,
+            "arrival_peak_window_per_hour": 0.0,
+            "arrival_offpeak_window_per_hour": 0.0,
+            "peak_offpeak_throughput_ratio": 0.0,
+            "scenario_start_hour_utc": 0,
+            "peak_window_hours_utc": [],
+            "hourly_merges": [],
+            "hourly_arrivals": [],
+        }
+
+    hour_count = max(1, int(math.ceil((total_time_ticks * tick_seconds) / 3600.0)))
+    hourly_merges = [0 for _ in range(hour_count)]
+    hourly_arrivals = [0 for _ in range(hour_count)]
+
+    for evt in events:
+        if evt.get("event") != "merge":
+            continue
+        tick = evt.get("tick")
+        if not isinstance(tick, int):
+            continue
+        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
+        hourly_merges[bucket] += 1
+
+    scenario_meta = next((e for e in events if e.get("event") == "scenario_meta"), {})
+    arrivals_meta = scenario_meta.get("arrivals", [])
+    if isinstance(arrivals_meta, list):
+        for item in arrivals_meta:
+            if not isinstance(item, dict):
+                continue
+            tick = item.get("tick")
+            if not isinstance(tick, int):
+                continue
+            bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
+            hourly_arrivals[bucket] += 1
+    for evt in events:
+        if evt.get("event") != "tick":
+            continue
+        tick = evt.get("tick")
+        arrivals = evt.get("arrivals")
+        if not isinstance(tick, int) or not isinstance(arrivals, list):
+            continue
+        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
+        hourly_arrivals[bucket] += len(arrivals)
+
+    calibration = (
+        scenario_meta.get("scenario_metadata", {})
+        .get("calibration_targets", {})
+    )
+    arrival_profile = calibration.get("arrival_profile", {})
+    start_hour = int(arrival_profile.get("scenario_start_hour", 0) or 0) % 24
+    peak_hours_raw = arrival_profile.get("peak_window_hours_utc", [])
+    peak_hours = {
+        int(h) % 24
+        for h in peak_hours_raw
+        if isinstance(h, (str, int, float)) and str(h).strip()
+    }
+
+    peak_merges: list[int] = []
+    offpeak_merges: list[int] = []
+    peak_arrivals: list[int] = []
+    offpeak_arrivals: list[int] = []
+    for idx in range(hour_count):
+        utc_hour = (start_hour + idx) % 24
+        if utc_hour in peak_hours:
+            peak_merges.append(hourly_merges[idx])
+            peak_arrivals.append(hourly_arrivals[idx])
+        else:
+            offpeak_merges.append(hourly_merges[idx])
+            offpeak_arrivals.append(hourly_arrivals[idx])
+
+    peak_merge_avg = (
+        sum(peak_merges) / len(peak_merges) if peak_merges else 0.0
+    )
+    offpeak_merge_avg = (
+        sum(offpeak_merges) / len(offpeak_merges) if offpeak_merges else 0.0
+    )
+    peak_arrival_avg = (
+        sum(peak_arrivals) / len(peak_arrivals) if peak_arrivals else 0.0
+    )
+    offpeak_arrival_avg = (
+        sum(offpeak_arrivals) / len(offpeak_arrivals) if offpeak_arrivals else 0.0
+    )
+    peak_offpeak_ratio = (
+        peak_merge_avg / offpeak_merge_avg if offpeak_merge_avg > 0 else 0.0
+    )
+
+    return {
+        "modeled_hours": (total_time_ticks * tick_seconds) / 3600.0,
+        "total_arrivals": int(sum(hourly_arrivals)),
+        "throughput_peak_window_merges_per_hour": peak_merge_avg,
+        "throughput_offpeak_merges_per_hour": offpeak_merge_avg,
+        "arrival_peak_window_per_hour": peak_arrival_avg,
+        "arrival_offpeak_window_per_hour": offpeak_arrival_avg,
+        "peak_offpeak_throughput_ratio": peak_offpeak_ratio,
+        "scenario_start_hour_utc": start_hour,
+        "peak_window_hours_utc": sorted(peak_hours),
+        "hourly_merges": hourly_merges,
+        "hourly_arrivals": hourly_arrivals,
+    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -84,8 +278,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--log-level", default="INFO")
     parser.add_argument(
         "--policy",
-        choices=["top-k", "active-cap", "old-burst", "active-cap+phase1"],
-        default="active-cap",
+        choices=[
+            "top-k",
+            "top-k-wait",
+            "top-k-wait-insist",
+            "active-cap",
+            "active-cap-wait",
+            "active-cap-wait-insist",
+            "old-burst",
+            "old-burst-wait",
+            "old-burst-wait-insist",
+            "cap+phase1",
+            "cap+phase1-wait",
+            "cap+phase1-wait-insist",
+        ],
+        default="old-burst",
         help="Which rebase policy to simulate",
     )
     parser.add_argument(
@@ -111,7 +318,10 @@ def parse_args() -> argparse.Namespace:
         "--policy-set",
         choices=["phase0", "phase1", "all"],
         default="phase0",
-        help="Named policy preset for Monte Carlo / comparison",
+        help=(
+            "Named policy preset for Monte Carlo / comparison"
+            " (all = no-wait + wait + wait-insist traces)"
+        ),
     )
     parser.add_argument(
         "--policies",
@@ -130,7 +340,54 @@ def parse_args() -> argparse.Namespace:
         default=9001,
         help="Base port for parallel servers in Monte Carlo mode",
     )
+    parser.add_argument(
+        "--metadata",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Arbitrary metadata key/value pairs to include in metadata.json",
+    )
     return parser.parse_args()
+
+
+def _parse_metadata_pairs(pairs: list[str]) -> dict[str, str]:
+    meta: dict[str, str] = {}
+    for raw in pairs:
+        if "=" not in raw:
+            raise ValueError(f"invalid --metadata entry '{raw}', expected KEY=VALUE")
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key:
+            raise ValueError(f"invalid --metadata entry '{raw}', key must not be empty")
+        meta[key] = value.strip()
+    return meta
+
+
+def _write_run_metadata(
+    *,
+    reports_dir: str,
+    run_category: str,
+    args: argparse.Namespace,
+    extra: dict[str, Any],
+) -> None:
+    now = datetime.now().astimezone()
+    metadata = {
+        "generated_at_iso": now.isoformat(),
+        "generated_at_epoch": int(now.timestamp()),
+        "run_category": run_category,
+        "hostname": socket.gethostname(),
+        "username": getpass.getuser(),
+        "cwd": os.getcwd(),
+        "script": os.path.abspath(__file__),
+        "argv": sys.argv,
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "custom_metadata": _parse_metadata_pairs(args.metadata),
+        "context": extra,
+    }
+    path = os.path.join(reports_dir, "metadata.json")
+    with open(path, "w") as f:
+        json.dump(metadata, f, indent=2, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +495,15 @@ def preprocess_mrs(sim_url: str, project_id: int, mrs: list[dict]) -> list[dict]
     return result
 
 
+def get_preprocessed_open_mrs(
+    sim_url: str, project_id: int
+) -> tuple[list[dict], list[dict]]:
+    """Fetch all open MRs and run production-like preprocess filtering."""
+    all_mrs = get_all_open_mrs(sim_url, project_id)
+    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
+    return all_mrs, preprocessed
+
+
 def needs_rebase(sim_url: str, project_id: int, mr_sha: str, target_head: str) -> bool:
     resp = requests.get(
         f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
@@ -252,7 +518,9 @@ def get_mr_pipelines(sim_url: str, project_id: int, mr_iid: int) -> list[dict]:
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/pipelines"
     )
     resp.raise_for_status()
-    return resp.json()
+    pipelines = resp.json()
+    # Defensive sort: production wrapper reads newest pipeline first.
+    return sorted(pipelines, key=lambda p: p.get("id", 0), reverse=True)
 
 
 def has_successful_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
@@ -260,45 +528,42 @@ def has_successful_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
     return any(p["status"] == "success" and p["sha"] == mr["sha"] for p in pipelines)
 
 
-def has_active_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
-    """Check if MR has a pending or running pipeline for its current SHA."""
-    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-    return any(
-        p["status"] in ("pending", "running") and p["sha"] == mr["sha"]
-        for p in pipelines
-    )
-
-
 def is_consuming_slot(
-    sim_url: str, project_id: int, mr: dict, target_head: str
+    sim_url: str,
+    project_id: int,
+    mr: dict,
+    target_head: str,
+    pipelines: list[dict] | None = None,
 ) -> bool:
     """Check if MR is consuming a CI concurrency slot.
 
-    Production active-cap logic (PR #5508):
-    - Rebased MR with running/pending/success pipeline = active
-      (success = green and waiting to merge, still occupying a slot)
-    - Non-rebased MR with running/pending pipeline = active
-      (previous rebase still in progress)
+    Production-like active-cap slot logic (PR #5508):
+    - Rebased MR with running/pending/success latest pipeline = active slot.
+    - Non-rebased MRs are not counted as active slots.
     """
-    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+    if pipelines is None:
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
     if not pipelines:
         return False
 
     latest_status = pipelines[0]["status"]
     is_rebased = not needs_rebase(sim_url, project_id, mr["sha"], target_head)
 
-    if is_rebased:
-        return latest_status in ("running", "pending", "success")
-    else:
-        return latest_status in ("running", "pending")
-
-
-def has_failed_pipeline(sim_url: str, project_id: int, mr: dict) -> bool:
-    """Check if MR's latest pipeline has failed (needs retry rebase)."""
-    pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-    if not pipelines:
+    if not is_rebased:
         return False
-    return pipelines[0]["status"] == "failed"
+    return latest_status in ("running", "pending", "success")
+
+
+def _should_skip_rebase_for_wait_mode(pipelines: list[dict]) -> bool:
+    """Match production rebase wait-mode semantics.
+
+    When wait_for_pipeline=True in rebase flow:
+    - MRs with no pipelines are skipped.
+    - MRs with running pipelines are skipped.
+    """
+    if not pipelines:
+        return True
+    return _has_running_pipeline(pipelines)
 
 
 def rebase_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
@@ -345,6 +610,112 @@ def reset_sim(sim_url: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+INSIST_MAX_ATTEMPTS = 10
+
+
+def _has_running_pipeline(pipelines: list[dict]) -> bool:
+    return any(p["status"] == "running" for p in pipelines)
+
+
+def _merge_serial_once(
+    sim_url: str,
+    project_id: int,
+    preprocessed: list[dict],
+    target_head: str,
+    wait_for_pipeline: bool,
+    insist: bool,
+    log: logging.Logger,
+) -> tuple[int, bool]:
+    """Run one production-like merge pass.
+
+    Returns:
+        (merge_count, insist_blocked)
+    """
+    for mr in preprocessed:
+        if mr["state"] != "opened":
+            continue
+        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            continue
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if not pipelines:
+            continue
+
+        if wait_for_pipeline and _has_running_pipeline(pipelines):
+            if insist:
+                log.info(f"  INSIST MR !{mr['iid']} (pipeline running)")
+                return 0, True
+            log.info(f"  SKIP MR !{mr['iid']} (pipeline running)")
+            continue
+
+        if pipelines[0]["status"] == "success":
+            log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
+            try:
+                merge_mr(sim_url, project_id, mr["iid"])
+            except requests.HTTPError as e:
+                log.warning(f"  MERGE FAILED MR !{mr['iid']}: {e}")
+                continue
+            return 1, False
+
+    return 0, False
+
+
+def _run_merge_phase_with_retry(
+    sim_url: str,
+    project_id: int,
+    wait_for_pipeline: bool,
+    insist: bool,
+    log: logging.Logger,
+    initial_target_head: str,
+    initial_preprocessed: list[dict],
+) -> int:
+    """Model production insist behavior with retries + reload/preprocess.
+
+    In production, insist=True raises and retries merge_merge_requests (which
+    reloads MRs and preprocesses again). If all retries fail, run() falls back
+    to insist=False once.
+    """
+    max_attempts = INSIST_MAX_ATTEMPTS if wait_for_pipeline and insist else 1
+    target_head = initial_target_head
+    preprocessed = initial_preprocessed
+
+    for attempt in range(1, max_attempts + 1):
+        if attempt > 1:
+            target_head = get_state(sim_url)["target_head"]
+            _, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+
+        merge_count, insist_blocked = _merge_serial_once(
+            sim_url=sim_url,
+            project_id=project_id,
+            preprocessed=preprocessed,
+            target_head=target_head,
+            wait_for_pipeline=wait_for_pipeline,
+            insist=insist,
+            log=log,
+        )
+        if merge_count > 0:
+            return merge_count
+        if not insist_blocked:
+            return 0
+        log.info(f"  RETRY merge pass {attempt}/{INSIST_MAX_ATTEMPTS}")
+
+    if wait_for_pipeline and insist:
+        log.info("  INSIST retries exhausted; rerun merge pass with insist=False")
+        target_head = get_state(sim_url)["target_head"]
+        _, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+        merge_count, _ = _merge_serial_once(
+            sim_url=sim_url,
+            project_id=project_id,
+            preprocessed=preprocessed,
+            target_head=target_head,
+            wait_for_pipeline=wait_for_pipeline,
+            insist=False,
+            log=log,
+        )
+        return merge_count
+
+    return 0
+
+
 def run_cycle_top_k(
     sim_url: str,
     project_id: int,
@@ -352,75 +723,60 @@ def run_cycle_top_k(
     log: logging.Logger,
     *,
     insist: bool = True,
+    wait_for_pipeline: bool = False,
 ) -> None:
-    """Top-K policy: only consider the first K MRs by priority.
+    """Top-K policy modeled against production run() call ordering.
 
-    Models hemslo's proposed design from PR #5508:
-    - merge_requests[:rebase_limit] — only the first K MRs are visible.
-    - Merge phase: single merge, rebase=True. If insist=True, block on
-      first rebased MR with running pipeline. If insist=False, skip it.
-    - Rebase phase: rebase non-rebased MRs in the window, skip active.
-    - MRs below the top-K window are completely invisible.
+    Production-equivalent ordering:
+    - Merge phase sees full preprocessed queue (opened MRs).
+    - Rebase phase applies top-K visibility window (PR #5508 behavior).
+    - If wait_for_pipeline=False (integration default), insist branch is unreachable.
     """
     state = get_state(sim_url)
     target_head = state["target_head"]
 
-    all_mrs = get_all_open_mrs(sim_url, project_id)
-    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
+    all_mrs, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
 
     log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
-
-    # Top-K window: only first `limit` MRs are visible
-    eligible_mrs = preprocessed[:limit]
-    log.info(f"  Top-K window: MRs {[m['iid'] for m in eligible_mrs]}")
 
     merge_count = 0
     rebase_count = 0
 
-    # Merge phase: single merge, rebase=True
-    for mr in eligible_mrs:
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            continue
-        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-        if not pipelines:
-            continue
-        latest_status = pipelines[0]["status"]
-        if latest_status in ("running", "pending"):
-            if insist:
-                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
-                break
-            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
-            continue
-        if latest_status == "success":
-            log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
-            merge_mr(sim_url, project_id, mr["iid"])
-            merge_count += 1
-            break
-        continue
+    # Merge phase (merge_merge_requests): full preprocessed queue
+    merge_count = _run_merge_phase_with_retry(
+        sim_url=sim_url,
+        project_id=project_id,
+        wait_for_pipeline=wait_for_pipeline,
+        insist=insist,
+        log=log,
+        initial_target_head=target_head,
+        initial_preprocessed=preprocessed,
+    )
 
-    # Rebase phase: rebase non-rebased MRs in the window (skip active)
+    # Rebase phase (rebase_merge_requests): fresh queue query + top-K window
     if merge_count > 0:
         state = get_state(sim_url)
         target_head = state["target_head"]
+
+    _, rebase_preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+    eligible_mrs = rebase_preprocessed[:limit]
+    log.info(f"  Top-K rebase window: MRs {[m['iid'] for m in eligible_mrs]}")
+
     for mr in eligible_mrs:
         if mr["state"] != "opened":
             continue
         if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if has_active_pipeline(sim_url, project_id, mr):
-            continue
+        if wait_for_pipeline:
+            pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+            if _should_skip_rebase_for_wait_mode(pipelines):
+                continue
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
-
-    # Retry failed: re-rebase MRs whose pipeline failed
-    for mr in eligible_mrs:
-        if mr["state"] != "opened":
-            continue
-        if has_failed_pipeline(sim_url, project_id, mr):
-            log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
+        try:
             rebase_mr(sim_url, project_id, mr["iid"])
             rebase_count += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE FAILED MR !{mr['iid']}: {e}")
 
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
@@ -432,6 +788,7 @@ def run_cycle_active_cap(
     log: logging.Logger,
     *,
     insist: bool = True,
+    wait_for_pipeline: bool = False,
 ) -> None:
     """Active-cap policy: maintain steady-state CI concurrency budget.
 
@@ -444,8 +801,7 @@ def run_cycle_active_cap(
     state = get_state(sim_url)
     target_head = state["target_head"]
 
-    all_mrs = get_all_open_mrs(sim_url, project_id)
-    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
+    all_mrs, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
 
     log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
@@ -453,47 +809,42 @@ def run_cycle_active_cap(
     rebase_count = 0
 
     # Merge phase: single merge, rebase=True
-    for mr in preprocessed:
-        if mr["state"] != "opened":
-            continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            continue
-        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-        if not pipelines:
-            continue
-        latest_status = pipelines[0]["status"]
-        if latest_status in ("running", "pending"):
-            if insist:
-                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
-                break
-            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
-            continue
-        if latest_status == "success":
-            log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
-            merge_mr(sim_url, project_id, mr["iid"])
-            merge_count += 1
-            break
-        continue
+    merge_count = _run_merge_phase_with_retry(
+        sim_url=sim_url,
+        project_id=project_id,
+        wait_for_pipeline=wait_for_pipeline,
+        insist=insist,
+        log=log,
+        initial_target_head=target_head,
+        initial_preprocessed=preprocessed,
+    )
 
     # Refresh state after potential merge
     if merge_count > 0:
         state = get_state(sim_url)
         target_head = state["target_head"]
 
-    # Rebase phase: classify and fill budget
+    # Rebase phase (rebase_merge_requests): fresh queue query, classify and fill budget
+    _, rebase_preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+
     already_active = 0
     needs_rebase_mrs: list[dict] = []
-    failed_mrs: list[dict] = []
 
-    for mr in preprocessed:
+    for mr in rebase_preprocessed:
         if mr["state"] != "opened":
             continue
-        if is_consuming_slot(sim_url, project_id, mr, target_head):
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if is_consuming_slot(
+            sim_url, project_id, mr, target_head, pipelines=pipelines
+        ):
             already_active += 1
-        elif has_failed_pipeline(sim_url, project_id, mr):
-            failed_mrs.append(mr)
-        elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            needs_rebase_mrs.append(mr)
+            continue
+
+        if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            continue
+        if wait_for_pipeline and _should_skip_rebase_for_wait_mode(pipelines):
+            continue
+        needs_rebase_mrs.append(mr)
 
     budget = max(0, limit - already_active)
     log.info(f"  Already active: {already_active}, budget: {budget} (limit={limit})")
@@ -502,16 +853,11 @@ def run_cycle_active_cap(
         if rebase_count >= budget:
             break
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
-
-    # Retry failed pipelines within remaining budget
-    for mr in failed_mrs:
-        if rebase_count >= budget:
-            break
-        log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
+        try:
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE FAILED MR !{mr['iid']}: {e}")
 
     log.info(
         f"  Cycle result: {merge_count} merges,"
@@ -526,6 +872,7 @@ def run_cycle_old_burst(
     log: logging.Logger,
     *,
     insist: bool = True,
+    wait_for_pipeline: bool = False,
 ) -> None:
     """Old burst policy: current production master behavior.
 
@@ -539,8 +886,7 @@ def run_cycle_old_burst(
     state = get_state(sim_url)
     target_head = state["target_head"]
 
-    all_mrs = get_all_open_mrs(sim_url, project_id)
-    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
+    all_mrs, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
 
     log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
@@ -548,57 +894,41 @@ def run_cycle_old_burst(
     rebase_count = 0
 
     # Merge phase: single merge, rebase=True
-    for mr in preprocessed:
-        if mr["state"] != "opened":
-            continue
-        if needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            continue
-        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-        if not pipelines:
-            continue
-        latest_status = pipelines[0]["status"]
-        if latest_status in ("running", "pending"):
-            if insist:
-                log.info(f"  INSIST MR !{mr['iid']} (pipeline {latest_status})")
-                break
-            log.info(f"  SKIP MR !{mr['iid']} (pipeline {latest_status})")
-            continue
-        if latest_status == "success":
-            log.info(f"  MERGE MR !{mr['iid']} ({mr['title']})")
-            merge_mr(sim_url, project_id, mr["iid"])
-            merge_count += 1
-            break
-        continue
+    merge_count = _run_merge_phase_with_retry(
+        sim_url=sim_url,
+        project_id=project_id,
+        wait_for_pipeline=wait_for_pipeline,
+        insist=insist,
+        log=log,
+        initial_target_head=target_head,
+        initial_preprocessed=preprocessed,
+    )
 
     # Refresh state after potential merge
     if merge_count > 0:
         state = get_state(sim_url)
         target_head = state["target_head"]
 
-    # Rebase phase: rebase up to limit (skip rebased, skip active pipelines)
-    for mr in preprocessed:
+    # Rebase phase (rebase_merge_requests): fresh queue query
+    _, rebase_preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+
+    for mr in rebase_preprocessed:
         if rebase_count >= limit:
             break
         if mr["state"] != "opened":
             continue
         if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
             continue
-        if has_active_pipeline(sim_url, project_id, mr):
-            continue
+        if wait_for_pipeline:
+            pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+            if _should_skip_rebase_for_wait_mode(pipelines):
+                continue
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
-
-    # Retry failed pipelines within remaining limit
-    for mr in preprocessed:
-        if rebase_count >= limit:
-            break
-        if mr["state"] != "opened":
-            continue
-        if has_failed_pipeline(sim_url, project_id, mr):
-            log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
+        try:
             rebase_mr(sim_url, project_id, mr["iid"])
             rebase_count += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE FAILED MR !{mr['iid']}: {e}")
 
     log.info(f"  Cycle result: {merge_count} merges, {rebase_count} rebases")
 
@@ -619,6 +949,7 @@ def run_cycle_active_cap_phase1(
     log: logging.Logger,
     *,
     insist: bool = False,
+    wait_for_pipeline: bool = False,
 ) -> None:
     """Active-cap + Phase 1 optimistic multi-merge.
 
@@ -640,8 +971,7 @@ def run_cycle_active_cap_phase1(
     state = get_state(sim_url)
     target_head = state["target_head"]
 
-    all_mrs = get_all_open_mrs(sim_url, project_id)
-    preprocessed = preprocess_mrs(sim_url, project_id, all_mrs)
+    all_mrs, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
 
     log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
 
@@ -695,8 +1025,11 @@ def run_cycle_active_cap_phase1(
                 log.info(
                     f"  MULTI-MERGE MR !{mr['iid']} ({mr['title']}) [phase1-optimistic]"
                 )
-            merge_mr(sim_url, project_id, mr["iid"])
-            merge_count += 1
+            try:
+                merge_mr(sim_url, project_id, mr["iid"])
+                merge_count += 1
+            except requests.HTTPError as e:
+                log.warning(f"  MERGE FAILED MR !{mr['iid']}: {e}")
     else:
         # Fallback: no same-root pool — serial merge with insist control
         for mr in preprocessed:
@@ -708,7 +1041,7 @@ def run_cycle_active_cap_phase1(
             if not pipelines:
                 continue
             latest_status = pipelines[0]["status"]
-            if latest_status in ("running", "pending"):
+            if wait_for_pipeline and _has_running_pipeline(pipelines):
                 if insist:
                     log.info(
                         f"  INSIST MR !{mr['iid']}"
@@ -721,8 +1054,11 @@ def run_cycle_active_cap_phase1(
                 continue
             if latest_status == "success":
                 log.info(f"  MERGE MR !{mr['iid']} ({mr['title']}) [fallback-single]")
-                merge_mr(sim_url, project_id, mr["iid"])
-                merge_count += 1
+                try:
+                    merge_mr(sim_url, project_id, mr["iid"])
+                    merge_count += 1
+                except requests.HTTPError as e:
+                    log.warning(f"  MERGE FAILED MR !{mr['iid']}: {e}")
                 break
             continue
 
@@ -731,20 +1067,30 @@ def run_cycle_active_cap_phase1(
         state = get_state(sim_url)
         target_head = state["target_head"]
 
-    # Rebase phase: classify and fill budget
+    # Rebase phase: fresh queue query, classify and fill budget
+    _, rebase_preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+
     already_active = 0
     needs_rebase_mrs: list[dict] = []
     failed_mrs: list[dict] = []
 
-    for mr in preprocessed:
+    for mr in rebase_preprocessed:
         if mr["state"] != "opened":
             continue
-        if is_consuming_slot(sim_url, project_id, mr, target_head):
+        pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if is_consuming_slot(
+            sim_url, project_id, mr, target_head, pipelines=pipelines
+        ):
             already_active += 1
-        elif has_failed_pipeline(sim_url, project_id, mr):
+            continue
+        if pipelines and pipelines[0]["status"] == "failed":
             failed_mrs.append(mr)
-        elif needs_rebase(sim_url, project_id, mr["sha"], target_head):
-            needs_rebase_mrs.append(mr)
+            continue
+        if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            continue
+        if wait_for_pipeline and _should_skip_rebase_for_wait_mode(pipelines):
+            continue
+        needs_rebase_mrs.append(mr)
 
     budget = max(0, limit - already_active)
     log.info(f"  Already active: {already_active}, budget: {budget} (limit={limit})")
@@ -753,16 +1099,22 @@ def run_cycle_active_cap_phase1(
         if rebase_count >= budget:
             break
         log.info(f"  REBASE MR !{mr['iid']} ({mr['title']})")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
+        try:
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE FAILED MR !{mr['iid']}: {e}")
 
     # Retry failed pipelines within remaining budget
     for mr in failed_mrs:
         if rebase_count >= budget:
             break
         log.info(f"  RETRY MR !{mr['iid']} ({mr['title']}) [pipeline failed]")
-        rebase_mr(sim_url, project_id, mr["iid"])
-        rebase_count += 1
+        try:
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE RETRY FAILED MR !{mr['iid']}: {e}")
 
     optimistic = max(0, merge_count - 1) if merge_count > 0 else 0
     log.info(
@@ -776,14 +1128,42 @@ def run_cycle_active_cap_phase1(
 # ---------------------------------------------------------------------------
 
 POLICY_RUNNERS = {
-    "top-k": partial(run_cycle_top_k, insist=True),
-    "top-k-no-insist": partial(run_cycle_top_k, insist=False),
-    "active-cap": partial(run_cycle_active_cap, insist=True),
-    "active-cap-no-insist": partial(run_cycle_active_cap, insist=False),
-    "old-burst": partial(run_cycle_old_burst, insist=True),
-    "old-burst-no-insist": partial(run_cycle_old_burst, insist=False),
-    "cap+phase1": partial(run_cycle_active_cap_phase1, insist=True),
-    "cap+phase1-NI": partial(run_cycle_active_cap_phase1, insist=False),
+    # Baseline: current production/master behavior
+    "old-burst": partial(
+        run_cycle_old_burst, wait_for_pipeline=False, insist=False
+    ),
+    # Experimental: strategy variants under study
+    "top-k": partial(run_cycle_top_k, wait_for_pipeline=False, insist=False),
+    "active-cap": partial(
+        run_cycle_active_cap, wait_for_pipeline=False, insist=False
+    ),
+    "cap+phase1": partial(
+        run_cycle_active_cap_phase1, wait_for_pipeline=False, insist=False
+    ),
+    # wait: wait_for_pipeline=True, insist=False
+    "top-k-wait": partial(run_cycle_top_k, wait_for_pipeline=True, insist=False),
+    "active-cap-wait": partial(
+        run_cycle_active_cap, wait_for_pipeline=True, insist=False
+    ),
+    "old-burst-wait": partial(
+        run_cycle_old_burst, wait_for_pipeline=True, insist=False
+    ),
+    "cap+phase1-wait": partial(
+        run_cycle_active_cap_phase1, wait_for_pipeline=True, insist=False
+    ),
+    # wait-insist: wait_for_pipeline=True, insist=True
+    "top-k-wait-insist": partial(
+        run_cycle_top_k, wait_for_pipeline=True, insist=True
+    ),
+    "active-cap-wait-insist": partial(
+        run_cycle_active_cap, wait_for_pipeline=True, insist=True
+    ),
+    "old-burst-wait-insist": partial(
+        run_cycle_old_burst, wait_for_pipeline=True, insist=True
+    ),
+    "cap+phase1-wait-insist": partial(
+        run_cycle_active_cap_phase1, wait_for_pipeline=True, insist=True
+    ),
 }
 
 
@@ -794,6 +1174,7 @@ def run_policy(
     cycles: int,
     ticks_per_cycle: int,
     log: logging.Logger,
+    metrics_path: str | None = None,
 ) -> dict[str, Any]:
     """Run a complete simulation with one policy. Returns enriched metrics."""
     project_id = 1001
@@ -810,6 +1191,7 @@ def run_policy(
     merge_ticks: list[int] = []  # tick at which each merge happened
     initial_state = get_state(sim_url)
     total_mrs = initial_state.get("total_mrs", initial_state["open_mrs"])
+    tick_seconds = max(1, int(initial_state.get("tick_seconds", 60)))
 
     # Track merges-per-cycle for Phase 1 multi-merge metric
     # "target advance" in Phase 1 context = one reconcile cycle that produced merges
@@ -845,6 +1227,8 @@ def run_policy(
     mrs_merged = metrics.get("merge_calls", 0) or len(merge_ticks)
     total_time_ticks = total_ticks
     throughput = mrs_merged / total_time_ticks if total_time_ticks > 0 else 0
+    total_time_hours = (total_time_ticks * tick_seconds) / 3600
+    throughput_per_hour = mrs_merged / total_time_hours if total_time_hours > 0 else 0
 
     # Time to first merge
     time_to_first_merge = merge_ticks[0] if merge_ticks else total_time_ticks
@@ -860,11 +1244,20 @@ def run_policy(
     # Avg MRs per merge-cycle (Phase 1 key metric)
     # Serial: ~1 MR per merge-cycle. Phase 1 goal: >1 MR per merge-cycle.
     avg_mrs_per_merge_cycle = mrs_merged / merge_cycles if merge_cycles > 0 else 0
+    throughput_dims = _compute_hourly_throughput_dims(
+        merge_ticks=merge_ticks,
+        total_time_ticks=total_time_ticks,
+        tick_seconds=tick_seconds,
+    )
+    rebase_calls = float(metrics.get("rebase_calls", 0))
+    rebase_per_merge = rebase_calls / mrs_merged if mrs_merged > 0 else 0.0
 
     # Enrich metrics with temporal data
     metrics["total_time_ticks"] = total_time_ticks
     metrics["mrs_merged"] = mrs_merged
+    metrics["tick_seconds"] = tick_seconds
     metrics["throughput_merges_per_tick"] = round(throughput, 4)
+    metrics["throughput_merges_per_hour"] = round(throughput_per_hour, 3)
     metrics["time_to_first_merge"] = time_to_first_merge
     metrics["time_to_merge_10"] = time_to_merge_10
     metrics["avg_merge_interval_ticks"] = round(avg_merge_interval, 2)
@@ -873,6 +1266,69 @@ def run_policy(
     )
     metrics["merge_cycles"] = merge_cycles
     metrics["avg_mrs_per_merge_cycle"] = round(avg_mrs_per_merge_cycle, 2)
+    metrics["throughput_active_merges_per_hour"] = round(
+        throughput_dims["throughput_active_merges_per_hour"],
+        3,
+    )
+    metrics["throughput_peak8_merges_per_hour"] = round(
+        throughput_dims["throughput_peak8_merges_per_hour"],
+        3,
+    )
+    metrics["throughput_peak8_p90_merges_per_hour"] = round(
+        throughput_dims["throughput_peak8_p90_merges_per_hour"],
+        3,
+    )
+    metrics["merge_interval_p50_seconds"] = round(
+        throughput_dims["merge_interval_p50_seconds"],
+        1,
+    )
+    metrics["merge_interval_p95_seconds"] = round(
+        throughput_dims["merge_interval_p95_seconds"],
+        1,
+    )
+    metrics["rebase_per_merge_ratio"] = round(rebase_per_merge, 3)
+
+    events = _load_ndjson_events(metrics_path)
+    hourly_profile = _extract_hourly_event_profile(
+        events=events,
+        tick_seconds=tick_seconds,
+        total_time_ticks=total_time_ticks,
+    )
+    metrics["modeled_hours"] = round(float(hourly_profile["modeled_hours"]), 3)
+    metrics["total_arrivals"] = int(hourly_profile["total_arrivals"])
+    metrics["throughput_peak_window_merges_per_hour"] = round(
+        float(hourly_profile["throughput_peak_window_merges_per_hour"]),
+        3,
+    )
+    metrics["throughput_offpeak_merges_per_hour"] = round(
+        float(hourly_profile["throughput_offpeak_merges_per_hour"]),
+        3,
+    )
+    metrics["arrival_peak_window_per_hour"] = round(
+        float(hourly_profile["arrival_peak_window_per_hour"]),
+        3,
+    )
+    metrics["arrival_offpeak_window_per_hour"] = round(
+        float(hourly_profile["arrival_offpeak_window_per_hour"]),
+        3,
+    )
+    metrics["peak_offpeak_throughput_ratio"] = round(
+        float(hourly_profile["peak_offpeak_throughput_ratio"]),
+        3,
+    )
+    metrics["scenario_start_hour_utc"] = int(hourly_profile["scenario_start_hour_utc"])
+    metrics["peak_window_hours_utc_json"] = json.dumps(
+        hourly_profile["peak_window_hours_utc"],
+        separators=(",", ":"),
+    )
+    metrics["hourly_merges_json"] = json.dumps(
+        hourly_profile["hourly_merges"],
+        separators=(",", ":"),
+    )
+    metrics["hourly_arrivals_json"] = json.dumps(
+        hourly_profile["hourly_arrivals"],
+        separators=(",", ":"),
+    )
 
     # Starvation tracking: fetch per-MR wait times
     resp = requests.get(f"{sim_url}/__sim/merged_mrs")
@@ -895,10 +1351,32 @@ def run_policy(
     log.info(f"  total_time: {total_time_ticks} ticks")
     log.info(f"  mrs_merged: {mrs_merged}")
     log.info(f"  throughput: {throughput:.4f} merges/tick")
+    log.info(
+        f"  throughput_hourly: {throughput_per_hour:.3f} merges/hour"
+        f" (tick_seconds={tick_seconds})"
+    )
+    log.info(
+        "  throughput profile:"
+        f" active={metrics['throughput_active_merges_per_hour']:.3f}/h"
+        f" peak8={metrics['throughput_peak8_merges_per_hour']:.3f}/h"
+        f" peak8_p90={metrics['throughput_peak8_p90_merges_per_hour']:.3f}/h"
+    )
+    log.info(
+        "  peak/off-peak profile:"
+        f" peak={metrics['throughput_peak_window_merges_per_hour']:.3f}/h"
+        f" offpeak={metrics['throughput_offpeak_merges_per_hour']:.3f}/h"
+        f" ratio={metrics['peak_offpeak_throughput_ratio']:.3f}"
+    )
     log.info(f"  time_to_first_merge: {time_to_first_merge} ticks")
     log.info(f"  time_to_merge_10: {time_to_merge_10} ticks")
     log.info(f"  avg_merge_interval: {avg_merge_interval:.1f} ticks")
     log.info(f"  queue_drain: {metrics['queue_drain_pct']}%")
+    log.info(
+        "  merge intervals:"
+        f" p50={metrics['merge_interval_p50_seconds']:.1f}s"
+        f" p95={metrics['merge_interval_p95_seconds']:.1f}s"
+    )
+    log.info(f"  rebase_per_merge: {metrics['rebase_per_merge_ratio']:.3f}")
     log.info(f"  peak_active_pipelines: {metrics.get('peak_active_pipelines')}")
     log.info(f"  duplicate_rebases: {metrics.get('duplicate_rebase_total')}")
     log.info(f"  remaining open MRs: {final_state['open_mrs']}")
@@ -909,6 +1387,22 @@ def run_policy(
     log.info(f"  starved MRs (>100 ticks): {metrics['starved_mrs']}")
 
     return metrics
+
+
+def resolve_policies(args: argparse.Namespace) -> list[str]:
+    """Resolve policy list from --policies or --policy-set and validate."""
+    if args.policies:
+        policies = [p.strip() for p in args.policies.split(",") if p.strip()]
+    else:
+        policies = POLICY_SETS[args.policy_set]
+
+    unknown = [p for p in policies if p not in POLICY_RUNNERS]
+    if unknown:
+        print(f"ERROR: Unknown policies: {unknown}")
+        print(f"Available: {list(POLICY_RUNNERS.keys())}")
+        sys.exit(1)
+
+    return policies
 
 
 def run_comparison(args: argparse.Namespace) -> None:
@@ -922,17 +1416,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
 
     results: dict[str, dict] = {}
-
-    policies = [
-        "top-k",
-        "top-k-no-insist",
-        "active-cap",
-        "active-cap-no-insist",
-        "old-burst",
-        "old-burst-no-insist",
-        "cap+phase1",
-        "cap+phase1-NI",
-    ]
+    policies = resolve_policies(args)
 
     timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
     base_reports = os.path.join(
@@ -994,7 +1478,13 @@ def run_comparison(args: argparse.Namespace) -> None:
 
         try:
             results[policy] = run_policy(
-                sim_url, policy, args.limit, args.cycles, args.ticks_per_cycle, log
+                sim_url,
+                policy,
+                args.limit,
+                args.cycles,
+                args.ticks_per_cycle,
+                log,
+                metrics_path=metrics_out,
             )
         finally:
             server_proc.terminate()
@@ -1007,17 +1497,8 @@ def run_comparison(args: argparse.Namespace) -> None:
             time.sleep(1)
 
     # Print comparison table
-    col_w = 12
-    header_policies = [
-        "top-k",
-        "top-k-NI",
-        "act-cap",
-        "act-cap-NI",
-        "burst",
-        "burst-NI",
-        "cap+ph1",
-        "ph1-NI",
-    ]
+    header_policies = policies
+    col_w = max(12, max(len(p) for p in header_policies) + 2)
     table_width = 30 + col_w * len(header_policies) + len(header_policies) + 1
     print("\n")
     print("=" * table_width)
@@ -1029,12 +1510,36 @@ def run_comparison(args: argparse.Namespace) -> None:
         # --- Throughput & Time ---
         (None, "── Throughput & Time ──"),
         ("total_time_ticks", "Total Time (ticks)"),
+        ("tick_seconds", "Tick Length (seconds)"),
         ("mrs_merged", "MRs Merged"),
         ("throughput_merges_per_tick", "Throughput (merges/tick)"),
+        ("throughput_merges_per_hour", "Throughput (merges/hour)"),
+        ("modeled_hours", "Modeled Window (hours)"),
+        ("throughput_active_merges_per_hour", "Throughput Active (merges/hour)"),
+        ("throughput_peak8_merges_per_hour", "Throughput Peak8 (merges/hour)"),
+        (
+            "throughput_peak8_p90_merges_per_hour",
+            "Throughput Peak8 p90 (merges/hour)",
+        ),
+        (
+            "throughput_peak_window_merges_per_hour",
+            "Throughput Peak Window (merges/hour)",
+        ),
+        (
+            "throughput_offpeak_merges_per_hour",
+            "Throughput Offpeak (merges/hour)",
+        ),
+        ("peak_offpeak_throughput_ratio", "Peak/Offpeak Throughput Ratio"),
+        ("arrival_peak_window_per_hour", "Arrivals Peak Window (/hour)"),
+        ("arrival_offpeak_window_per_hour", "Arrivals Offpeak (/hour)"),
+        ("total_arrivals", "Total Arrivals"),
         ("time_to_first_merge", "Time to First Merge"),
         ("time_to_merge_10", "Time to Merge 10 MRs"),
         ("avg_merge_interval_ticks", "Avg Merge Interval"),
+        ("merge_interval_p50_seconds", "Merge Interval p50 (seconds)"),
+        ("merge_interval_p95_seconds", "Merge Interval p95 (seconds)"),
         ("queue_drain_pct", "Queue Drain %"),
+        ("rebase_per_merge_ratio", "Rebase/Merge Ratio"),
         # --- CI Efficiency ---
         (None, "── CI Efficiency ──"),
         ("rebase_calls", "Rebases"),
@@ -1042,6 +1547,11 @@ def run_comparison(args: argparse.Namespace) -> None:
         ("peak_active_pipelines", "Peak Active Pipelines"),
         ("duplicate_rebase_total", "Duplicate Rebases"),
         ("stale_success_max", "Stale Successes Max"),
+        # --- Operation Failures ---
+        (None, "── Operation Failures ──"),
+        ("merge_errors", "Merge Errors"),
+        ("rebase_errors", "Rebase Errors"),
+        ("pipeline_cancels", "Pipeline Cancels"),
         # --- Queue Health ---
         (None, "── Queue Health ──"),
         ("same_root_success_pool_p95", "Same-Root Pool p95"),
@@ -1086,8 +1596,12 @@ def run_comparison(args: argparse.Namespace) -> None:
 
     print()
     print("Key:")
-    print("  NI = no-insist (skip running MRs, merge first available green)")
-    print("  tick ≈ 1 minute of CI time (when using pipeline_durations config)")
+    print("  old-burst* = current master-fidelity baseline traces")
+    print("  top-k* / active-cap* = experimental strategy traces")
+    print("  base policy names = no-wait mode (wait_for_pipeline=False, insist=False)")
+    print("  *-wait = wait_for_pipeline=True, insist=False")
+    print("  *-wait-insist = wait_for_pipeline=True, insist=True")
+    print("  tick length comes from scenario tick_seconds (default 60s)")
     print("  throughput = MRs merged / total ticks elapsed")
     print("  queue drain = % of initial open MRs that got merged")
     print()
@@ -1098,7 +1612,8 @@ def run_comparison(args: argparse.Namespace) -> None:
     print("  - Lower duplicate rebases = less wasted CI")
     print("  - Higher same-root pool = more Phase 1 multi-merge candidates")
     print(
-        "  - insist vs NI: insist respects priority but may idle; NI maximizes merges"
+        "  - compare no-wait vs wait vs wait-insist to isolate"
+        " scheduling/throughput trade-offs"
     )
     print()
 
@@ -1134,7 +1649,14 @@ def run_comparison(args: argparse.Namespace) -> None:
                 cells = "|".join(f" {v:>{col_w - 2}} " for v in vals)
                 f.write(f"| {label:<28} |{cells}|\n")
         f.write("\nKey:\n")
-        f.write("  NI = no-insist (skip running MRs, merge first available green)\n")
+        f.write("  old-burst* = current master-fidelity baseline traces\n")
+        f.write("  top-k* / active-cap* = experimental strategy traces\n")
+        f.write(
+            "  base policy names = no-wait mode"
+            " (wait_for_pipeline=False, insist=False)\n"
+        )
+        f.write("  *-wait = wait_for_pipeline=True, insist=False\n")
+        f.write("  *-wait-insist = wait_for_pipeline=True, insist=True\n")
         f.write("  tick ≈ 1 minute of CI time (when using pipeline_durations config)\n")
         f.write("  throughput = MRs merged / total ticks elapsed\n")
         f.write("  queue drain = % of initial open MRs that got merged\n\n")
@@ -1147,11 +1669,80 @@ def run_comparison(args: argparse.Namespace) -> None:
         f.write("  - Lower duplicate rebases = less wasted CI\n")
         f.write("  - Higher same-root pool = more Phase 1 multi-merge candidates\n")
         f.write(
-            "  - insist vs NI: insist respects priority but may idle;"
-            " NI maximizes merges\n\n"
+            "  - compare no-wait vs wait vs wait-insist to isolate"
+            " scheduling/throughput trade-offs\n\n"
         )
     log.info(f"Comparison saved to {comparison_file}")
+    extended_summary_file = os.path.join(reports_dir, "comparison-extended.json")
+    with open(extended_summary_file, "w") as f:
+        json.dump(
+            {
+                policy: {
+                    "modeled_hours": results.get(policy, {}).get("modeled_hours"),
+                    "throughput_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_merges_per_hour"
+                    ),
+                    "throughput_active_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_active_merges_per_hour"
+                    ),
+                    "throughput_peak8_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_peak8_merges_per_hour"
+                    ),
+                    "throughput_peak8_p90_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_peak8_p90_merges_per_hour"
+                    ),
+                    "throughput_peak_window_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_peak_window_merges_per_hour"
+                    ),
+                    "throughput_offpeak_merges_per_hour": results.get(policy, {}).get(
+                        "throughput_offpeak_merges_per_hour"
+                    ),
+                    "arrival_peak_window_per_hour": results.get(policy, {}).get(
+                        "arrival_peak_window_per_hour"
+                    ),
+                    "arrival_offpeak_window_per_hour": results.get(policy, {}).get(
+                        "arrival_offpeak_window_per_hour"
+                    ),
+                    "total_arrivals": results.get(policy, {}).get("total_arrivals"),
+                    "peak_window_hours_utc_json": results.get(policy, {}).get(
+                        "peak_window_hours_utc_json"
+                    ),
+                    "scenario_start_hour_utc": results.get(policy, {}).get(
+                        "scenario_start_hour_utc"
+                    ),
+                    "hourly_merges_json": results.get(policy, {}).get(
+                        "hourly_merges_json"
+                    ),
+                    "hourly_arrivals_json": results.get(policy, {}).get(
+                        "hourly_arrivals_json"
+                    ),
+                }
+                for policy in policies
+            },
+            f,
+            indent=2,
+            sort_keys=True,
+        )
+    log.info(f"Extended comparison metrics: {extended_summary_file}")
     log.info(f"Per-policy NDJSON files saved to {reports_dir}/")
+    _write_run_metadata(
+        reports_dir=reports_dir,
+        run_category="comparisons",
+        args=args,
+        extra={
+            "scenario": os.path.abspath(args.scenario),
+            "policies": policies,
+            "policy_set": args.policy_set if not args.policies else None,
+            "limit": args.limit,
+            "cycles": args.cycles,
+            "ticks_per_cycle": args.ticks_per_cycle,
+            "comparison_file": os.path.basename(comparison_file),
+            "extended_metrics_file": os.path.basename(extended_summary_file),
+            "policy_metrics_files": [
+                f"{policy}-metrics.ndjson" for policy in policies if policy in results
+            ],
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1226,17 +1817,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
     n_trials = args.monte_carlo
     base_seed = args.base_seed
     base_port = args.base_port
-
-    if args.policies:
-        policies = [p.strip() for p in args.policies.split(",")]
-    else:
-        policies = POLICY_SETS[args.policy_set]
-
-    for p in policies:
-        if p not in POLICY_RUNNERS:
-            log.error(f"Unknown policy: {p}")
-            log.error(f"Available: {list(POLICY_RUNNERS.keys())}")
-            sys.exit(1)
+    policies = resolve_policies(args)
 
     venv_python = os.path.join(os.path.dirname(__file__), ".venv", "bin", "python")
     sim_dir = os.path.abspath(os.path.dirname(__file__) or ".")
@@ -1262,6 +1843,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
         trial_seed = base_seed + trial
         trial_dir = os.path.join(reports_dir, f"trial-{trial:02d}")
         os.makedirs(trial_dir, exist_ok=True)
+        metrics_out_by_policy: dict[str, str] = {}
 
         log.info(f"\n{'=' * 60}")
         log.info(f"TRIAL {trial + 1}/{n_trials} (seed={trial_seed})")
@@ -1271,6 +1853,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
         for i, policy in enumerate(policies):
             port = base_port + i
             metrics_out = os.path.join(trial_dir, f"{policy}-metrics.ndjson")
+            metrics_out_by_policy[policy] = metrics_out
             log_path = os.path.join(trial_dir, f"{policy}-server.log")
             proc = _start_server(
                 venv_python,
@@ -1304,6 +1887,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 args.cycles,
                 args.ticks_per_cycle,
                 policy_log,
+                metrics_path=metrics_out_by_policy.get(policy),
             )
             return policy, result
 
@@ -1331,6 +1915,24 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 all_results[policy].append(trial_results[policy])
 
     _write_monte_carlo_output(all_results, policies, n_trials, reports_dir, log)
+    _write_run_metadata(
+        reports_dir=reports_dir,
+        run_category="monte-carlo",
+        args=args,
+        extra={
+            "scenario": os.path.abspath(args.scenario),
+            "policies": policies,
+            "policy_set": args.policy_set if not args.policies else None,
+            "limit": args.limit,
+            "cycles": args.cycles,
+            "ticks_per_cycle": args.ticks_per_cycle,
+            "trials": n_trials,
+            "base_seed": args.base_seed,
+            "base_port": args.base_port,
+            "summary_csv": "monte-carlo-summary.csv",
+            "comparison_file": "monte-carlo-comparison.txt",
+        },
+    )
 
 
 def _write_monte_carlo_output(
@@ -1345,10 +1947,24 @@ def _write_monte_carlo_output(
         ("total_time_ticks", "Total Time (ticks)"),
         ("mrs_merged", "MRs Merged"),
         ("throughput_merges_per_tick", "Throughput (m/tick)"),
+        ("throughput_merges_per_hour", "Throughput (m/hour)"),
+        ("modeled_hours", "Modeled Window (hours)"),
+        ("throughput_active_merges_per_hour", "Throughput Active"),
+        ("throughput_peak8_merges_per_hour", "Throughput Peak8"),
+        ("throughput_peak8_p90_merges_per_hour", "Throughput Peak8 p90"),
+        ("throughput_peak_window_merges_per_hour", "Throughput Peak Window"),
+        ("throughput_offpeak_merges_per_hour", "Throughput Offpeak"),
+        ("peak_offpeak_throughput_ratio", "Peak/Offpeak Ratio"),
+        ("arrival_peak_window_per_hour", "Arrivals Peak Window"),
+        ("arrival_offpeak_window_per_hour", "Arrivals Offpeak"),
+        ("total_arrivals", "Total Arrivals"),
         ("time_to_first_merge", "First Merge (ticks)"),
         ("time_to_merge_10", "Merge 10 (ticks)"),
         ("avg_merge_interval_ticks", "Avg Interval"),
+        ("merge_interval_p50_seconds", "Merge p50 (sec)"),
+        ("merge_interval_p95_seconds", "Merge p95 (sec)"),
         ("queue_drain_pct", "Queue Drain %"),
+        ("rebase_per_merge_ratio", "Rebase/Merge"),
         ("rebase_calls", "Rebases"),
         ("pipelines_created", "Pipelines"),
         ("peak_active_pipelines", "Peak Active"),
@@ -1485,7 +2101,14 @@ def main() -> None:
         )
         sys.exit(1)
 
-    run_policy(sim_url, args.policy, args.limit, args.cycles, args.ticks_per_cycle, log)
+    run_policy(
+        sim_url,
+        args.policy,
+        args.limit,
+        args.cycles,
+        args.ticks_per_cycle,
+        log,
+    )
 
 
 if __name__ == "__main__":

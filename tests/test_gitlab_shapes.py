@@ -3,6 +3,7 @@
 from gitlab_hk_sim.gitlab_shapes import (
     compare_shape,
     mr_shape,
+    pipeline_list_shape,
     pipeline_shape,
     project_shape,
     user_shape,
@@ -83,6 +84,16 @@ class TestPipelineShape:
         assert result["id"] == 5001
         assert result["status"] == "running"
         assert result["sha"] == "sha-001"
+
+    def test_list_is_newest_first(self):
+        older = Pipeline(
+            id=5001, status=PipelineStatus.SUCCESS, sha="sha-001", root_sha="target-001"
+        )
+        newer = Pipeline(
+            id=5002, status=PipelineStatus.RUNNING, sha="sha-002", root_sha="target-001"
+        )
+        result = pipeline_list_shape([older, newer])
+        assert [p["id"] for p in result] == [5002, 5001]
 
 
 class TestCompareShape:

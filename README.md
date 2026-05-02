@@ -120,6 +120,7 @@ Equivalent framing:
 | `external-target-advance.yaml` | Target moves externally | Active-Cap limits blast |
 | `clean-nonoverlap-phase1.yaml` | Non-overlapping success pool | Phase 1 |
 | `overlap-conflict-phase1.yaml` | Shared tenant domains | Phase 1 limited |
+| `app-interface-prod-calibrated.yaml` | App-interface-only production baseline calibration | Old Burst parity target |
 
 ## Priority Model
 
@@ -158,6 +159,40 @@ pipeline_durations:
   failure_rate: 0.10   # 10% of pipelines will fail
 ```
 
+### Merge/Rebase Operation Failure Realism
+
+Set `failure_path_realism` to model API operation failures in merge/rebase
+mutations (default is `0.0` for both operations when unset):
+
+```yaml
+failure_path_realism:
+  merge_failure_rate: 0.001
+  rebase_failure_rate: 0.001
+```
+
+You can also use a scalar to apply one rate to both:
+
+```yaml
+failure_path_realism: 0.001
+```
+
+### Deterministic Per-MR Merge Failures
+
+Model repeatable pathological merge failures on specific merge requests:
+
+```yaml
+merge_requests:
+  - id: 9999
+    iid: 753
+    merge_failure:
+      remaining: always        # or an integer, e.g. 2
+      status_code: 405
+      detail: 405 Method Not Allowed
+```
+
+This is applied before random `failure_path_realism` failures, so deterministic
+cases remain reproducible across runs.
+
 ### Per-MR CI Duration
 
 Override the global pipeline duration for individual MRs:
@@ -180,6 +215,17 @@ merge_requests:
     arrival_tick: 20   # appears at tick 20
     labels: ["bot/approved: critical"]
 ```
+
+### Tick Length Calibration
+
+By default, one tick is 60 seconds. To align simulator time with production
+reconcile cadence, set `tick_seconds` in the scenario:
+
+```yaml
+tick_seconds: 82
+```
+
+`run_standalone.py` reports both merges/tick and merges/hour using this value.
 
 ### Force-Merge (Queue Bypass)
 
@@ -237,6 +283,7 @@ commits != []  → housekeeping considers MR not rebased
 
 A single-page UI is meant for **walkthroughs in meetings**:
 - A **metrics comparison table** (throughput, CI waste, same-root pool, etc.) for every file you load, with the **active** column highlighted
+- A **Simulation tab** that surfaces scenario/runtime parameters, embedded calibration targets, arrival profile metadata, and per-policy runtime rollups
 - A **kanban board**: one card per merge request, moving through **Waiting → Rebase / CI / Ready → Merged** as you scrub or play
 - **Playback** with **Play / Pause / Reset**, **speed (0.25×–4×)**, **Loop** (optional), and a **step scrubber**
 - A plain-language **“at this time step”** and **“what housekeeping did”** readout
@@ -252,6 +299,128 @@ make ui
 In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js and D3 load from a CDN (first open needs network).
 
 - **File**: [ui/index.html](ui/index.html) (no build step)
+
+## Standalone Trace Modes
+
+`run_standalone.py` models three runtime modes per policy without a separate
+CLI wait flag:
+
+- `regular` (base name): `wait_for_pipeline=False`, `insist=False`
+- `-wait`: `wait_for_pipeline=True`, `insist=False`
+- `-wait-insist`: `wait_for_pipeline=True`, `insist=True`
+
+Examples:
+
+- `top-k`, `top-k-wait`, `top-k-wait-insist`
+- `active-cap`, `active-cap-wait`, `active-cap-wait-insist`
+- `old-burst`, `old-burst-wait`, `old-burst-wait-insist`
+- `cap+phase1`, `cap+phase1-wait`, `cap+phase1-wait-insist`
+
+Policy presets for comparison/Monte Carlo:
+
+- `phase0`: regular mode only (`top-k`, `active-cap`, `old-burst`)
+- `phase1`: `phase0` + `cap+phase1` regular
+- `all`: regular + `-wait` + `-wait-insist` traces across all policies
+
+`Makefile` comparison targets pass `POLICY_SET` through to `run_standalone.py`
+for consistent behavior across quick/advanced/Monte Carlo runs.
+
+## Calibrating From Production Logs (app-interface only)
+
+Use the calibration script to derive app-interface baseline targets from real
+gitlab-housekeeping logs and generate a production-like scenario. Calibration
+now emits a multidimensional target vector (24h throughput, active-hour
+throughput, peak-window throughput, rebase pressure, and merge interval
+percentiles) in `metadata.calibration_targets.performance_dimensions`:
+
+```bash
+cd tools/gitlab_housekeeping_perf_sim
+
+.venv/bin/python scripts/calibrate_from_housekeeping_logs.py \
+  --project app-interface \
+  --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
+  --emit-scenario scenarios/app-interface-prod-calibrated.yaml
+
+# run old-burst baseline against the calibrated scenario
+.venv/bin/python run_standalone.py \
+  --compare \
+  --policies old-burst \
+  --scenario scenarios/app-interface-prod-calibrated.yaml \
+  --limit 2 \
+  --cycles 480 \
+  --ticks-per-cycle 1
+```
+
+Tune calibration knobs for any policy (defaults to `old-burst`) and emit
+UI-ready calibration CSVs. The tuner now scores candidates against the
+multidimensional target vector (not just a single throughput scalar), while
+retaining compatibility columns (`rel_error_pct`, `target_mph`) for existing
+UI workflows:
+
+```bash
+.venv/bin/python scripts/tune_prod_calibration.py \
+  --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
+  --project app-interface \
+  --policy active-cap \
+  --scenario-out scenarios/app-interface-prod-calibrated-active-cap.yaml \
+  --grid-out reports/calibration/active-cap-grid.csv \
+  --validation-out reports/calibration/active-cap-validation.csv
+```
+
+Cycle planning and scoring controls:
+
+- Adaptive cycle planning is on by default (`--cycle-scaling adaptive`) and
+  scales tune/validate cycles to log window size with a bounded runtime target.
+- Use `--resolution-minutes` (e.g. `60`, `10`, `5`) to control effective
+  cycle-planning granularity.
+- Candidate ranking can use `--rank-score extended|standard|throughput`
+  (`extended` default).
+- Final output reports separate gates for throughput tolerance
+  (`--tolerance-pct`) and ranking-score tolerance (`--score-tolerance-pct`),
+  plus per-dimension error breakdowns.
+- To force legacy behavior, pass `--cycle-scaling fixed --tune-cycles ... --validate-cycles ...`.
+
+## Discrimination Pass (policy-agnostic)
+
+Run a repeatable stress-variant sweep on top of the tuned calibrated scenario to
+force policy separation where possible for any selected policy pair:
+
+```bash
+cd tools/gitlab_housekeeping_perf_sim
+
+.venv/bin/python scripts/run_discrimination_pass.py \
+  --base-scenario scenarios/app-interface-prod-calibrated.yaml \
+  --policies top-k,active-cap,old-burst \
+  --lhs-policy top-k \
+  --rhs-policy active-cap \
+  --baseline-policy old-burst \
+  --cycles 480 \
+  --limit 2 \
+  --ticks-per-cycle 1
+```
+
+`--lhs-policy` and `--rhs-policy` define the delta direction in outputs
+(`rhs - lhs`). The optional `--baseline-policy` adds context columns in the
+summary.
+
+Outputs are written under `reports/discrimination/<timestamp>/` with:
+
+- `discrimination-summary.csv` (policy-agnostic machine-readable matrix)
+- `discrimination-summary.md` (human-readable summary)
+- `metadata.json` (timestamp + local context + optional custom metadata)
+- `scenarios/*.yaml` (the generated stress variants)
+- `raw/*-compare.txt` (full compare output per variant)
+
+All major run writers now emit a sibling `metadata.json` in run output folders:
+
+- `reports/comparisons/<timestamp>/metadata.json`
+- `reports/monte-carlo/<timestamp>/metadata.json`
+- `reports/discrimination/<timestamp>/metadata.json`
+- `reports/calibration/<timestamp>/metadata.json` (from `tune_prod_calibration.py`)
+
+You can attach custom key/value metadata with repeatable `--metadata KEY=VALUE`
+on `run_standalone.py`, `scripts/run_discrimination_pass.py`, and
+`scripts/tune_prod_calibration.py`.
 
 ## Running Tests
 

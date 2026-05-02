@@ -8,9 +8,13 @@
 #   make validate               # validate all scenarios
 #   make serve SCENARIO=...     # start sim server
 #   make run                    # run standalone driver
-#   make compare                # compare all policies (default scenario)
-#   make compare-advanced       # compare all policies (advanced scenario)
+#   make compare                # compare selected POLICY_SET (default scenario)
+#   make compare-advanced       # compare selected POLICY_SET (advanced scenario)
+#   make compare-prod-calibrated # compare against app-interface calibrated scenario
+#   make discrimination-pass      # run policy-pair stress variants
 #   make compare-quick          # quick comparison (~2 min)
+#   make calibrate-prod-scenario LOGS="a.log b.log c.log"
+#   make tune-prod-calibration LOGS="a.log b.log c.log" CALIBRATION_POLICY=active-cap
 #   make monte-carlo-small      # Monte Carlo: 10 trials (~10 min)
 #   make monte-carlo-medium     # Monte Carlo: 20 trials (~20 min)
 #   make monte-carlo-large      # Monte Carlo: 30 trials (~30 min)
@@ -27,6 +31,11 @@ SIM_HOST ?= 127.0.0.1
 SIM_URL := http://$(SIM_HOST):$(SIM_PORT)
 SCENARIO ?= scenarios/mvp-active-cap.yaml
 ADV_SCENARIO := scenarios/large-mixed-queue-advanced.yaml
+PROD_SCENARIO := scenarios/app-interface-prod-calibrated.yaml
+# policy sets are defined in run_standalone.py:
+#   phase0: regular mode only (wait_for_pipeline=False, insist=False)
+#   phase1: phase0 + cap+phase1 regular
+#   all: regular + wait + wait-insist traces for all policies
 POLICY_SET ?= phase0
 METRICS_DIR := reports/comparisons/latest
 METRICS_FILE := $(METRICS_DIR)/metrics.ndjson
@@ -35,7 +44,16 @@ LIMIT ?= 8
 TICKS ?= 10
 CYCLES ?= 20
 TICKS_PER_CYCLE ?= 4
+# POLICY can be a regular or mode-explicit trace, e.g.:
+#   top-k, top-k-wait, top-k-wait-insist
 POLICY ?= active-cap
+CALIBRATION_POLICY ?= old-burst
+RUN_TS ?= $(shell date +"%m-%d-%y_%I-%M-%p")
+CALIBRATION_OUT_DIR ?= reports/calibration/$(RUN_TS)
+DISCRIMINATION_POLICIES ?= top-k,active-cap,old-burst
+DISCRIMINATION_LHS ?= top-k
+DISCRIMINATION_RHS ?= active-cap
+DISCRIMINATION_BASELINE ?= old-burst
 
 # Use the venv python directly (avoids uv version mismatch)
 VENV_PYTHON := .venv/bin/python
@@ -46,7 +64,8 @@ PYTEST := $(VENV_PYTHON) -m pytest
 QR_ROOT := $(shell cd ../.. && pwd)
 
 .PHONY: test validate serve serve-bg kill-server run run-harness run-harness-dry \
-        compare compare-advanced compare-quick \
+        compare compare-advanced compare-prod-calibrated compare-quick \
+        calibrate-prod-scenario tune-prod-calibration discrimination-pass \
         monte-carlo-small monte-carlo-medium monte-carlo-large \
         tick ticks metrics state reset report full-cycle clean ui help
 
@@ -125,6 +144,7 @@ run: ## Run standalone driver against sim
 compare: ## Compare all policies (default scenario)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--compare \
+		--policy-set $(POLICY_SET) \
 		--scenario $(SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit $(LIMIT) \
@@ -134,6 +154,7 @@ compare: ## Compare all policies (default scenario)
 compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--compare \
+		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit $(LIMIT) \
@@ -141,9 +162,21 @@ compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 		--ticks-per-cycle 1 \
 		--log-level WARNING
 
+compare-prod-calibrated: ## Compare all policies against app-interface calibrated scenario
+	PYTHONPATH=. $(PYTHON) run_standalone.py \
+		--compare \
+		--policy-set $(POLICY_SET) \
+		--scenario $(PROD_SCENARIO) \
+		--port $(SIM_PORT) \
+		--limit 2 \
+		--cycles 480 \
+		--ticks-per-cycle 1 \
+		--log-level WARNING
+
 compare-quick: ## Quick comparison (~2 min) - fewer cycles
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--compare \
+		--policy-set $(POLICY_SET) \
 		--scenario $(SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit $(LIMIT) \
@@ -153,6 +186,41 @@ compare-quick: ## Quick comparison (~2 min) - fewer cycles
 # ---------------------------------------------------------------------------
 # Monte Carlo (parallel trials with statistical analysis)
 # ---------------------------------------------------------------------------
+
+calibrate-prod-scenario: ## Build app-interface calibrated scenario from housekeeping logs
+	@if [ -z "$(LOGS)" ]; then \
+		echo "Set LOGS to one or more log paths, e.g."; \
+		echo '  make calibrate-prod-scenario LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
+		exit 1; \
+	fi
+	PYTHONPATH=. $(PYTHON) scripts/calibrate_from_housekeeping_logs.py \
+		--project app-interface \
+		--logs $(LOGS) \
+		--emit-scenario $(PROD_SCENARIO)
+
+tune-prod-calibration: ## Tune calibration knobs for selected CALIBRATION_POLICY
+	@if [ -z "$(LOGS)" ]; then \
+		echo "Set LOGS to one or more log paths, e.g."; \
+		echo '  make tune-prod-calibration LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
+		exit 1; \
+	fi
+	PYTHONPATH=. $(PYTHON) scripts/tune_prod_calibration.py \
+		--logs $(LOGS) \
+		--project app-interface \
+		--policy $(CALIBRATION_POLICY) \
+		--scenario-out scenarios/app-interface-prod-calibrated-$(CALIBRATION_POLICY).yaml \
+		--out-dir $(CALIBRATION_OUT_DIR)
+
+discrimination-pass: ## Run repeatable policy-pair discrimination variants
+	PYTHONPATH=. $(PYTHON) scripts/run_discrimination_pass.py \
+		--base-scenario $(PROD_SCENARIO) \
+		--policies $(DISCRIMINATION_POLICIES) \
+		--lhs-policy $(DISCRIMINATION_LHS) \
+		--rhs-policy $(DISCRIMINATION_RHS) \
+		--baseline-policy $(DISCRIMINATION_BASELINE) \
+		--cycles 480 \
+		--limit 2 \
+		--ticks-per-cycle 1
 
 monte-carlo-small: ## Monte Carlo: 10 trials (~30 min)
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
