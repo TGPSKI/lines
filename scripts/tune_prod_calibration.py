@@ -41,7 +41,7 @@ TABLE_ROW_RE = re.compile(
     r"^\|\s*(?P<label>[^|]+?)\s*\|\s*(?P<value>[^|]+?)\s*\|$",
     re.MULTILINE,
 )
-STANDARD_DIMENSION_WEIGHTS = {
+LEGACY_STANDARD_DIMENSION_WEIGHTS = {
     "merge_per_hour_24h": 0.30,
     "merge_per_hour_active_hours": 0.20,
     "merge_per_hour_peak8": 0.20,
@@ -49,12 +49,39 @@ STANDARD_DIMENSION_WEIGHTS = {
     "rebase_per_merge_global": 0.10,
     "merge_interval_seconds_p95": 0.05,
 }
+HOURLY_EXTENDED_DIMENSION_WEIGHTS = {
+    "merge_per_hour_24h": 0.10,
+    "merge_per_hour_active_hours": 0.18,
+    "merge_per_hour_peak8": 0.18,
+    "merge_per_hour_peak8_p90": 0.15,
+    "merge_peak_offpeak_ratio": 0.17,
+    "rebase_per_merge_global": 0.12,
+    "merge_interval_seconds_p50": 0.05,
+    "merge_interval_seconds_p95": 0.05,
+}
+DIMENSION_WEIGHT_PROFILES = {
+    "legacy": LEGACY_STANDARD_DIMENSION_WEIGHTS,
+    "hourly-extended": HOURLY_EXTENDED_DIMENSION_WEIGHTS,
+}
+DEFAULT_DIMENSION_PROFILE = "hourly-extended"
+TARGET_ANCHOR_TO_DIMENSION = {
+    "window24h": "merge_per_hour_24h",
+    "active": "merge_per_hour_active_hours",
+    "peak8": "merge_per_hour_peak8",
+    "peak8_p90": "merge_per_hour_peak8_p90",
+}
+DEFAULT_TARGET_ANCHOR_BY_PROFILE = {
+    "legacy": "window24h",
+    "hourly-extended": "active",
+}
 TARGET_TO_RUN_METRIC = {
     "merge_per_hour_24h": "throughput_mph",
     "merge_per_hour_active_hours": "throughput_active_mph",
     "merge_per_hour_peak8": "throughput_peak8_mph",
     "merge_per_hour_peak8_p90": "throughput_peak8_p90_mph",
+    "merge_peak_offpeak_ratio": "peak_offpeak_ratio",
     "rebase_per_merge_global": "rebase_per_merge",
+    "merge_interval_seconds_p50": "merge_interval_p50_seconds",
     "merge_interval_seconds_p95": "merge_interval_p95_seconds",
 }
 
@@ -81,6 +108,7 @@ class CandidateResult:
     modeled_hours: float
     total_arrivals: float
     rebase_per_merge: float
+    merge_interval_p50_seconds: float
     merge_interval_p95_seconds: float
     merged: int
     rel_error: float
@@ -105,6 +133,7 @@ class ValidationResult:
     modeled_hours: float
     total_arrivals: float
     rebase_per_merge: float
+    merge_interval_p50_seconds: float
     merge_interval_p95_seconds: float
     merged: int
     rel_error: float
@@ -219,6 +248,7 @@ def _extract_run_metrics(output: str) -> dict[str, float] | None:
         "total_arrivals": table.get("Total Arrivals", 0.0),
         "merged": table["MRs Merged"],
         "rebase_per_merge": table["Rebase/Merge Ratio"],
+        "merge_interval_p50_seconds": table.get("Merge Interval p50 (seconds)", 0.0),
         "merge_interval_p95_seconds": table["Merge Interval p95 (seconds)"],
     }
 
@@ -227,11 +257,12 @@ def _score_metrics(
     *,
     run_metrics: dict[str, float],
     target_dimensions: dict[str, float],
+    dimension_weights: dict[str, float],
 ) -> tuple[float, float, dict[str, float]]:
     weighted_error_sum = 0.0
     active_weight = 0.0
     dim_errors: dict[str, float] = {}
-    for dim_name, weight in STANDARD_DIMENSION_WEIGHTS.items():
+    for dim_name, weight in dimension_weights.items():
         target = target_dimensions.get(dim_name, 0.0)
         if target <= 0:
             continue
@@ -270,6 +301,40 @@ def _score_for_rank(
     if rank_score == "standard":
         return standard_score
     return extended_score
+
+
+def _evaluate_gate_results(
+    *,
+    rel_error: float,
+    ranking_score: float,
+    max_dimension_error: float,
+    throughput_tolerance: float,
+    score_tolerance: float,
+    max_dimension_tolerance: float,
+) -> dict[str, bool]:
+    throughput_pass = rel_error <= throughput_tolerance
+    score_pass = ranking_score <= score_tolerance
+    max_dimension_pass = max_dimension_error <= max_dimension_tolerance
+    accepted = throughput_pass and score_pass and max_dimension_pass
+    return {
+        "throughput_pass": throughput_pass,
+        "score_pass": score_pass,
+        "max_dimension_pass": max_dimension_pass,
+        "accepted": accepted,
+    }
+
+
+def _decision_reason_codes(gate_results: dict[str, bool]) -> list[str]:
+    reasons: list[str] = []
+    if not gate_results.get("throughput_pass", False):
+        reasons.append("throughput_gate_failed")
+    if not gate_results.get("score_pass", False):
+        reasons.append("rank_score_gate_failed")
+    if not gate_results.get("max_dimension_pass", False):
+        reasons.append("max_dimension_gate_failed")
+    if not reasons:
+        reasons.append("accepted")
+    return reasons
 
 
 def _format_dim_errors(dim_errors: dict[str, float]) -> str:
@@ -357,6 +422,12 @@ def _derive_tick_candidates(stats: list[LogStats]) -> list[int]:
 
 def _build_target_dimensions(stats: list[LogStats]) -> dict[str, float]:
     return compute_weighted_performance_dimensions(stats)
+
+
+def _resolve_target_anchor(dimension_profile: str, requested_anchor: str) -> str:
+    if requested_anchor != "auto":
+        return requested_anchor
+    return DEFAULT_TARGET_ANCHOR_BY_PROFILE.get(dimension_profile, "window24h")
 
 
 def _hours_to_cycles(
@@ -448,6 +519,10 @@ def _resolve_cycle_plan(
         if args.scenario_window_ticks > 0
         else max(480, validate_cycles)
     )
+    if scenario_ticks > 0:
+        min_cycles_for_scenario = scenario_ticks * args.ticks_per_cycle
+        tune_cycles = max(tune_cycles, min_cycles_for_scenario // 2)
+        validate_cycles = max(validate_cycles, min_cycles_for_scenario)
     return tune_cycles, validate_cycles, scenario_ticks
 
 
@@ -464,7 +539,16 @@ def parse_args() -> argparse.Namespace:
         "--target-mph",
         type=float,
         default=None,
-        help="Target policy merges/hour; defaults to weighted log baseline",
+        help="Target policy merges/hour; overrides metric-derived anchor",
+    )
+    parser.add_argument(
+        "--target-anchor",
+        choices=["auto", *sorted(TARGET_ANCHOR_TO_DIMENSION.keys())],
+        default="auto",
+        help=(
+            "Dimension used to derive target mph when --target-mph is unset"
+            " (auto: profile-specific default)"
+        ),
     )
     parser.add_argument(
         "--policy",
@@ -518,6 +602,12 @@ def parse_args() -> argparse.Namespace:
         help="Target ranking-score percent threshold",
     )
     parser.add_argument(
+        "--max-dimension-error-pct",
+        type=float,
+        default=60.0,
+        help="Maximum allowed single-dimension absolute relative error percent",
+    )
+    parser.add_argument(
         "--validate-top-n",
         type=int,
         default=3,
@@ -533,6 +623,15 @@ def parse_args() -> argparse.Namespace:
         choices=["extended", "standard", "throughput"],
         default="extended",
         help="Score objective used to rank candidates",
+    )
+    parser.add_argument(
+        "--dimension-profile",
+        choices=sorted(DIMENSION_WEIGHT_PROFILES.keys()),
+        default=DEFAULT_DIMENSION_PROFILE,
+        help=(
+            "Target-dimension weighting profile used for score calculation"
+            " (hourly-extended emphasizes intra-day shape over pure 24h mean)"
+        ),
     )
     parser.add_argument(
         "--cycle-scaling",
@@ -640,6 +739,11 @@ def parse_args() -> argparse.Namespace:
         help="Comma-separated queue-depth-scale candidates",
     )
     parser.add_argument(
+        "--ci-duration-scale-candidates",
+        default="1.0",
+        help="DEPRECATED: CI duration is now fixed from real data. Ignored.",
+    )
+    parser.add_argument(
         "--grid-out",
         default="",
         help="Optional path for 240-cycle grid CSV output",
@@ -683,15 +787,24 @@ def _write_metadata_file(
     *,
     out_dir: Path,
     args: argparse.Namespace,
+    dimension_profile: str,
+    dimension_weights: dict[str, float],
+    target_anchor: str,
+    target_anchor_dimension: str,
     policy: str,
     target_mph: float,
     target_dimensions: dict[str, float],
     best_240: CandidateResult,
     best_480: ValidationResult,
+    decision_status: str,
+    decision_reason_codes: list[str],
+    decision_gates: dict[str, bool],
+    decision_thresholds: dict[str, float],
     grid_rows: list[dict[str, int | float | str]],
     validation_rows: list[dict[str, int | float | str]],
-    final_scenario_path: Path,
-    scenario_copy_path: Path,
+    selected_scenario_path: Path | None,
+    selected_scenario_copy_path: Path | None,
+    rejected_scenario_path: Path | None,
     grid_csv_path: Path,
     validation_csv_path: Path,
     scenario_window_ticks: int,
@@ -714,9 +827,13 @@ def _write_metadata_file(
         "context": {
             "project": args.project,
             "policy": policy,
+            "scenario": best_480.candidate.scenario_path.stem if best_480 else "",
             "target_mph": target_mph,
             "target_dimensions": target_dimensions,
-            "standard_dimension_weights": STANDARD_DIMENSION_WEIGHTS,
+            "dimension_profile": dimension_profile,
+            "target_anchor": target_anchor,
+            "target_anchor_dimension": target_anchor_dimension,
+            "standard_dimension_weights": dimension_weights,
             "extended_score_component_weights": EXTENDED_SCORE_COMPONENT_WEIGHTS,
             "tune_cycles": tune_cycles,
             "validate_cycles": validate_cycles,
@@ -728,6 +845,15 @@ def _write_metadata_file(
             "scenario_window_ticks": scenario_window_ticks,
             "grid_candidates": len(grid_rows),
             "validated_candidates": len(validation_rows),
+            "finalist_knobs": {
+                "tick_seconds": best_480.candidate.tick_seconds,
+                "arrival_skew": best_480.candidate.arrival_skew,
+                "queue_depth_scale": best_480.candidate.queue_depth_scale,
+            } if best_480 else {},
+            "decision_status": decision_status,
+            "decision_reason_codes": decision_reason_codes,
+            "decision_gates": decision_gates,
+            "decision_thresholds": decision_thresholds,
             "best_240": {
                 "tick_seconds": best_240.tick_seconds,
                 "arrival_skew": best_240.arrival_skew,
@@ -742,6 +868,7 @@ def _write_metadata_file(
                 "modeled_hours": best_240.modeled_hours,
                 "total_arrivals": best_240.total_arrivals,
                 "rebase_per_merge": best_240.rebase_per_merge,
+                "merge_interval_p50_seconds": best_240.merge_interval_p50_seconds,
                 "merge_interval_p95_seconds": best_240.merge_interval_p95_seconds,
                 "rel_error_pct": best_240.rel_error * 100.0,
                 "standard_score_pct": best_240.standard_score * 100.0,
@@ -766,6 +893,7 @@ def _write_metadata_file(
                 "modeled_hours": best_480.modeled_hours,
                 "total_arrivals": best_480.total_arrivals,
                 "rebase_per_merge": best_480.rebase_per_merge,
+                "merge_interval_p50_seconds": best_480.merge_interval_p50_seconds,
                 "merge_interval_p95_seconds": best_480.merge_interval_p95_seconds,
                 "merged": best_480.merged,
                 "rel_error_pct": best_480.rel_error * 100.0,
@@ -778,11 +906,26 @@ def _write_metadata_file(
                 },
             },
             "outputs": {
-                "scenario_out": str(final_scenario_path),
-                "scenario_copy": str(scenario_copy_path),
+                "selected_scenario_out": (
+                    str(selected_scenario_path) if selected_scenario_path else None
+                ),
+                "selected_scenario_copy": (
+                    str(selected_scenario_copy_path)
+                    if selected_scenario_copy_path
+                    else None
+                ),
+                "rejected_scenario_out": (
+                    str(rejected_scenario_path) if rejected_scenario_path else None
+                ),
                 "grid_csv": str(grid_csv_path),
                 "validation_csv": str(validation_csv_path),
             },
+        },
+        "decision": {
+            "status": decision_status,
+            "reason_codes": decision_reason_codes,
+            "gates": decision_gates,
+            "thresholds_pct": decision_thresholds,
         },
     }
     (out_dir / "metadata.json").write_text(
@@ -811,15 +954,20 @@ def main() -> None:
         run_out_dir = ROOT / "reports" / "calibration" / timestamp
     run_out_dir.mkdir(parents=True, exist_ok=True)
     target_dimensions = _build_target_dimensions(stats)
+    dimension_weights = DIMENSION_WEIGHT_PROFILES[args.dimension_profile]
+    target_anchor = _resolve_target_anchor(args.dimension_profile, args.target_anchor)
+    target_anchor_dimension = TARGET_ANCHOR_TO_DIMENSION[target_anchor]
+    derived_target_mph = target_dimensions.get(target_anchor_dimension, 0.0)
     target_mph = (
         args.target_mph
         if args.target_mph is not None
-        else target_dimensions.get("merge_per_hour_24h", 0.0)
+        else derived_target_mph
     )
-    if target_mph > 0:
-        target_dimensions["merge_per_hour_24h"] = target_mph
+    if target_mph > 0 and target_anchor_dimension in target_dimensions:
+        target_dimensions[target_anchor_dimension] = target_mph
     throughput_tolerance = args.tolerance_pct / 100.0
     score_tolerance = args.score_tolerance_pct / 100.0
+    max_dimension_tolerance = args.max_dimension_error_pct / 100.0
 
     if args.tick_seconds_candidates.strip():
         tick_candidates = _parse_csv_ints(args.tick_seconds_candidates)
@@ -855,17 +1003,30 @@ def main() -> None:
     )
     _status(f"target_mph={target_mph:.3f}")
     _status(
+        "target anchor:"
+        f" {target_anchor} ({target_anchor_dimension})"
+        f" derived={derived_target_mph:.3f}"
+        + (
+            f" overridden={target_mph:.3f}"
+            if args.target_mph is not None
+            else ""
+        )
+    )
+    _status(
         "target dimensions:"
         f" active={target_dimensions.get('merge_per_hour_active_hours', 0.0):.3f}"
         f" peak8={target_dimensions.get('merge_per_hour_peak8', 0.0):.3f}"
         f" peak8_p90={target_dimensions.get('merge_per_hour_peak8_p90', 0.0):.3f}"
+        f" peak/offpeak={target_dimensions.get('merge_peak_offpeak_ratio', 0.0):.3f}"
         f" rebase/merge={target_dimensions.get('rebase_per_merge_global', 0.0):.3f}"
+        f" merge_p50_s={target_dimensions.get('merge_interval_seconds_p50', 0.0):.1f}"
         f" merge_p95_s={target_dimensions.get('merge_interval_seconds_p95', 0.0):.1f}"
     )
+    _status(f"dimension profile={args.dimension_profile}")
     _status(f"run out dir={run_out_dir}")
     _status(
         f"grid: ticks={tick_candidates}, arrival_skew={arrival_candidates},"
-        f" queue_depth={depth_candidates}"
+        f" queue_depth={depth_candidates} (CI: fixed real distribution)"
     )
     _status(
         f"candidates={total_candidates}, tune_cycles={tune_cycles},"
@@ -878,6 +1039,7 @@ def main() -> None:
         "tolerances:"
         f" throughput<={args.tolerance_pct:.2f}%"
         f" score<={args.score_tolerance_pct:.2f}%"
+        f" max_dim<={args.max_dimension_error_pct:.2f}%"
     )
 
     best: CandidateResult | None = None
@@ -895,7 +1057,8 @@ def main() -> None:
                     idx += 1
                     candidate_start = perf_counter()
                     scenario_path = temp_dir / (
-                        f"cand-{idx}-t{tick_seconds}-a{arrival_skew}-q{depth}.yaml"
+                        f"cand-{idx}-t{tick_seconds}-a{arrival_skew}"
+                        f"-q{depth}.yaml"
                     )
                     _status(
                         f"[{idx:02d}/{total_candidates}] candidate start:"
@@ -903,22 +1066,30 @@ def main() -> None:
                         f" depth={depth:.2f}"
                     )
                     _status(
-                        f"[{idx:02d}] generating scenario -> {scenario_path.name}"
+                        f"[{idx:02d}] generating scenario"
+                        f" -> {scenario_path.name}"
                     )
                     scenario_dict = build_scenario_dict(
                         stats=stats,
                         project_name=args.project,
-                        scenario_name=f"Calib candidate {idx} ({policy})",
+                        scenario_name=(
+                            f"Calib candidate {idx} ({policy})"
+                        ),
                         window_ticks=scenario_window_ticks,
                         seed=args.seed,
                         tick_seconds_override=tick_seconds,
                         arrival_skew=arrival_skew,
                         queue_depth_scale=depth,
                     )
-                    scenario_path.write_text(yaml.safe_dump(scenario_dict, sort_keys=False))
+                    scenario_path.write_text(
+                        yaml.safe_dump(scenario_dict, sort_keys=False)
+                    )
                     _status(f"[{idx:02d}] scenario generated")
 
-                    _status(f"[{idx:02d}] running {policy} tuning simulation")
+                    _status(
+                        f"[{idx:02d}] running {policy} tuning"
+                        " simulation"
+                    )
                     run_metrics, port = _run_policy_with_retry(
                         policy=policy,
                         scenario_path=scenario_path,
@@ -930,10 +1101,17 @@ def main() -> None:
                     )
                     mph = float(run_metrics["throughput_mph"])
                     merged = int(run_metrics["merged"])
-                    rel_err = abs(mph - target_mph) / target_mph if target_mph > 0 else 0.0
-                    standard_score, max_dim_error, dim_errors = _score_metrics(
-                        run_metrics=run_metrics,
-                        target_dimensions=target_dimensions,
+                    rel_err = (
+                        abs(mph - target_mph) / target_mph
+                        if target_mph > 0
+                        else 0.0
+                    )
+                    standard_score, max_dim_error, dim_errors = (
+                        _score_metrics(
+                            run_metrics=run_metrics,
+                            target_dimensions=target_dimensions,
+                            dimension_weights=dimension_weights,
+                        )
                     )
                     ext_score = _extended_score(
                         standard_score=standard_score,
@@ -951,8 +1129,12 @@ def main() -> None:
                         arrival_skew=arrival_skew,
                         queue_depth_scale=depth,
                         throughput_mph=mph,
-                        throughput_active_mph=float(run_metrics["throughput_active_mph"]),
-                        throughput_peak8_mph=float(run_metrics["throughput_peak8_mph"]),
+                        throughput_active_mph=float(
+                            run_metrics["throughput_active_mph"]
+                        ),
+                        throughput_peak8_mph=float(
+                            run_metrics["throughput_peak8_mph"]
+                        ),
                         throughput_peak8_p90_mph=float(
                             run_metrics["throughput_peak8_p90_mph"]
                         ),
@@ -962,10 +1144,21 @@ def main() -> None:
                         throughput_offpeak_mph=float(
                             run_metrics["throughput_offpeak_mph"]
                         ),
-                        peak_offpeak_ratio=float(run_metrics["peak_offpeak_ratio"]),
-                        modeled_hours=float(run_metrics["modeled_hours"]),
-                        total_arrivals=float(run_metrics["total_arrivals"]),
-                        rebase_per_merge=float(run_metrics["rebase_per_merge"]),
+                        peak_offpeak_ratio=float(
+                            run_metrics["peak_offpeak_ratio"]
+                        ),
+                        modeled_hours=float(
+                            run_metrics["modeled_hours"]
+                        ),
+                        total_arrivals=float(
+                            run_metrics["total_arrivals"]
+                        ),
+                        rebase_per_merge=float(
+                            run_metrics["rebase_per_merge"]
+                        ),
+                        merge_interval_p50_seconds=float(
+                            run_metrics["merge_interval_p50_seconds"]
+                        ),
                         merge_interval_p95_seconds=float(
                             run_metrics["merge_interval_p95_seconds"]
                         ),
@@ -982,8 +1175,10 @@ def main() -> None:
                     if best is None or result.score < best.score:
                         best = result
                         _status(
-                            f"[{idx:02d}] NEW BEST at {tune_cycles} cycles:"
-                            f" mph={mph:.3f}, err={rel_err*100:.2f}%"
+                            f"[{idx:02d}] NEW BEST at"
+                            f" {tune_cycles} cycles:"
+                            f" mph={mph:.3f},"
+                            f" err={rel_err*100:.2f}%"
                             f" std={standard_score*100:.2f}%"
                             f" ext={ext_score*100:.2f}%"
                             f" max_dim={max_dim_error*100:.2f}%"
@@ -995,7 +1190,8 @@ def main() -> None:
                     _status(
                         f"[{idx:02d}] done: tick={tick_seconds:>3}"
                         f" arrival={arrival_skew:.2f}"
-                        f" depth={depth:.2f} -> mph={mph:.3f} merged={merged}"
+                        f" depth={depth:.2f}"
+                        f" -> mph={mph:.3f} merged={merged}"
                         f" err={rel_err*100:.2f}%"
                         f" std={standard_score*100:.2f}%"
                         f" ext={ext_score*100:.2f}%"
@@ -1008,8 +1204,8 @@ def main() -> None:
                         and ranking_score <= score_tolerance
                     ):
                         _status(
-                            "tuning tolerance hit at 240-cycle pass;"
-                            " stopping grid search early"
+                            "tuning tolerance hit at 240-cycle"
+                            " pass; stopping grid search early"
                         )
                         break
                 if (
@@ -1056,7 +1252,8 @@ def main() -> None:
             val_start = perf_counter()
             _status(
                 f"[val {i}/{len(to_validate)}] start: tick={cand.tick_seconds},"
-                f" arrival={cand.arrival_skew:.2f}, depth={cand.queue_depth_scale:.2f}"
+                f" arrival={cand.arrival_skew:.2f},"
+                f" depth={cand.queue_depth_scale:.2f}"
             )
             val_run_metrics, port = _run_policy_with_retry(
                 policy=policy,
@@ -1073,6 +1270,7 @@ def main() -> None:
             v_std_score, v_max_dim_error, v_dim_errors = _score_metrics(
                 run_metrics=val_run_metrics,
                 target_dimensions=target_dimensions,
+                dimension_weights=dimension_weights,
             )
             v_ext_score = _extended_score(
                 standard_score=v_std_score,
@@ -1106,6 +1304,9 @@ def main() -> None:
                     modeled_hours=float(val_run_metrics["modeled_hours"]),
                     total_arrivals=float(val_run_metrics["total_arrivals"]),
                     rebase_per_merge=float(val_run_metrics["rebase_per_merge"]),
+                    merge_interval_p50_seconds=float(
+                        val_run_metrics["merge_interval_p50_seconds"]
+                    ),
                     merge_interval_p95_seconds=float(
                         val_run_metrics["merge_interval_p95_seconds"]
                     ),
@@ -1131,7 +1332,31 @@ def main() -> None:
                 f" elapsed={_fmt_seconds(elapsed)}"
             )
 
-        best_validation = min(validations, key=lambda x: x.score)
+        accepted_validations = [
+            v
+            for v in validations
+            if _evaluate_gate_results(
+                rel_error=v.rel_error,
+                ranking_score=v.score,
+                max_dimension_error=v.max_dimension_error,
+                throughput_tolerance=throughput_tolerance,
+                score_tolerance=score_tolerance,
+                max_dimension_tolerance=max_dimension_tolerance,
+            )["accepted"]
+        ]
+        pool = accepted_validations if accepted_validations else validations
+        best_validation = min(pool, key=lambda x: x.score)
+        if accepted_validations:
+            _status(
+                f"{len(accepted_validations)}/{len(validations)}"
+                " validation candidates pass all gates; selecting best among"
+                " accepted"
+            )
+        else:
+            _status(
+                "no validation candidates pass all gates; selecting best"
+                " overall"
+            )
         final_path = (
             Path(args.scenario_out).resolve()
             if args.scenario_out
@@ -1154,6 +1379,14 @@ def main() -> None:
         best_480 = best_validation
         grid_rows: list[dict[str, int | float | str]] = []
         for i, cand in enumerate(attempts, start=1):
+            gate_results = _evaluate_gate_results(
+                rel_error=cand.rel_error,
+                ranking_score=cand.score,
+                max_dimension_error=cand.max_dimension_error,
+                throughput_tolerance=throughput_tolerance,
+                score_tolerance=score_tolerance,
+                max_dimension_tolerance=max_dimension_tolerance,
+            )
             grid_rows.append(
                 {
                     "phase": "tune",
@@ -1172,6 +1405,7 @@ def main() -> None:
                     "modeled_hours": cand.modeled_hours,
                     "total_arrivals": cand.total_arrivals,
                     "rebase_per_merge": cand.rebase_per_merge,
+                    "merge_interval_p50_seconds": cand.merge_interval_p50_seconds,
                     "merge_interval_p95_seconds": cand.merge_interval_p95_seconds,
                     "merged": cand.merged,
                     "rel_error_pct": cand.rel_error * 100.0,
@@ -1194,6 +1428,10 @@ def main() -> None:
                     ),
                     "cycles": tune_cycles,
                     "rank_score": args.rank_score,
+                    "throughput_gate_pass": int(gate_results["throughput_pass"]),
+                    "score_gate_pass": int(gate_results["score_pass"]),
+                    "max_dimension_gate_pass": int(gate_results["max_dimension_pass"]),
+                    "accepted_by_gates": int(gate_results["accepted"]),
                     "is_best_240": int(cand is best_240),
                 }
             )
@@ -1216,6 +1454,7 @@ def main() -> None:
                 "modeled_hours",
                 "total_arrivals",
                 "rebase_per_merge",
+                "merge_interval_p50_seconds",
                 "merge_interval_p95_seconds",
                 "merged",
                 "rel_error_pct",
@@ -1229,6 +1468,10 @@ def main() -> None:
                 "target_dimensions_json",
                 "cycles",
                 "rank_score",
+                "throughput_gate_pass",
+                "score_gate_pass",
+                "max_dimension_gate_pass",
+                "accepted_by_gates",
                 "is_best_240",
             ],
             grid_rows,
@@ -1237,6 +1480,14 @@ def main() -> None:
         validation_rows: list[dict[str, int | float | str]] = []
         sorted_validations = sorted(validations, key=lambda x: x.score)
         for rank, val in enumerate(sorted_validations, start=1):
+            gate_results = _evaluate_gate_results(
+                rel_error=val.rel_error,
+                ranking_score=val.score,
+                max_dimension_error=val.max_dimension_error,
+                throughput_tolerance=throughput_tolerance,
+                score_tolerance=score_tolerance,
+                max_dimension_tolerance=max_dimension_tolerance,
+            )
             validation_rows.append(
                 {
                     "phase": "validate",
@@ -1255,6 +1506,7 @@ def main() -> None:
                     "modeled_hours": val.modeled_hours,
                     "total_arrivals": val.total_arrivals,
                     "rebase_per_merge": val.rebase_per_merge,
+                    "merge_interval_p50_seconds": val.merge_interval_p50_seconds,
                     "merge_interval_p95_seconds": val.merge_interval_p95_seconds,
                     "merged": val.merged,
                     "rel_error_pct": val.rel_error * 100.0,
@@ -1277,6 +1529,10 @@ def main() -> None:
                     ),
                     "cycles": validate_cycles,
                     "rank_score": args.rank_score,
+                    "throughput_gate_pass": int(gate_results["throughput_pass"]),
+                    "score_gate_pass": int(gate_results["score_pass"]),
+                    "max_dimension_gate_pass": int(gate_results["max_dimension_pass"]),
+                    "accepted_by_gates": int(gate_results["accepted"]),
                     "source_240_rel_error_pct": val.candidate.rel_error * 100.0,
                     "source_240_score_pct": val.candidate.score * 100.0,
                     "is_best_480": int(val is best_480),
@@ -1301,6 +1557,7 @@ def main() -> None:
                 "modeled_hours",
                 "total_arrivals",
                 "rebase_per_merge",
+                "merge_interval_p50_seconds",
                 "merge_interval_p95_seconds",
                 "merged",
                 "rel_error_pct",
@@ -1314,6 +1571,10 @@ def main() -> None:
                 "target_dimensions_json",
                 "cycles",
                 "rank_score",
+                "throughput_gate_pass",
+                "score_gate_pass",
+                "max_dimension_gate_pass",
+                "accepted_by_gates",
                 "source_240_rel_error_pct",
                 "source_240_score_pct",
                 "is_best_480",
@@ -1321,14 +1582,45 @@ def main() -> None:
             validation_rows,
         )
 
-        _phase("Final Selection")
-        _status(f"writing selected scenario -> {final_path}")
-        final_path.write_text(best_validation.candidate.scenario_path.read_text())
-        scenario_copy_path = run_out_dir / "selected-scenario.yaml"
-        scenario_copy_path.write_text(best_validation.candidate.scenario_path.read_text())
+        final_gate_results = _evaluate_gate_results(
+            rel_error=best_validation.rel_error,
+            ranking_score=best_validation.score,
+            max_dimension_error=best_validation.max_dimension_error,
+            throughput_tolerance=throughput_tolerance,
+            score_tolerance=score_tolerance,
+            max_dimension_tolerance=max_dimension_tolerance,
+        )
+        decision_reason_codes = _decision_reason_codes(final_gate_results)
+        decision_status = "accepted" if final_gate_results["accepted"] else "rejected"
+        decision_thresholds = {
+            "throughput_rel_error_pct": args.tolerance_pct,
+            "rank_score_pct": args.score_tolerance_pct,
+            "max_dimension_error_pct": args.max_dimension_error_pct,
+        }
+
+        _phase("Final Decision")
+        selected_scenario_path: Path | None = None
+        selected_scenario_copy_path: Path | None = None
+        rejected_scenario_path: Path | None = None
+        scenario_content = best_validation.candidate.scenario_path.read_text()
+        if final_gate_results["accepted"]:
+            _status(f"writing selected scenario -> {final_path}")
+            final_path.write_text(scenario_content)
+            selected_scenario_path = final_path
+            selected_scenario_copy_path = run_out_dir / "selected-scenario.yaml"
+            selected_scenario_copy_path.write_text(scenario_content)
+            _status(f"scenario copy -> {selected_scenario_copy_path}")
+        else:
+            rejected_scenario_path = run_out_dir / "rejected-scenario.yaml"
+            rejected_scenario_path.write_text(scenario_content)
+            _status(f"run rejected; writing rejected scenario -> {rejected_scenario_path}")
+            if args.scenario_out:
+                _status(
+                    "selected scenario output not written due to failed acceptance gates:"
+                    f" {final_path}"
+                )
         _status(f"grid csv -> {grid_out_path}")
         _status(f"validation csv -> {validation_out_path}")
-        _status(f"scenario copy -> {scenario_copy_path}")
 
         _status(f"best {validate_cycles}-cycle candidate:")
         _status(
@@ -1347,32 +1639,42 @@ def main() -> None:
             f" | rank_score={best_validation.score*100:.2f}% ({args.rank_score})"
         )
         _status(f"dimension errors: {_format_dim_errors(best_validation.dimension_errors)}")
-        throughput_pass = best_validation.rel_error <= throughput_tolerance
-        score_pass = best_validation.score <= score_tolerance
         _status(
             "PASS"
-            if throughput_pass and score_pass
+            if final_gate_results["accepted"]
             else "MISS"
         )
         _status(
             "gate results:"
-            f" throughput={'PASS' if throughput_pass else 'MISS'}"
+            f" throughput={'PASS' if final_gate_results['throughput_pass'] else 'MISS'}"
             f" ({best_validation.rel_error*100:.2f}% <= {args.tolerance_pct:.2f}%)"
-            f" | rank_score={'PASS' if score_pass else 'MISS'}"
+            f" | rank_score={'PASS' if final_gate_results['score_pass'] else 'MISS'}"
             f" ({best_validation.score*100:.2f}% <= {args.score_tolerance_pct:.2f}%)"
+            f" | max_dim={'PASS' if final_gate_results['max_dimension_pass'] else 'MISS'}"
+            f" ({best_validation.max_dimension_error*100:.2f}% <= {args.max_dimension_error_pct:.2f}%)"
         )
+        _status(f"decision={decision_status} reasons={','.join(decision_reason_codes)}")
         _write_metadata_file(
             out_dir=run_out_dir,
             args=args,
+            dimension_profile=args.dimension_profile,
+            dimension_weights=dimension_weights,
+            target_anchor=target_anchor,
+            target_anchor_dimension=target_anchor_dimension,
             policy=policy,
             target_mph=target_mph,
             target_dimensions=target_dimensions,
             best_240=best_240,
             best_480=best_480,
+            decision_status=decision_status,
+            decision_reason_codes=decision_reason_codes,
+            decision_gates=final_gate_results,
+            decision_thresholds=decision_thresholds,
             grid_rows=grid_rows,
             validation_rows=validation_rows,
-            final_scenario_path=final_path,
-            scenario_copy_path=scenario_copy_path,
+            selected_scenario_path=selected_scenario_path,
+            selected_scenario_copy_path=selected_scenario_copy_path,
+            rejected_scenario_path=rejected_scenario_path,
             grid_csv_path=grid_out_path,
             validation_csv_path=validation_out_path,
             scenario_window_ticks=scenario_window_ticks,
@@ -1381,6 +1683,8 @@ def main() -> None:
         )
         _status(f"metadata -> {run_out_dir / 'metadata.json'}")
         _status(f"total elapsed={_fmt_seconds(perf_counter() - global_start)}")
+        if not final_gate_results["accepted"]:
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":

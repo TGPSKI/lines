@@ -713,6 +713,10 @@ const btnBrowseFiles = document.getElementById("btnBrowseFiles");
 const btnBrowseRunFolder = document.getElementById("btnBrowseRunFolder");
 const btnUnload = document.getElementById("btnUnload");
 const btnLoadSelectedRun = document.getElementById("btnLoadSelectedRun");
+const btnRefreshRuns = document.getElementById("btnRefreshRuns");
+const runSearchInput = document.getElementById("runSearchInput");
+const runSearchSuggestions = document.getElementById("runSearchSuggestions");
+const loadedFileCount = document.getElementById("loadedFileCount");
 const runCategorySelect = document.getElementById("runCategorySelect");
 const runMetaKeySelect = document.getElementById("runMetaKeySelect");
 const runMetaValueSelect = document.getElementById("runMetaValueSelect");
@@ -722,6 +726,8 @@ const runMetadataView = document.getElementById("runMetadataView");
 const runOutputFiles = document.getElementById("runOutputFiles");
 const runBrowserStatus = document.getElementById("runBrowserStatus");
 let runCatalog = [];
+let lastRunDirFiles = null;
+let runSearchActiveSuggestion = -1;
 const selectedRunKeys = new Set();
 let activeRunKey = null;
 let runSortBy = "timestamp";
@@ -853,6 +859,7 @@ function expandCalibrationLeafRuns(rawEntry) {
 
 async function indexRunDirectory(filesLike) {
   const files = Array.from(filesLike || []);
+  if (files.length) lastRunDirFiles = filesLike;
   const groupedRuns = new Map();
   files.forEach(file => {
     const rel = file.webkitRelativePath || file.name;
@@ -905,21 +912,38 @@ async function indexRunDirectory(filesLike) {
   renderRunBrowserControls();
 }
 
-function getFilteredRuns() {
-  const category = runCategorySelect.value;
-  const metaKey = runMetaKeySelect.value;
-  const metaValue = runMetaValueSelect.value;
-  const runName = runNameFilterSelect.value;
-  const filtered = runCatalog.filter(run => {
-    if (category && run.category !== category) return false;
-    if (runName && run.run !== runName) return false;
-    if (metaKey) {
-      const v = run.metadataFlat[metaKey];
-      if (v == null) return false;
-      if (metaValue && v !== metaValue) return false;
+function parseSearchTerms(query) {
+  const terms = [];
+  const parts = query.split(/\s+/).filter(Boolean);
+  for (const part of parts) {
+    const eqIdx = part.indexOf("=");
+    if (eqIdx > 0) {
+      terms.push({ key: part.slice(0, eqIdx).toLowerCase(), value: part.slice(eqIdx + 1).toLowerCase() });
+    } else {
+      terms.push({ key: null, value: part.toLowerCase() });
     }
-    return true;
+  }
+  return terms;
+}
+
+function matchRunToTerms(run, terms) {
+  if (!terms.length) return true;
+  const blob = [run.category, run.run, ...Object.entries(run.metadataFlat).map(([k, v]) => `${k}=${v}`)].join(" ").toLowerCase();
+  return terms.every(term => {
+    if (term.key === "category") return run.category.toLowerCase().includes(term.value);
+    if (term.key) {
+      return Object.entries(run.metadataFlat).some(([k, v]) =>
+        k.toLowerCase().includes(term.key) && String(v).toLowerCase().includes(term.value)
+      );
+    }
+    return blob.includes(term.value);
   });
+}
+
+function getFilteredRuns() {
+  const query = runSearchInput ? runSearchInput.value.trim() : "";
+  const terms = parseSearchTerms(query);
+  const filtered = runCatalog.filter(run => matchRunToTerms(run, terms));
   return filtered.sort(compareRunsBySort);
 }
 
@@ -1024,6 +1048,26 @@ function tailPath(value) {
   return parts.length ? parts[parts.length - 1] : normalized;
 }
 
+function _findCalibrationWinnerLabel(scenarioPath) {
+  if (!scenarioPath || !runCatalog.length) return "";
+  const scenarioFile = scenarioPath.replace(/\\/g, "/").split("/").pop() || "";
+  if (!scenarioFile) return "";
+  const stem = scenarioFile.replace(/\.ya?ml$/i, "");
+  for (const r of runCatalog) {
+    if (r.category !== "calibration") continue;
+    const flat = r.metadataFlat || {};
+    const decision = flat["context.decision_status"] || flat["decision.status"] || "";
+    if (decision !== "accepted") continue;
+    const bestSkew = flat["context.best_480.arrival_skew"] || "";
+    const bestDepth = flat["context.best_480.queue_depth_scale"] || "";
+    if (bestSkew && stem.includes(`a${bestSkew}`) && bestDepth && stem.includes(`q${bestDepth}`)) {
+      const label = r.run || r.key || "";
+      return label.replace(/^golden-proof-/, "").replace(/-adaptive-/, " ");
+    }
+  }
+  return "";
+}
+
 function summarizeRunBubbles(run) {
   const flat = run.metadataFlat || {};
   const bubbles = [];
@@ -1048,7 +1092,11 @@ function summarizeRunBubbles(run) {
     const policyCount = countListish(policies);
     if (policyCount <= 1) push("policy", previewListish(policies, 1), "cmp-primary");
     else push("policies", `${policyCount} (${previewListish(policies, 2)})`, "cmp-primary");
-    push("scenario", tailPath(firstMetaValue(flat, ["context.scenario", "context.base_scenario"])), "cmp-secondary");
+    const scenarioPath = firstMetaValue(flat, ["context.scenario", "context.base_scenario"]) || "";
+    const scenarioTail = tailPath(scenarioPath);
+    const winnerLabel = _findCalibrationWinnerLabel(scenarioPath);
+    if (winnerLabel) push("WINNER", winnerLabel, "strong");
+    push("scenario", scenarioTail, "cmp-secondary");
     push("cycles", flat["context.cycles"]);
     push("limit", flat["context.limit"]);
     push("ticks", flat["context.ticks_per_cycle"]);
@@ -1190,7 +1238,7 @@ function buildRunMetadataSummary(run, loadableCount) {
       indexed_files: Array.isArray(run?.files) ? run.files.length : 0,
       loadable_files: loadableCount,
     },
-    metadata_keys: Object.keys(flat).length,
+    metadata: flat,
   };
   return pruneEmpty(summary) || {};
 }
@@ -1198,7 +1246,9 @@ function buildRunMetadataSummary(run, loadableCount) {
 function updateRunDetailPane() {
   const selected = getSelectedRunEntries();
   const run = getRunByKey(activeRunKey) || selected[0] || null;
+  const contentEl = document.getElementById("runMetadataContent");
   if (!run) {
+    if (contentEl) contentEl.innerHTML = "";
     runMetadataView.textContent = "{}";
     runOutputFiles.textContent = "";
     return;
@@ -1206,6 +1256,9 @@ function updateRunDetailPane() {
   const loadable = pickLoadFilesForRun(run);
   const compactSummary = buildRunMetadataSummary(run, loadable.length);
   runMetadataView.textContent = JSON.stringify(compactSummary, null, 2);
+
+  if (contentEl) contentEl.innerHTML = _renderStructuredMetadata(run, loadable);
+
   const preview = loadable
     .slice(0, 8)
     .map(f => `<code>${mqEscapeHtml(f.webkitRelativePath || f.name)}</code>`)
@@ -1214,6 +1267,75 @@ function updateRunDetailPane() {
     ? `Loadable outputs (${loadable.length}): ${preview}${loadable.length > 8 ? ", ..." : ""}`
     : "No loadable NDJSON/CSV/YAML outputs for this run.";
 }
+
+function _renderStructuredMetadata(run, loadable) {
+  const flat = run.metadataFlat || {};
+  const html = [];
+
+  const decision = flat["context.decision_status"] || flat["decision.status"] || "";
+  if (decision) {
+    const cls = decision === "accepted" ? "accepted" : "rejected";
+    html.push(`<div class="meta-decision ${cls}">${decision.toUpperCase()}</div>`);
+  }
+
+  const groups = {};
+  for (const [key, val] of Object.entries(flat)) {
+    if (val == null || val === "") continue;
+    const dotIdx = key.indexOf(".");
+    const group = dotIdx > 0 ? key.slice(0, dotIdx) : "info";
+    const subKey = dotIdx > 0 ? key.slice(dotIdx + 1) : key;
+    if (!groups[group]) groups[group] = [];
+    groups[group].push([subKey, val]);
+  }
+
+  const groupOrder = ["decision", "context", "custom_metadata", "info"];
+  const sortedGroups = Object.keys(groups).sort((a, b) => {
+    const ai = groupOrder.indexOf(a), bi = groupOrder.indexOf(b);
+    return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+  });
+
+  for (const group of sortedGroups) {
+    const entries = groups[group];
+    html.push(`<div class="meta-section"><div class="meta-section-title">${mqEscapeHtml(group)}</div>`);
+    for (const [key, val] of entries) {
+      let valClass = "";
+      const sv = String(val).toLowerCase();
+      if (sv === "true" || sv === "accepted") valClass = "good";
+      else if (sv === "false" || sv === "rejected") valClass = "error";
+      else if (sv.includes("error") || sv.includes("fail")) valClass = "warn";
+      const displayVal = String(val).length > 60 ? String(val).slice(0, 57) + "..." : String(val);
+      const fullKey = group === "info" ? key : `${group}.${key}`;
+      html.push(`<div class="meta-row meta-clickable" data-meta-key="${mqEscapeHtml(fullKey)}" data-meta-val="${mqEscapeHtml(String(val))}"><span class="meta-key" title="${mqEscapeHtml(key)}">${mqEscapeHtml(key)}</span><span class="meta-val ${valClass}" title="${mqEscapeHtml(String(val))}">${mqEscapeHtml(displayVal)}</span></div>`);
+    }
+    html.push("</div>");
+  }
+
+  return html.join("");
+}
+
+(function initMetaToggle() {
+  const toggle = document.getElementById("metaToggleRaw");
+  const pre = document.getElementById("runMetadataView");
+  const content = document.getElementById("runMetadataContent");
+  if (!toggle || !pre || !content) return;
+  let showRaw = false;
+  toggle.addEventListener("click", () => {
+    showRaw = !showRaw;
+    pre.classList.toggle("visible", showRaw);
+    content.style.display = showRaw ? "none" : "";
+    toggle.textContent = showRaw ? "Structured" : "JSON";
+  });
+  content.addEventListener("click", e => {
+    const row = e.target.closest(".meta-clickable");
+    if (!row) return;
+    const key = row.dataset.metaKey || "";
+    const val = row.dataset.metaVal || "";
+    if (!key || !runSearchInput) return;
+    runSearchInput.value = `${key}=${val}`;
+    runSearchInput.dispatchEvent(new Event("input"));
+    runSearchInput.focus();
+  });
+})();
 
 function renderRunChips() {
   const filtered = getFilteredRuns();
@@ -1281,10 +1403,95 @@ runDirInput.addEventListener("change", () => { if (runDirInput.files) indexRunDi
 btnBrowseFiles.addEventListener("click", () => fileInput.click());
 btnBrowseRunFolder.addEventListener("click", () => runDirInput.click());
 if (btnUnload) btnUnload.addEventListener("click", unloadAllData);
-runCategorySelect.addEventListener("change", () => renderRunChips());
-runMetaKeySelect.addEventListener("change", () => { renderMetaValueOptions(); renderRunChips(); });
-runMetaValueSelect.addEventListener("change", () => renderRunChips());
-runNameFilterSelect.addEventListener("change", () => renderRunChips());
+if (btnRefreshRuns) btnRefreshRuns.addEventListener("click", () => {
+  if (lastRunDirFiles) { indexRunDirectory(lastRunDirFiles); runBrowserStatus.textContent = "Refreshed folder index."; }
+  else { runBrowserStatus.textContent = "No folder loaded to refresh. Import a folder first."; }
+});
+
+function buildSearchSuggestions(query) {
+  const suggestions = [];
+  if (!runCatalog.length) return suggestions;
+  const lower = query.toLowerCase();
+  const eqIdx = lower.indexOf("=");
+  if (eqIdx < 0) {
+    const allKeys = new Set(["category"]);
+    runCatalog.forEach(r => Object.keys(r.metadataFlat).forEach(k => allKeys.add(k)));
+    const cats = [...new Set(runCatalog.map(r => r.category))];
+    cats.filter(c => c.toLowerCase().includes(lower)).forEach(c => {
+      suggestions.push({ display: `category=${c}`, insert: `category=${c} `, keyPart: "category", valPart: c });
+    });
+    [...allKeys].sort().filter(k => k.toLowerCase().includes(lower)).slice(0, 12).forEach(k => {
+      suggestions.push({ display: `${k}=`, insert: `${k}=`, keyPart: k, valPart: "" });
+    });
+  } else {
+    const keyPart = lower.slice(0, eqIdx);
+    const valPart = lower.slice(eqIdx + 1);
+    const valuesSet = new Set();
+    runCatalog.forEach(run => {
+      if (keyPart === "category") {
+        if (run.category.toLowerCase().includes(valPart)) valuesSet.add(run.category);
+      } else {
+        Object.entries(run.metadataFlat).forEach(([k, v]) => {
+          if (k.toLowerCase().includes(keyPart) && String(v).toLowerCase().includes(valPart)) valuesSet.add(`${k}=${v}`);
+        });
+      }
+    });
+    [...valuesSet].sort().slice(0, 15).forEach(v => {
+      const fullInsert = keyPart === "category" ? `category=${v} ` : `${v} `;
+      suggestions.push({ display: keyPart === "category" ? `category=${v}` : v, insert: fullInsert, keyPart, valPart: v });
+    });
+  }
+  return suggestions.slice(0, 15);
+}
+
+function renderSearchSuggestions() {
+  if (!runSearchInput || !runSearchSuggestions) return;
+  const raw = runSearchInput.value;
+  const lastSpaceIdx = raw.lastIndexOf(" ");
+  const currentToken = lastSpaceIdx >= 0 ? raw.slice(lastSpaceIdx + 1) : raw;
+  if (!currentToken) { runSearchSuggestions.classList.remove("visible"); return; }
+  const suggestions = buildSearchSuggestions(currentToken);
+  if (!suggestions.length) { runSearchSuggestions.classList.remove("visible"); return; }
+  runSearchActiveSuggestion = -1;
+  runSearchSuggestions.innerHTML = suggestions.map((s, i) => {
+    const eqIdx = s.display.indexOf("=");
+    const keyHtml = eqIdx >= 0 ? `<span class="sg-key">${mqEscapeHtml(s.display.slice(0, eqIdx + 1))}</span><span class="sg-val">${mqEscapeHtml(s.display.slice(eqIdx + 1))}</span>` : `<span class="sg-key">${mqEscapeHtml(s.display)}</span>`;
+    return `<div class="run-search-suggestion" data-idx="${i}" data-insert="${mqEscapeHtml(s.insert)}">${keyHtml}</div>`;
+  }).join("");
+  runSearchSuggestions.classList.add("visible");
+}
+
+function applySearchSuggestion(insertText) {
+  if (!runSearchInput) return;
+  const raw = runSearchInput.value;
+  const lastSpaceIdx = raw.lastIndexOf(" ");
+  const prefix = lastSpaceIdx >= 0 ? raw.slice(0, lastSpaceIdx + 1) : "";
+  runSearchInput.value = prefix + insertText;
+  runSearchSuggestions.classList.remove("visible");
+  renderRunChips();
+  runSearchInput.focus();
+}
+
+if (runSearchInput) {
+  runSearchInput.addEventListener("input", () => { renderSearchSuggestions(); renderRunChips(); });
+  runSearchInput.addEventListener("focus", () => renderSearchSuggestions());
+  runSearchInput.addEventListener("blur", () => setTimeout(() => runSearchSuggestions.classList.remove("visible"), 180));
+  runSearchInput.addEventListener("keydown", e => {
+    const items = runSearchSuggestions.querySelectorAll(".run-search-suggestion");
+    if (e.key === "ArrowDown") { e.preventDefault(); runSearchActiveSuggestion = Math.min(runSearchActiveSuggestion + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle("active", i === runSearchActiveSuggestion)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); runSearchActiveSuggestion = Math.max(runSearchActiveSuggestion - 1, 0); items.forEach((el, i) => el.classList.toggle("active", i === runSearchActiveSuggestion)); }
+    else if ((e.key === "Tab" || e.key === "Enter") && runSearchActiveSuggestion >= 0 && items[runSearchActiveSuggestion]) {
+      e.preventDefault();
+      applySearchSuggestion(items[runSearchActiveSuggestion].getAttribute("data-insert") || "");
+    }
+  });
+}
+if (runSearchSuggestions) {
+  runSearchSuggestions.addEventListener("mousedown", e => {
+    const el = e.target.closest(".run-search-suggestion");
+    if (el) { e.preventDefault(); applySearchSuggestion(el.getAttribute("data-insert") || ""); }
+  });
+}
 
 runChipList.addEventListener("click", e => {
   const sortHeader = e.target.closest(".run-sortable[data-sort-col]");
@@ -1353,12 +1560,47 @@ btnLoadSelectedRun.addEventListener("click", () => {
   loadSelectedRunsFromBrowser();
 });
 document.addEventListener("keydown", e => {
-  if (e.key !== "Enter") return;
   if (!document.getElementById("panelLoad").classList.contains("active")) return;
   if (isTypingTarget(e.target)) return;
-  if (!selectedRunKeys.size) return;
-  e.preventDefault();
-  loadSelectedRunsFromBrowser();
+  if (e.key === "Enter") {
+    if (!selectedRunKeys.size) return;
+    e.preventDefault();
+    loadSelectedRunsFromBrowser();
+    return;
+  }
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const filtered = getFilteredRuns();
+    if (!filtered.length) return;
+    const curIdx = filtered.findIndex(r => r.key === activeRunKey);
+    let nextIdx;
+    if (e.key === "ArrowDown") nextIdx = curIdx < filtered.length - 1 ? curIdx + 1 : 0;
+    else nextIdx = curIdx > 0 ? curIdx - 1 : filtered.length - 1;
+    activeRunKey = filtered[nextIdx].key;
+    renderRunChips();
+    const activeRow = runChipList.querySelector(`.run-row[data-run-key="${CSS.escape(activeRunKey)}"]`);
+    if (activeRow) activeRow.scrollIntoView({ block: "nearest" });
+    return;
+  }
+  if (e.key === " ") {
+    e.preventDefault();
+    if (!activeRunKey) return;
+    const run = getRunByKey(activeRunKey);
+    if (!run) return;
+    if (selectedRunKeys.has(activeRunKey)) {
+      selectedRunKeys.delete(activeRunKey);
+    } else {
+      if (run.category !== "calibration") {
+        Array.from(selectedRunKeys).forEach(k => {
+          const ex = getRunByKey(k);
+          if (ex?.category === run.category) selectedRunKeys.delete(k);
+        });
+      }
+      selectedRunKeys.add(activeRunKey);
+    }
+    renderRunChips();
+    return;
+  }
 });
 
 function enableTabs(tabNames) {
@@ -1437,6 +1679,7 @@ function unloadAllData() {
 
   disableTabs(DATA_TABS);
   renderFileList();
+  updateLoadedCount();
   updateRefreshUiButtonState();
   switchTab("load");
   runBrowserStatus.textContent = "Unloaded all loaded files and metrics. Run browser index is still available.";
@@ -1536,25 +1779,72 @@ function loadFiles(fl, opts = {}) {
 
   Promise.all(tasks).then(() => {
     renderFileList();
+    updateLoadedCount();
     updateRefreshUiButtonState();
     if (ndjsonLoaded || yamlLoaded) {
-      if (filesData.length) switchTab("stats");
+      if (filesData.length) switchTab("simulation");
       else switchTab("simulation");
     }
     else if (csvExpLoaded) switchTab("experiments");
     else if (csvMonteLoaded) switchTab("monteCarlo");
   });
 }
-function renderFileList() {
-  const el = document.getElementById("fileList"); el.innerHTML = "";
-  filesData.forEach((d, i) => { el.innerHTML += `<div class="file-item"><span>📊 ${mqEscapeHtml(d.name)}.ndjson</span></div>`; });
-  loadedScenarioDocs.forEach(s => { el.innerHTML += `<div class="file-item"><span>🧩 ${mqEscapeHtml(s.fileName)} (scenario)</span></div>`; });
-  if (mcData) { el.innerHTML += `<div class="file-item"><span>📈 monte-carlo-summary.csv (${mcData.policies.length} policies, ${mcData.metrics.length} metrics)</span></div>`; }
-  if (expData.discrimination) { el.innerHTML += `<div class="file-item"><span>🧪 discrimination-summary.csv (${expData.discrimination.length} variants)</span></div>`; }
-  if (expData.calibrationGrid.length || expData.calibrationValidation.length || expData.calibrationSummary.length) {
-    el.innerHTML += `<div class="file-item"><span>🧭 calibration csv (${expData.calibrationGrid.length} tune / ${expData.calibrationValidation.length} validation / ${expData.calibrationSummary.length} summary)</span></div>`;
-  }
+function updateLoadedCount() {
+  if (!loadedFileCount) return;
+  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
+  loadedFileCount.textContent = count ? `${count} file${count !== 1 ? "s" : ""}` : "0 files";
 }
+function renderFileList() {
+  const el = document.getElementById("fileList");
+  el.innerHTML = "";
+  const chips = [];
+  filesData.forEach((d, i) => {
+    chips.push(`<span class="file-chip fc-ndjson" data-unload="ndjson" data-idx="${i}" title="Click to unload">${mqEscapeHtml(d.name)}.ndjson<span class="fc-x">\u00d7</span></span>`);
+  });
+  loadedScenarioDocs.forEach((s, i) => {
+    chips.push(`<span class="file-chip fc-scenario" data-unload="scenario" data-idx="${i}" title="Click to unload">${mqEscapeHtml(s.fileName)}<span class="fc-x">\u00d7</span></span>`);
+  });
+  if (mcData) {
+    chips.push(`<span class="file-chip fc-csv" data-unload="mc" title="Click to unload">monte-carlo (${mcData.policies.length}p/${mcData.metrics.length}m)<span class="fc-x">\u00d7</span></span>`);
+  }
+  if (expData.discrimination) {
+    chips.push(`<span class="file-chip fc-csv" data-unload="discrimination" title="Click to unload">discrimination (${expData.discrimination.length})<span class="fc-x">\u00d7</span></span>`);
+  }
+  if (expData.calibrationGrid.length || expData.calibrationValidation.length || expData.calibrationSummary.length) {
+    chips.push(`<span class="file-chip fc-csv" data-unload="calibration" title="Click to unload">calibration (${expData.calibrationGrid.length}t/${expData.calibrationValidation.length}v)<span class="fc-x">\u00d7</span></span>`);
+  }
+  el.innerHTML = chips.join("");
+}
+
+(function initFileChipUnload() {
+  const el = document.getElementById("fileList");
+  if (!el) return;
+  el.addEventListener("click", e => {
+    const chip = e.target.closest(".file-chip");
+    if (!chip) return;
+    const kind = chip.dataset.unload;
+    const idx = parseInt(chip.dataset.idx || "0", 10);
+    if (kind === "ndjson" && idx >= 0 && idx < filesData.length) {
+      filesData.splice(idx, 1);
+      if (activeIndex >= filesData.length) activeIndex = Math.max(0, filesData.length - 1);
+    } else if (kind === "scenario" && idx >= 0 && idx < loadedScenarioDocs.length) {
+      loadedScenarioDocs.splice(idx, 1);
+    } else if (kind === "mc") {
+      mcData = null;
+    } else if (kind === "discrimination") {
+      expData.discrimination = null;
+    } else if (kind === "calibration") {
+      expData.calibrationGrid = [];
+      expData.calibrationValidation = [];
+      expData.calibrationSummary = [];
+    }
+    renderFileList();
+    updateLoadedCount();
+    updateRefreshUiButtonState();
+    const tab = getActiveTabName();
+    renderTabContent(tab);
+  });
+})();
 
 // --- Statistics Tab ---
 let selectedSeries = null; // null = all selected
@@ -2267,22 +2557,20 @@ function renderSimulationTab() {
       <div class="sim-section-title">Scenario Model & Timeline</div>
       <div class="sim-grid compact">${scenarioCards.join("") || `<div class="sim-card full sim-empty">Load a scenario YAML or NDJSON trace to view modeled-time and hourly scenario details.</div>`}</div>
     </div>`,
-    `<div class="sim-section">
-      <div class="sim-section-title calibration">Calibration (Target vs Measured)</div>
-      <div class="sim-grid compact">${calibrationCards.join("") || `<div class="sim-card full sim-empty">No calibration targets loaded.</div>`}</div>
-    </div>`,
-    `<div class="sim-section">
-      <div class="sim-section-title runtime">Per-Policy Runtime (Extended Metrics)</div>
-      <div class="sim-grid runtime">${runtimeCards.join("") || `<div class="sim-card full sim-empty">Load one or more NDJSON policy traces to view extended runtime metrics.</div>`}</div>
-    </div>`,
   ];
+  if (calibrationCards.length || runtimeCards.length) {
+    sectionHtml.push(`<div class="sim-section">
+      <div class="sim-section-title runtime">Performance & Calibration</div>
+      <div class="sim-grid compact">${runtimeCards.join("")}${calibrationCards.join("")}</div>
+    </div>`);
+  }
   if (metadataCards.length) {
     sectionHtml.push(`
       <div class="sim-section">
         <div class="sim-section-title">Run Metadata</div>
         <div class="sim-grid compact">
           <div class="sim-card full">
-              <details class="sim-collapse" open>
+              <details class="sim-collapse">
               <summary>Loaded run metadata context</summary>
               <div class="sim-collapse-body">${metadataCards.join("")}</div>
             </details>
@@ -2482,8 +2770,10 @@ function renderSnapshot() {
   const visible = filesData.filter((_, i) => kanbanVisibleIdxs.has(i));
   const parts = visible.map(d => {
     if (!d.packed) return "";
-    const i = Math.min(t, d.packed.series.open.length - 1);
-    return `<span><b>${d.packed.series.open[i] || 0}</b></span>`;
+    const f = normalizeEventsForAnalysis(d.events);
+    const w = buildKanbanState(d.packed, f, t);
+    const active = w.queue.length;
+    return `<span><b>${active}</b></span>`;
   });
   const f = normalizeEventsForAnalysis(filesData[0]?.events || []);
   const story = buildNarrativeAtTick(f, t);
@@ -3987,3 +4277,34 @@ document.addEventListener("keydown", e => {
 });
 
 // =========================================================================
+// Run Browser splitter: drag to resize list vs detail pane
+(function initRunBrowserSplitter() {
+  const splitter = document.getElementById("runBrowserSplitter");
+  const detail = document.getElementById("runDetailPane");
+  if (!splitter || !detail) return;
+  let dragging = false, startX = 0, startW = 0;
+  splitter.addEventListener("mousedown", e => {
+    e.preventDefault();
+    dragging = true;
+    startX = e.clientX;
+    startW = detail.offsetWidth;
+    splitter.classList.add("dragging");
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  });
+  document.addEventListener("mousemove", e => {
+    if (!dragging) return;
+    const dx = startX - e.clientX;
+    const container = detail.parentElement;
+    const maxW = container ? container.offsetWidth - 100 : window.innerWidth - 200;
+    detail.style.width = Math.max(80, Math.min(maxW, startW + dx)) + "px";
+  });
+  document.addEventListener("mouseup", () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove("dragging");
+    document.body.style.cursor = "";
+    document.body.style.userSelect = "";
+  });
+})();
+

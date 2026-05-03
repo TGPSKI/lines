@@ -378,6 +378,12 @@ Cycle planning and scoring controls:
 - Final output reports separate gates for throughput tolerance
   (`--tolerance-pct`) and ranking-score tolerance (`--score-tolerance-pct`),
   plus per-dimension error breakdowns.
+- Acceptance now includes a max single-dimension guardrail
+  (`--max-dimension-error-pct`, default `60`).
+- If any acceptance gate fails, calibration is marked **rejected**:
+  - `selected-scenario.yaml` is not emitted,
+  - `rejected-scenario.yaml` is written for diagnostics,
+  - the script exits non-zero so CI/automation cannot treat it as success.
 - To force legacy behavior, pass `--cycle-scaling fixed --tune-cycles ... --validate-cycles ...`.
 
 ## Discrimination Pass (policy-agnostic)

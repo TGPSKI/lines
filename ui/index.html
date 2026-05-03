@@ -109,20 +109,38 @@
     #panelKanban .pb-scrub { width: min(360px, 26vw); }
 
     /* Load tab */
-    #panelLoad { gap: 0.6rem; }
-    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.35rem 1rem; text-align: center; color: var(--muted); background: var(--panel); cursor: pointer; max-width: 760px; margin: 0.25rem auto 0.15rem; }
-    .drop-zone:hover { border-color: var(--accent); }
-    .load-actions { display: flex; justify-content: center; gap: 0.5rem; margin: 0 auto 0.8rem; max-width: 500px; flex-wrap: wrap; }
+    #panelLoad { gap: 0.5rem; }
+    .load-toolbar { display: flex; align-items: center; gap: 0.5rem; padding: 0.45rem 0.7rem; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; flex-wrap: wrap; }
+    .load-toolbar-group { display: flex; align-items: center; gap: 0.35rem; }
+    .load-toolbar-title { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-right: 0.1rem; }
+    .load-chip { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.22rem 0.55rem; border-radius: 999px; cursor: pointer; font-size: 0.74rem; white-space: nowrap; transition: background 0.15s; }
+    .load-chip:hover { background: #30363d; border-color: var(--accent); }
+    .load-chip.info { cursor: default; border-color: rgba(88,166,255,0.5); color: #9ecbff; background: rgba(56,139,253,0.1); }
+    .load-chip.danger { border-color: rgba(248,81,73,0.5); }
+    .load-chip.danger:hover { background: rgba(248,81,73,0.15); border-color: #f85149; }
+    .load-toolbar-drop { flex: 1; min-width: 180px; border: 2px dashed var(--border); border-radius: 8px; padding: 0.32rem 0.7rem; text-align: center; color: var(--muted); font-size: 0.72rem; cursor: pointer; transition: border-color 0.15s; }
+    .load-toolbar-drop:hover { border-color: var(--accent); }
+    .load-toolbar-drop code { font-size: 0.68rem; background: rgba(110,118,129,0.15); padding: 0.08rem 0.28rem; border-radius: 3px; }
+    .load-toolbar-loaded { margin-left: auto; }
     .load-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.3rem 0.65rem; border-radius: 6px; cursor: pointer; font-size: 0.78rem; }
     .load-btn:hover { background: #30363d; }
-    .run-browser { width: calc(100vw - 2.2rem); max-width: none; margin: 0 auto; border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 0.95rem 1rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
-    .run-browser h3 { font-size: 0.9rem; margin-bottom: 0.62rem; color: var(--text); }
-    .run-browser .row { display: grid; grid-template-columns: repeat(4, minmax(140px, 1fr)) auto; gap: 0.6rem; align-items: end; margin-bottom: 0.55rem; }
-    .run-browser label { font-size: 0.76rem; color: var(--muted); display: flex; flex-direction: column; gap: 0.2rem; }
-    .run-browser select { background: #0d1117; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.28rem 0.4rem; font-size: 0.75rem; min-width: 150px; }
-    .run-browser .hint { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.55rem; }
-    .run-browser-body { display: grid; grid-template-columns: minmax(0, 2.55fr) minmax(250px, 0.72fr); gap: 0.7rem; min-height: 0; flex: 1; }
-    .run-list-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.45rem; min-height: 0; overflow: auto; }
+    .run-browser { width: calc(100vw - 2.2rem); max-width: none; margin: 0 auto; border: 1px solid var(--border); background: var(--panel); border-radius: 10px; padding: 0.75rem 1rem; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+    .run-browser-header { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.5rem; flex-wrap: wrap; }
+    .run-browser-header h3 { font-size: 0.9rem; color: var(--text); margin: 0; white-space: nowrap; }
+    .run-browser-controls { display: flex; align-items: center; gap: 0.4rem; flex: 1; min-width: 0; }
+    .run-search-wrap { position: relative; flex: 1; min-width: 220px; max-width: 480px; }
+    .run-search-input { width: 100%; background: #0d1117; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 0.3rem 0.5rem; font-size: 0.76rem; font-family: inherit; outline: none; }
+    .run-search-input:focus { border-color: var(--accent); }
+    .run-search-input::placeholder { color: #484f58; }
+    .run-search-suggestions { position: absolute; top: 100%; left: 0; right: 0; z-index: 20; background: #161b22; border: 1px solid var(--border); border-radius: 0 0 6px 6px; max-height: 240px; overflow: auto; display: none; }
+    .run-search-suggestions.visible { display: block; }
+    .run-search-suggestion { padding: 0.3rem 0.5rem; font-size: 0.74rem; cursor: pointer; color: var(--text); }
+    .run-search-suggestion:hover, .run-search-suggestion.active { background: rgba(56,139,253,0.18); }
+    .run-search-suggestion .sg-key { color: #9ecbff; }
+    .run-search-suggestion .sg-val { color: #8b949e; margin-left: 0.3rem; }
+    .run-browser .hint { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.45rem; }
+    .run-browser-body { display: flex; gap: 0; min-height: 0; flex: 1; }
+    .run-list-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.45rem; min-height: 0; overflow: auto; flex: 1; min-width: 0; }
     .run-list-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.8rem; table-layout: fixed; }
     .run-list-table thead th { position: sticky; top: 0; z-index: 2; background: #161b22; color: #c9d1d9; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.68rem; text-align: left; padding: 0.36rem 0.42rem; border-bottom: 1px solid var(--border); }
     .run-list-table thead th.run-sortable { cursor: pointer; user-select: none; }
@@ -133,13 +151,13 @@
     .run-list-table tbody tr.run-row { cursor: pointer; }
     .run-list-table tbody tr.run-row:hover td { background: rgba(255,255,255,0.03); }
     .run-list-table tbody tr.run-row.selected td { background: rgba(56,139,253,0.14); box-shadow: inset 0 0 0 1px rgba(56,139,253,0.42); }
-    .run-list-table tbody tr.run-row.active td { outline: 1px solid rgba(88,166,255,0.45); outline-offset: -1px; }
-    .run-list-table th.col-category, .run-list-table td.col-category { width: 12%; min-width: 84px; font-weight: 600; color: #9ecbff; white-space: nowrap; }
-    .run-list-table th.col-timestamp, .run-list-table td.col-timestamp { width: 19%; min-width: 150px; color: #c9d1d9; font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .run-list-table th.col-name, .run-list-table td.col-name { width: 35%; min-width: 220px; }
-    .run-list-table .run-name { font-size: 0.82rem; font-weight: 600; color: #e6edf3; line-height: 1.16; }
+    .run-list-table tbody tr.run-row.active td { outline: 2px solid rgba(255,255,255,0.85); outline-offset: -2px; }
+    .run-list-table th.col-category, .run-list-table td.col-category { width: 10%; min-width: 74px; font-weight: 600; color: #9ecbff; white-space: nowrap; }
+    .run-list-table th.col-timestamp, .run-list-table td.col-timestamp { width: 16%; min-width: 130px; color: #c9d1d9; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .run-list-table th.col-name, .run-list-table td.col-name { width: 22%; min-width: 140px; }
+    .run-list-table .run-name { font-size: 0.82rem; font-weight: 600; color: #e6edf3; line-height: 1.16; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .run-list-table .run-subpath { margin-top: 0.15rem; font-size: 0.72rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .run-list-table th.col-bubbles, .run-list-table td.col-bubbles { width: 34%; min-width: 220px; }
+    .run-list-table th.col-bubbles, .run-list-table td.col-bubbles { width: 52%; min-width: 200px; }
     .run-bubbles { display: flex; flex-wrap: wrap; gap: 0.22rem; }
     .run-bubble { border: 1px solid #3d444d; border-radius: 999px; background: #131821; color: #c9d1d9; padding: 0.1rem 0.42rem; font-size: 0.68rem; line-height: 1.12; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
     .run-bubble.strong { border-color: rgba(88,166,255,0.65); color: #d4e8ff; background: rgba(56,139,253,0.13); }
@@ -155,15 +173,41 @@
     .run-bubble.mc-secondary { border-color: rgba(127,188,255,0.68); color: #d6ebff; background: rgba(127,188,255,0.14); }
     .run-bubble.meta-primary { border-color: rgba(139,148,158,0.74); color: #d7dde5; background: rgba(139,148,158,0.14); }
     .run-list-empty { color: var(--muted); font-size: 0.82rem; padding: 0.6rem; border: 1px dashed var(--border); border-radius: 6px; }
-    .run-detail-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.48rem; min-height: 0; display: flex; flex-direction: column; }
-    .run-detail-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.28rem; }
-    .run-detail-pane pre { margin: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: #0b1018; padding: 0.38rem; font-size: 0.69rem; color: #c9d1d9; flex: 1; min-height: 0; }
+    .run-detail-pane { border: 1px solid var(--border); border-radius: 8px; background: #0d1117; padding: 0.48rem; min-height: 0; display: flex; flex-direction: column; width: 36vw; min-width: 120px; flex-shrink: 0; }
+    .run-browser-splitter { width: 6px; cursor: col-resize; background: transparent; position: relative; flex-shrink: 0; }
+    .run-browser-splitter::after { content: ""; position: absolute; top: 20%; bottom: 20%; left: 2px; width: 2px; border-radius: 1px; background: var(--border); transition: background 0.15s; }
+    .run-browser-splitter:hover::after, .run-browser-splitter.dragging::after { background: var(--accent); }
+    .run-detail-title { font-size: 0.74rem; color: var(--muted); margin-bottom: 0.28rem; display: flex; align-items: center; gap: 0.4rem; }
+    .run-detail-title .meta-toggle { font-size: 0.66rem; color: var(--accent); cursor: pointer; margin-left: auto; opacity: 0.7; }
+    .run-detail-title .meta-toggle:hover { opacity: 1; }
+    .run-detail-pane pre { margin: 0; overflow: auto; border: 1px solid var(--border); border-radius: 6px; background: #0b1018; padding: 0.38rem; font-size: 0.69rem; color: #c9d1d9; flex: 1; min-height: 0; display: none; }
+    .run-detail-pane pre.visible { display: block; flex: 1; }
+    .run-detail-content { flex: 1; min-height: 0; overflow: auto; }
+    .meta-section { margin-bottom: 0.4rem; }
+    .meta-section-title { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--accent); padding: 0.15rem 0; border-bottom: 1px solid #21262d; margin-bottom: 0.2rem; font-weight: 600; }
+    .meta-row { display: flex; gap: 0.3rem; padding: 0.12rem 0; font-size: 0.7rem; line-height: 1.3; border-bottom: 1px solid #161b22; }
+    .meta-row:last-child { border-bottom: none; }
+    .meta-row.meta-clickable { cursor: pointer; border-radius: 3px; padding: 0.12rem 0.2rem; margin: 0 -0.2rem; }
+    .meta-row.meta-clickable:hover { background: rgba(56,139,253,0.12); }
+    .meta-key { color: #8b949e; flex-shrink: 0; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .meta-val { color: #e6edf3; word-break: break-all; flex: 1; min-width: 0; }
+    .meta-val.good { color: #3fb950; }
+    .meta-val.warn { color: #d29922; }
+    .meta-val.error { color: #f85149; }
+    .meta-decision { display: inline-flex; align-items: center; gap: 0.25rem; padding: 0.12rem 0.4rem; border-radius: 4px; font-size: 0.72rem; font-weight: 600; margin-bottom: 0.3rem; }
+    .meta-decision.accepted { background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid rgba(63,185,80,0.3); }
+    .meta-decision.rejected { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid rgba(248,81,73,0.3); }
     .run-output-files { margin-top: 0.45rem; font-size: 0.74rem; color: var(--muted); overflow: auto; max-height: 110px; }
     .run-output-files code { color: #9ecbff; }
-    .file-list { margin-top: 1rem; max-width: 500px; margin-left: auto; margin-right: auto; }
-    .file-item { display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 0.3rem; background: var(--panel); font-size: 0.82rem; }
-    .file-item .rm { color: var(--muted); cursor: pointer; border: none; background: none; font-size: 1rem; }
-    .file-item .rm:hover { color: #f85149; }
+    .file-chip-bar { display: flex; align-items: center; gap: 0.35rem; padding: 0.3rem 0.7rem; flex-wrap: wrap; min-height: 0; }
+    .file-chip-bar:empty { display: none; }
+    .file-chip { display: inline-flex; align-items: center; gap: 0.25rem; background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.15rem 0.45rem; border-radius: 999px; font-size: 0.68rem; white-space: nowrap; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+    .file-chip:hover { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.4); }
+    .file-chip .fc-x { color: var(--muted); font-size: 0.78rem; line-height: 1; margin-left: 0.1rem; }
+    .file-chip:hover .fc-x { color: #f85149; }
+    .file-chip.fc-ndjson { border-color: rgba(56,139,253,0.35); }
+    .file-chip.fc-scenario { border-color: rgba(163,113,247,0.35); }
+    .file-chip.fc-csv { border-color: rgba(210,153,34,0.35); }
 
     /* Stats tab */
     .hero-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; margin-bottom: 1.2rem; }
@@ -574,19 +618,20 @@
     .exp-note { font-size: 0.75rem; color: var(--muted); margin-bottom: 0.45rem; }
 
     /* Simulation tab */
-    #panelSimulation { gap: 0.85rem; }
+    #panelSimulation { gap: 0.65rem; }
     #simulationContent {
       display: flex;
       flex-direction: column;
-      gap: 0.85rem;
+      gap: 0.65rem;
       width: 100%;
       min-width: 0;
     }
-    .sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(500px, 1fr)); gap: 0.9rem; align-items: start; width: 100%; min-width: 0; }
-    .sim-grid.compact { grid-template-columns: repeat(auto-fit, minmax(460px, 1fr)); gap: 0.7rem; }
+    .sim-grid { display: grid; grid-template-columns: 1fr; gap: 0.65rem; align-items: start; width: 100%; min-width: 0; }
+    .sim-grid.compact { grid-template-columns: 1fr; gap: 0.55rem; }
     .sim-grid.runtime { grid-template-columns: 1fr; }
-    .sim-section { display: flex; flex-direction: column; gap: 0.55rem; }
-    .sim-section + .sim-section { margin-top: 0.5rem; }
+    .sim-grid.two-col { grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); }
+    .sim-section { display: flex; flex-direction: column; gap: 0.45rem; }
+    .sim-section + .sim-section { margin-top: 0.35rem; }
     .sim-section-title {
       font-size: 0.8rem;
       color: var(--text);
@@ -607,38 +652,41 @@
     }
     .sim-section-title.calibration::before { background: var(--purple); box-shadow: 0 0 8px rgba(163, 113, 247, 0.55); }
     .sim-section-title.runtime::before { background: var(--green); box-shadow: 0 0 8px rgba(46, 160, 67, 0.55); }
-    .sim-card { background: linear-gradient(180deg, rgba(22,27,34,0.96), rgba(13,17,23,0.98)); border: 1px solid var(--border); border-radius: 10px; padding: 0.95rem 1.05rem; box-shadow: 0 4px 14px rgba(0,0,0,0.22); min-width: 0; }
+    .sim-card { background: linear-gradient(180deg, rgba(22,27,34,0.96), rgba(13,17,23,0.98)); border: 1px solid var(--border); border-radius: 10px; padding: 0.65rem 0.85rem; box-shadow: 0 2px 8px rgba(0,0,0,0.18); min-width: 0; }
     .sim-card.full { grid-column: 1 / -1; }
-    .sim-card h3 { font-size: 0.94rem; margin-bottom: 0.56rem; color: var(--text); letter-spacing: 0.01em; }
+    .sim-card h3 { font-size: 0.88rem; margin-bottom: 0.38rem; color: var(--text); letter-spacing: 0.01em; }
     .sim-strip {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
-      gap: 0.42rem;
-      margin-bottom: 0.08rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.32rem;
+      margin-bottom: 0.15rem;
     }
     .sim-pill {
       border: 1px solid #2c333b;
       border-radius: 8px;
       background: #0f141c;
-      padding: 0.4rem 0.52rem;
-      min-height: 54px;
+      padding: 0.28rem 0.48rem;
+      min-height: 42px;
       display: flex;
       flex-direction: column;
       justify-content: center;
-      gap: 0.08rem;
+      gap: 0.04rem;
+      flex: 0 0 auto;
+      min-width: 110px;
     }
+    .sim-pill.wide { min-width: 160px; flex: 1 1 160px; }
     .sim-pill .k {
       color: var(--muted);
-      font-size: 0.7rem;
+      font-size: 0.66rem;
       text-transform: uppercase;
       letter-spacing: 0.03em;
     }
     .sim-pill .v {
       color: var(--text);
-      font-size: 0.9rem;
+      font-size: 0.84rem;
       font-weight: 600;
       font-variant-numeric: tabular-nums;
-      line-height: 1.2;
+      line-height: 1.15;
     }
     .sim-kv { display: grid; grid-template-columns: minmax(200px, 250px) 1fr; row-gap: 0.36rem; column-gap: 0.68rem; font-size: 0.86rem; }
     .sim-kv .k { color: var(--muted); font-weight: 500; }
@@ -725,8 +773,8 @@
     <h1>Merge Queue Sim</h1>
     <nav class="nav-tabs" id="navTabs">
       <button class="nav-tab active" data-tab="load">Load</button>
-      <button class="nav-tab disabled" data-tab="stats">Statistics</button>
       <button class="nav-tab disabled" data-tab="simulation">Simulation</button>
+      <button class="nav-tab disabled" data-tab="stats">Statistics</button>
       <button class="nav-tab disabled" data-tab="kanban">Kanban</button>
       <button class="nav-tab disabled" data-tab="composition">Composition</button>
       <button class="nav-tab disabled" data-tab="bars">Composition Charts</button>
@@ -742,22 +790,35 @@
 
   <!-- Tab: Load -->
   <div class="tab-panel active" id="panelLoad">
-    <div class="drop-zone" id="dropZone">Drop <code>.ndjson</code>, <code>.csv</code>, and/or <code>.yaml</code> files here or click to open<br><span style="font-size:0.72rem;margin-top:0.4rem;display:inline-block;color:var(--muted)">NDJSON → Statistics, Simulation, Kanban, Composition &nbsp;|&nbsp; CSV → Monte Carlo/Experiments &nbsp;|&nbsp; YAML → Scenario context + MR labels</span></div>
-    <div class="load-actions">
-      <button class="load-btn" id="btnBrowseFiles">Browse files</button>
-      <button class="load-btn" id="btnBrowseRunFolder">Browse run folder</button>
-      <button class="load-btn" id="btnUnload">Unload</button>
+    <div class="load-toolbar">
+      <div class="load-toolbar-group">
+        <span class="load-toolbar-title">Import</span>
+        <button class="load-chip" id="btnBrowseFiles">Files</button>
+        <button class="load-chip" id="btnBrowseRunFolder">Folder</button>
+      </div>
+      <div class="load-toolbar-drop" id="dropZone">Drop <code>.ndjson</code> <code>.csv</code> <code>.yaml</code></div>
+      <div class="load-toolbar-group load-toolbar-loaded" id="loadedInfo">
+        <span class="load-toolbar-title">Loaded</span>
+        <span class="load-chip info" id="loadedFileCount">0 files</span>
+      </div>
+      <div class="load-toolbar-group">
+        <button class="load-chip danger" id="btnUnload">Unload</button>
+      </div>
     </div>
     <input type="file" id="fileInput" accept=".ndjson,.json,.jsonl,.csv,.yaml,.yml" multiple hidden />
     <input type="file" id="runDirInput" webkitdirectory directory multiple hidden />
+    <div class="file-chip-bar" id="fileList"></div>
     <div class="run-browser" id="runBrowser">
-      <h3>Run Browser (category / run / metadata)</h3>
-      <div class="row">
-        <label>Category <select id="runCategorySelect"><option value="">all</option></select></label>
-        <label>Metadata key <select id="runMetaKeySelect"><option value="">any</option></select></label>
-        <label>Metadata value <select id="runMetaValueSelect"><option value="">any</option></select></label>
-        <label>Name filter <select id="runNameFilterSelect"><option value="">any</option></select></label>
-        <button class="load-btn" id="btnLoadSelectedRun">Load selected runs</button>
+      <div class="run-browser-header">
+        <h3>Run Browser</h3>
+        <div class="run-browser-controls">
+          <div class="run-search-wrap">
+            <input type="text" class="run-search-input" id="runSearchInput" placeholder="Search: category=comp… purpose=golden…" autocomplete="off" spellcheck="false" />
+            <div class="run-search-suggestions" id="runSearchSuggestions"></div>
+          </div>
+          <button class="load-chip" id="btnLoadSelectedRun">Load selected</button>
+          <button class="load-chip" id="btnRefreshRuns" title="Re-scan loaded folder">Refresh</button>
+        </div>
       </div>
       <div class="hint" id="runBrowserStatus">No run folder indexed yet. Select one or more rows, then press Enter to load all selected runs.</div>
       <div class="hint" id="uiSelfCheckStatus">Self-check: not run.</div>
@@ -765,14 +826,19 @@
         <div class="run-list-pane">
           <div id="runChipList"></div>
         </div>
-        <div class="run-detail-pane">
-          <div class="run-detail-title">Selected run metadata</div>
+        <div class="run-browser-splitter" id="runBrowserSplitter"></div>
+        <div class="run-detail-pane" id="runDetailPane">
+          <div class="run-detail-title">Selected run metadata <span class="meta-toggle" id="metaToggleRaw">JSON</span></div>
+          <div class="run-detail-content" id="runMetadataContent"></div>
           <pre id="runMetadataView">{}</pre>
           <div class="run-output-files" id="runOutputFiles"></div>
         </div>
       </div>
     </div>
-    <div class="file-list" id="fileList"></div>
+    <select id="runCategorySelect" hidden><option value="">all</option></select>
+    <select id="runMetaKeySelect" hidden><option value="">any</option></select>
+    <select id="runMetaValueSelect" hidden><option value="">any</option></select>
+    <select id="runNameFilterSelect" hidden><option value="">any</option></select>
   </div>
 
   <!-- Tab: Statistics -->

@@ -185,11 +185,18 @@ function loadCalibrationCSVText(text, fileName = "") {
     tick_seconds: mqParseNumber(r.tick_seconds),
     arrival_skew: mqParseNumber(r.arrival_skew),
     queue_depth_scale: mqParseNumber(r.queue_depth_scale),
+    ci_duration_scale: mqParseNumber(r.ci_duration_scale, null),
     throughput_mph: mqParseNumber(r.throughput_mph),
     throughput_active_mph: mqParseNumber(r.throughput_active_mph),
     throughput_peak8_mph: mqParseNumber(r.throughput_peak8_mph),
     throughput_peak8_p90_mph: mqParseNumber(r.throughput_peak8_p90_mph),
+    throughput_peak_window_mph: mqParseNumber(r.throughput_peak_window_mph),
+    throughput_offpeak_mph: mqParseNumber(r.throughput_offpeak_mph),
+    peak_offpeak_ratio: mqParseNumber(r.peak_offpeak_ratio),
+    modeled_hours: mqParseNumber(r.modeled_hours),
+    total_arrivals: mqParseNumber(r.total_arrivals),
     rebase_per_merge: mqParseNumber(r.rebase_per_merge),
+    merge_interval_p50_seconds: mqParseNumber(r.merge_interval_p50_seconds),
     merge_interval_p95_seconds: mqParseNumber(r.merge_interval_p95_seconds),
     merged: mqParseNumber(r.merged),
     rel_error_pct: mqParseNumber(r.rel_error_pct),
@@ -201,6 +208,10 @@ function loadCalibrationCSVText(text, fileName = "") {
     is_best_480: mqParseNumber(r.is_best_480),
     source_240_rel_error_pct: mqParseNumber(r.source_240_rel_error_pct),
     source_240_score_pct: mqParseNumber(r.source_240_score_pct, mqParseNumber(r.source_240_rel_error_pct)),
+    throughput_gate_pass: mqParseNumber(r.throughput_gate_pass),
+    score_gate_pass: mqParseNumber(r.score_gate_pass),
+    max_dimension_gate_pass: mqParseNumber(r.max_dimension_gate_pass),
+    accepted_by_gates: mqParseNumber(r.accepted_by_gates),
     dimension_error_pct_json: r.dimension_error_pct_json || "{}",
     target_dimensions_json: r.target_dimensions_json || "{}"
   }));
@@ -211,8 +222,8 @@ function loadCalibrationCSVText(text, fileName = "") {
     if (lower.includes("validation")) valRows = mapped;
     else tuneRows = mapped;
   }
-  if (tuneRows.length) expData.calibrationGrid = [...expData.calibrationGrid, ...tuneRows];
-  if (valRows.length) expData.calibrationValidation = [...expData.calibrationValidation, ...valRows];
+  if (tuneRows.length) expData.calibrationGrid = tuneRows;
+  if (valRows.length) expData.calibrationValidation = valRows;
 }
 
 function loadCalibrationSummaryCSVText(text, fileName = "") {
@@ -544,6 +555,33 @@ function renderCalibrationExperiments(content) {
   const target = (val[0]?.target_mph || grid[0]?.target_mph || 0).toFixed(3);
   const rankingRows = val.length ? val : grid;
   const best = rankingRows[0] || null;
+  const calibrationMeta = loadedRunMetadataByCategory?.calibration || {};
+  const decision = (calibrationMeta && typeof calibrationMeta.decision === "object")
+    ? calibrationMeta.decision
+    : {};
+  const decisionStatusRaw = String(decision.status || "").trim().toLowerCase();
+  const decisionStatus = decisionStatusRaw || "unknown";
+  const decisionLabel = decisionStatus === "accepted"
+    ? "ACCEPTED"
+    : decisionStatus === "rejected"
+      ? "REJECTED"
+      : "UNKNOWN";
+  const decisionReasons = Array.isArray(decision.reason_codes)
+    ? decision.reason_codes.filter(Boolean).join(", ")
+    : "";
+  const gateInfo = (decision.gates && typeof decision.gates === "object")
+    ? decision.gates
+    : {};
+  const gateSummary = [
+    `throughput=${gateInfo.throughput_pass ? "PASS" : "MISS"}`,
+    `rank=${gateInfo.score_pass ? "PASS" : "MISS"}`,
+    `max-dim=${gateInfo.max_dimension_pass ? "PASS" : "MISS"}`,
+  ].join(" | ");
+  const decisionClass = decisionStatus === "accepted"
+    ? "run-bubble cal-secondary"
+    : decisionStatus === "rejected"
+      ? "run-bubble cal-warn"
+      : "run-bubble meta-primary";
   const targetDims = expParseJsonObject(best?.target_dimensions_json || grid[0]?.target_dimensions_json || "{}", {});
   const bestDimErr = expParseJsonObject(best?.dimension_error_pct_json || "{}", {});
   const dimToRunMetric = {
@@ -551,7 +589,9 @@ function renderCalibrationExperiments(content) {
     merge_per_hour_active_hours: "throughput_active_mph",
     merge_per_hour_peak8: "throughput_peak8_mph",
     merge_per_hour_peak8_p90: "throughput_peak8_p90_mph",
+    merge_peak_offpeak_ratio: "peak_offpeak_ratio",
     rebase_per_merge_global: "rebase_per_merge",
+    merge_interval_seconds_p50: "merge_interval_p50_seconds",
     merge_interval_seconds_p95: "merge_interval_p95_seconds"
   };
   const dimLabel = k => ({
@@ -559,13 +599,16 @@ function renderCalibrationExperiments(content) {
     merge_per_hour_active_hours: "active-hour throughput",
     merge_per_hour_peak8: "peak-8 throughput",
     merge_per_hour_peak8_p90: "peak-8 p90",
+    merge_peak_offpeak_ratio: "peak/offpeak ratio",
     rebase_per_merge_global: "rebase/merge",
+    merge_interval_seconds_p50: "merge interval p50 (s)",
     merge_interval_seconds_p95: "merge interval p95 (s)"
   }[k] || k);
   if (hasCandidates) {
     content.innerHTML = `
     ${benchmarkSection}
     <div class="exp-note">Target throughput: <b>${target}</b> merges/hour (${mqEscapeHtml(policyLabel)}). Calibration now uses a weighted multidimensional score.</div>
+    <div class="exp-note">Decision status: <span class="${mqEscapeHtml(decisionClass)}">${mqEscapeHtml(decisionLabel)}</span>${decisionReasons ? ` · reasons: ${mqEscapeHtml(decisionReasons)}` : ""}${decisionStatus !== "unknown" ? ` · gates: ${mqEscapeHtml(gateSummary)}` : ""}</div>
     <div class="exp-grid">
       <div class="exp-card">
         <h3>Best candidate summary</h3>
@@ -576,7 +619,9 @@ function renderCalibrationExperiments(content) {
           <span class="k">Throughput (24h)</span><span class="v">${Number(best?.throughput_mph || 0).toFixed(3)} mph</span>
           <span class="k">Throughput (active)</span><span class="v">${Number(best?.throughput_active_mph || 0).toFixed(3)} mph</span>
           <span class="k">Throughput (peak-8)</span><span class="v">${Number(best?.throughput_peak8_mph || 0).toFixed(3)} mph</span>
+          <span class="k">Peak/offpeak ratio</span><span class="v">${Number(best?.peak_offpeak_ratio || 0).toFixed(3)}</span>
           <span class="k">Rebase/Merge</span><span class="v">${Number(best?.rebase_per_merge || 0).toFixed(3)}</span>
+          <span class="k">Merge p50 interval</span><span class="v">${Number(best?.merge_interval_p50_seconds || 0).toFixed(1)}s</span>
           <span class="k">Merge p95 interval</span><span class="v">${Number(best?.merge_interval_p95_seconds || 0).toFixed(1)}s</span>
         </div>
       </div>
@@ -586,6 +631,7 @@ function renderCalibrationExperiments(content) {
           <span class="k">tick_seconds</span><span class="v">${Number(best?.tick_seconds || 0)}</span>
           <span class="k">arrival_skew</span><span class="v">${Number(best?.arrival_skew || 0).toFixed(2)}</span>
           <span class="k">queue_depth_scale</span><span class="v">${Number(best?.queue_depth_scale || 0).toFixed(2)}</span>
+          <span class="k">ci_model</span><span class="v">fixed (5-25 min)</span>
           <span class="k">cycles (row)</span><span class="v">${Number(best?.cycles || 0)}</span>
           <span class="k">merged</span><span class="v">${Math.round(Number(best?.merged || 0))}</span>
         </div>
@@ -773,7 +819,13 @@ function renderCalibrationExperiments(content) {
   dimKeys.forEach(k => {
     const targetVal = Number(targetDims[k]);
     const metricName = dimToRunMetric[k];
-    const actualVal = metricName ? Number(best?.[metricName] || 0) : NaN;
+    let actualVal = metricName && best?.[metricName] !== undefined
+      ? Number(best[metricName])
+      : NaN;
+    if (!Number.isFinite(actualVal) && Number.isFinite(targetVal)) {
+      const errFrac = (Number(bestDimErr[k]) || 0) / 100.0;
+      actualVal = targetVal * (1 + errFrac);
+    }
     const errVal = Number(bestDimErr[k] || 0);
     dimHtml += `<tr class="data-row"><td>${mqEscapeHtml(dimLabel(k))}</td><td>${Number.isFinite(targetVal) ? targetVal.toFixed(4) : "—"}</td><td>${Number.isFinite(actualVal) ? actualVal.toFixed(4) : "—"}</td><td>${errVal.toFixed(2)}</td></tr>`;
   });
