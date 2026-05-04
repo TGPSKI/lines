@@ -1418,11 +1418,15 @@ def run_comparison(args: argparse.Namespace) -> None:
     results: dict[str, dict] = {}
     policies = resolve_policies(args)
 
-    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
     base_reports = os.path.join(
         os.path.abspath(os.path.dirname(__file__) or "."), "reports", "comparisons"
     )
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%S-%p")
     reports_dir = os.path.join(base_reports, timestamp)
+    if os.path.exists(reports_dir):
+        import uuid
+        timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
+        reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
 
     latest_link = os.path.join(base_reports, "latest")
@@ -1823,9 +1827,13 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
     sim_dir = os.path.abspath(os.path.dirname(__file__) or ".")
     scenario_path = os.path.abspath(args.scenario)
 
-    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
     base_reports = os.path.join(sim_dir, "reports", "monte-carlo")
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%S-%p")
     reports_dir = os.path.join(base_reports, timestamp)
+    if os.path.exists(reports_dir):
+        import uuid
+        timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
+        reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
 
     latest_link = os.path.join(base_reports, "latest")

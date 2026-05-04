@@ -32,7 +32,7 @@
     .pb-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.25rem 0.6rem; border-radius: 5px; cursor: pointer; font-size: 0.8rem; }
     .pb-btn:hover { background: #30363d; }
     .pb-btn.primary { background: #1f3d5c; border-color: #388bfd; }
-    .pb-label { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+    .pb-label { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; display: inline-block; white-space: nowrap; }
     .pb-scrub { width: min(260px, 30vw); }
     .pb-speed { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
 
@@ -301,12 +301,12 @@
     .trace-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.65rem; cursor: default; user-select: none; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
     .trace-header .tname { font-size: 0.8rem; font-weight: 600; color: var(--accent); }
     .trace-header .tcounts { font-size: 0.72rem; color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
-    .trace-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; }
-    .trace-cols { display: flex; gap: 0; flex-shrink: 0; border-bottom: 1px solid var(--border); }
+    .trace-body { flex: 1; overflow-y: auto; scrollbar-gutter: stable; display: flex; flex-direction: column; min-height: 0; }
+    .trace-cols { display: flex; gap: 0; flex-shrink: 0; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 1; background: var(--bg); }
     .trace-cols .col-hd { flex: 1; text-align: center; font-size: 0.65rem; text-transform: uppercase; color: var(--muted); padding: 0.3rem 0.2rem; border-right: 1px solid var(--border); letter-spacing: 0.03em; }
     .trace-cols .col-hd:last-child { border-right: none; }
-    .trace-cards { display: flex; flex: 1; overflow-y: auto; min-height: 0; }
-    .trace-cards .tcol { flex: 1; padding: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.25rem; align-content: flex-start; border-right: 1px solid var(--border); }
+    .trace-cards { display: flex; flex: 1; min-height: 0; }
+    .trace-cards .tcol { flex: 1; min-width: 0; padding: 0.35rem; display: flex; flex-wrap: wrap; gap: 0.25rem; align-content: flex-start; border-right: 1px solid var(--border); }
     .trace-cards .tcol:last-child { border-right: none; }
     .kcard { font-size: 0.75rem; padding: 0.15rem 0.4rem; border-radius: 4px; background: #21262d; border: 1px solid #30363d; transition: transform 0.2s, background 0.2s, opacity 0.2s, box-shadow 0.2s; }
     .kcard.just-rebased { background: #2d1f6f; border-color: var(--purple); box-shadow: 0 0 7px 2px rgba(163,113,247,0.55); transform: scale(1.06); }
@@ -393,6 +393,17 @@
     .chart-view-toggle { display: flex; gap: 0.3rem; margin-bottom: 0.5rem; }
     .chart-view-toggle button { padding: 0.25rem 0.6rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.72rem; }
     .chart-view-toggle button.active { border-color: var(--accent); color: var(--text); background: #1c2128; }
+    .time-toggle { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .time-toggle button { padding: 0.2rem 0.5rem; border: none; border-right: 1px solid var(--border); background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.68rem; font-weight: 500; white-space: nowrap; }
+    .time-toggle button:last-child { border-right: none; }
+    .time-toggle button.active { color: var(--text); background: #1c2128; box-shadow: inset 0 -2px 0 var(--accent); }
+    .peak-toggle { padding: 0.2rem 0.5rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--muted); cursor: pointer; font-size: 0.68rem; font-weight: 500; white-space: nowrap; }
+    .peak-toggle.active { color: #fbbf24; border-color: rgba(251,191,36,0.5); background: rgba(251,191,36,0.1); }
+    .peak-badge { display: inline-block; padding: 0.05rem 0.35rem; border-radius: 4px; font-size: 0.66rem; font-weight: 600; letter-spacing: 0.02em; min-width: 3.2rem; text-align: center; vertical-align: middle; }
+    .peak-badge.peak { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .peak-badge.offpeak { background: rgba(139,148,158,0.12); color: var(--muted); }
+    .peak-badge.hidden { visibility: hidden; }
+    .pb-scrub.in-peak { accent-color: #fbbf24; }
     .tab-inline-controls { display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.45rem; color: var(--muted); font-size: 0.84rem; }
     .chart-pickers { display: flex; gap: 1.5rem; flex-wrap: wrap; margin-bottom: 0.5rem; }
     .chart-picker { display: flex; align-items: center; gap: 0.3rem; }
@@ -766,6 +777,32 @@
       .sim-kv { grid-template-columns: 1fr; }
       .sim-split { grid-template-columns: 1fr; }
     }
+
+    /* Sweep tab */
+    .sweep-header { margin-bottom: 0.8rem; }
+    .sweep-header h2 { font-size: 1rem; margin: 0 0 0.25rem; }
+    .sweep-header p { font-size: 0.78rem; color: var(--muted); margin: 0; }
+    .sweep-header .sweep-setup { display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .sweep-header .sweep-setup span { font-size: 0.72rem; padding: 0.15rem 0.5rem; border: 1px solid var(--border); border-radius: 999px; color: #c9d1d9; background: rgba(255,255,255,0.03); }
+    .sweep-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1rem; padding: 0.5rem 0.7rem; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+    .sweep-control-group { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
+    .sweep-control-label { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+    .sweep-controls select, .sweep-converge-select { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 0.22rem 0.5rem; font-size: 0.78rem; }
+    .sweep-controls .sweep-policy-btn { border: 1px solid #3d444d; border-radius: 999px; background: #131821; color: #c9d1d9; padding: 0.14rem 0.5rem; font-size: 0.72rem; cursor: pointer; }
+    .sweep-controls .sweep-policy-btn.active { border-color: var(--policy-color, #58a6ff); color: #fff; background: color-mix(in srgb, var(--policy-color, #58a6ff) 25%, #131821); }
+    .sweep-body { display: flex; flex-direction: column; gap: 1rem; }
+    .sweep-chart-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    .sweep-chart-row:has(.sweep-chart-wide) { grid-template-columns: 1fr; }
+    .sweep-chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; }
+    .sweep-chart-title { font-size: 0.82rem; margin: 0 0 0.5rem; color: var(--text); }
+    .sweep-chart-wrap { height: 260px; }
+    .sweep-chart-wide .sweep-chart-wrap { height: 200px; }
+    .sweep-table-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; overflow-x: auto; }
+    .sweep-table-wrap { overflow-x: auto; }
+    #sweepDataTable th, #sweepDataTable td { padding: 0.3rem 0.6rem; font-size: 0.75rem; white-space: nowrap; }
+    #sweepDataTable th { background: var(--bg); position: sticky; top: 0; }
+    #sweepDataTable tr:hover td { background: rgba(255,255,255,0.03); }
+    #sweepDataTable td.best { color: #3fb950; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -781,6 +818,7 @@
       <button class="nav-tab disabled" data-tab="swimlane">Swimlane</button>
       <button class="nav-tab disabled" data-tab="experiments">Experiments</button>
       <button class="nav-tab disabled" data-tab="monteCarlo">Monte Carlo</button>
+      <button class="nav-tab disabled" data-tab="sweep">Sweep</button>
     </nav>
     <div class="top-actions">
       <button class="top-btn" id="btnRedrawUi" title="Re-render active view using loaded data" disabled>Refresh UI</button>
@@ -867,6 +905,15 @@
         <span class="tab-control-title">Traces</span>
         <div class="kanban-policy-tabs" id="kanbanPolicyTabs"></div>
       </div>
+      <div class="tab-control-group">
+        <span class="tab-control-title">Axis</span>
+        <div class="time-toggle" data-time-toggle="kanban">
+          <button class="active" data-tmode="ticks">Ticks</button>
+          <button data-tmode="relative">Relative</button>
+          <button data-tmode="absolute">Absolute</button>
+        </div>
+        <button class="peak-toggle" data-peak-toggle title="Highlight peak window hours">Peak</button>
+      </div>
       <div class="tab-control-group tab-control-group-grow">
         <span class="tab-control-title">Playhead</span>
         <div class="playback-bar" id="playbackBar">
@@ -916,8 +963,14 @@
         </div>
       </div>
       <div class="tab-control-group">
-        <span class="tab-control-title">Merge lines</span>
-        <button class="tab-toggle-chip active" id="btnMergeLinesComposition" type="button" aria-pressed="true">ON</button>
+        <span class="tab-control-title">Axis</span>
+        <div class="time-toggle" data-time-toggle="composition">
+          <button class="active" data-tmode="ticks">Ticks</button>
+          <button data-tmode="relative">Relative</button>
+          <button data-tmode="absolute">Absolute</button>
+        </div>
+        <button class="peak-toggle" data-peak-toggle title="Highlight peak window hours">Peak</button>
+        <button class="peak-toggle active" id="btnMergeLinesComposition" type="button" aria-pressed="true">Merge Lines</button>
       </div>
       <div class="tab-control-group tab-control-group-grow">
         <span class="tab-control-title">Traces</span>
@@ -956,8 +1009,14 @@
       <div class="bars-legend-group" id="barsTraceControls"></div>
       <div class="bars-legend-group" id="barsLegendSeriesControls"></div>
       <div class="bars-legend-group">
-        <span class="bars-legend-title">Merge lines</span>
-        <button class="bars-merge-chip active" id="btnMergeLinesBars" type="button" aria-pressed="true">ON</button>
+        <span class="bars-legend-title">Axis</span>
+        <div class="time-toggle" data-time-toggle="bars">
+          <button class="active" data-tmode="ticks">Ticks</button>
+          <button data-tmode="relative">Relative</button>
+          <button data-tmode="absolute">Absolute</button>
+        </div>
+        <button class="peak-toggle" data-peak-toggle title="Highlight peak window hours">Peak</button>
+        <button class="peak-toggle active" id="btnMergeLinesBars" type="button" aria-pressed="true">Merge Lines</button>
       </div>
       <div class="bars-legend-group" id="barsStatsControls"></div>
     </div>
@@ -970,6 +1029,16 @@
       <div class="tab-control-group tab-control-group-grow">
         <span class="tab-control-title">Traces</span>
         <div class="chart-policy-tabs" id="swimPolicyTabs"></div>
+      </div>
+      <div class="tab-control-group">
+        <span class="tab-control-title">Axis</span>
+        <div class="time-toggle" data-time-toggle="swimlane">
+          <button class="active" data-tmode="ticks">Ticks</button>
+          <button data-tmode="relative">Relative</button>
+          <button data-tmode="absolute">Absolute</button>
+        </div>
+        <button class="peak-toggle" data-peak-toggle title="Highlight peak window hours">Peak</button>
+        <button class="peak-toggle active" id="btnMergeLinesSwim" type="button" aria-pressed="true">Merge Lines</button>
       </div>
     </div>
     <div class="swim-single-wrap">
@@ -1046,10 +1115,49 @@
     </div>
   </div>
 
+  <!-- Tab: Sweep -->
+  <div class="tab-panel" id="panelSweep">
+    <div class="sweep-header" id="sweepHeader"></div>
+    <div class="sweep-controls" id="sweepControls">
+      <div class="sweep-control-group">
+        <span class="sweep-control-label">Metric:</span>
+        <select id="sweepMetricSelect"></select>
+      </div>
+      <div class="sweep-control-group" id="sweepPolicyToggles"></div>
+    </div>
+    <div class="sweep-body">
+      <div class="sweep-chart-row">
+        <div class="sweep-chart-panel">
+          <h3 class="sweep-chart-title" id="sweepLineTitle">Metric vs Limit</h3>
+          <div class="sweep-chart-wrap"><canvas id="sweepLineCanvas"></canvas></div>
+        </div>
+        <div class="sweep-chart-panel">
+          <h3 class="sweep-chart-title" id="sweepBarTitle">By Policy (grouped)</h3>
+          <div class="sweep-chart-wrap"><canvas id="sweepBarCanvas"></canvas></div>
+        </div>
+      </div>
+      <div class="sweep-chart-row">
+        <div class="sweep-chart-panel sweep-chart-wide">
+          <h3 class="sweep-chart-title">
+            Convergence: <select id="sweepConvergeA" class="sweep-converge-select"></select>
+            vs <select id="sweepConvergeB" class="sweep-converge-select"></select>
+            <span id="sweepConvergeMetricLabel" style="color:var(--muted);font-weight:400;font-size:0.75rem;margin-left:0.5rem">(Δ selected metric)</span>
+          </h3>
+          <div class="sweep-chart-wrap"><canvas id="sweepConvergeCanvas"></canvas></div>
+        </div>
+      </div>
+      <div class="sweep-table-panel">
+        <h3 class="sweep-chart-title" id="sweepTableTitle">Data Table</h3>
+        <div class="sweep-table-wrap"><table class="cmp" id="sweepDataTable"></table></div>
+      </div>
+    </div>
+  </div>
+
   <script src="./js/mqsim-common.js"></script>
   <script src="./js/mqsim-core.js"></script>
   <script src="./js/mqsim-experiments.js"></script>
   <script src="./js/mqsim-monte-carlo.js"></script>
+  <script src="./js/mqsim-sweep.js"></script>
   <script src="./js/mqsim-selfcheck.js"></script>
 </body>
 </html>

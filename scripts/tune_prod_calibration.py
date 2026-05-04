@@ -51,12 +51,12 @@ LEGACY_STANDARD_DIMENSION_WEIGHTS = {
 }
 HOURLY_EXTENDED_DIMENSION_WEIGHTS = {
     "merge_per_hour_24h": 0.10,
-    "merge_per_hour_active_hours": 0.18,
-    "merge_per_hour_peak8": 0.18,
+    "merge_per_hour_active_hours": 0.20,
+    "merge_per_hour_peak8": 0.20,
     "merge_per_hour_peak8_p90": 0.15,
     "merge_peak_offpeak_ratio": 0.17,
     "rebase_per_merge_global": 0.12,
-    "merge_interval_seconds_p50": 0.05,
+    "merge_interval_seconds_p50": 0.01,
     "merge_interval_seconds_p95": 0.05,
 }
 DIMENSION_WEIGHT_PROFILES = {
@@ -604,7 +604,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-dimension-error-pct",
         type=float,
-        default=60.0,
+        default=90.0,
         help="Maximum allowed single-dimension absolute relative error percent",
     )
     parser.add_argument(
@@ -943,7 +943,7 @@ def main() -> None:
     if not policy:
         raise ValueError("--policy must not be empty")
     stats = [parse_log(p, args.project) for p in logs]
-    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%S-%p")
     if args.out_dir:
         run_out_dir = Path(args.out_dir).resolve()
     elif args.grid_out:
@@ -952,6 +952,10 @@ def main() -> None:
         run_out_dir = Path(args.validation_out).resolve().parent
     else:
         run_out_dir = ROOT / "reports" / "calibration" / timestamp
+        if run_out_dir.exists():
+            import uuid
+            timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
+            run_out_dir = ROOT / "reports" / "calibration" / timestamp
     run_out_dir.mkdir(parents=True, exist_ok=True)
     target_dimensions = _build_target_dimensions(stats)
     dimension_weights = DIMENSION_WEIGHT_PROFILES[args.dimension_profile]

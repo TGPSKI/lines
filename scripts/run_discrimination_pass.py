@@ -583,11 +583,15 @@ def main() -> None:
     if baseline_policy and baseline_policy not in policies:
         raise ValueError("baseline_policy must be present in --policies")
 
-    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%p")
+    timestamp = datetime.now().strftime("%m-%d-%y_%I-%M-%S-%p")
     if args.out_dir:
         out_dir = Path(args.out_dir).resolve()
     else:
         out_dir = ROOT / "reports" / "discrimination" / timestamp
+        if out_dir.exists():
+            import uuid
+            timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
+            out_dir = ROOT / "reports" / "discrimination" / timestamp
     scenarios_dir = out_dir / "scenarios"
     raw_dir = out_dir / "raw"
     scenarios_dir.mkdir(parents=True, exist_ok=True)

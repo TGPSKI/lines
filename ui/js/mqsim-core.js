@@ -19,6 +19,96 @@ const MERGE_LABELS_PRIORITY = [
 ];
 let playhead = 0, playTimer = null, xRange = [0, 100];
 let filesData = [], activeIndex = 0;
+
+// Time display mode: "ticks" | "relative" | "absolute"
+let timeDisplayMode = "ticks";
+
+function getTimeContext(fileIdx) {
+  const d = filesData[fileIdx || activeIndex];
+  if (!d) return { tickSeconds: 60, startHour: 0, startWeekday: "", peakHoursUtc: new Set() };
+  const meta = (d.events || []).find(e => e.event === "scenario_meta") || {};
+  const tickSeconds = Math.max(1, Number(meta.tick_seconds) || 60);
+  const scenMeta = meta.scenario_metadata || {};
+  const ap = scenMeta.arrival_profile || scenMeta.calibration_targets?.arrival_profile || {};
+  const startHour = Number(ap.scenario_start_hour) || 0;
+  const startWeekday = ap.scenario_start_weekday || "";
+  const peakHoursUtc = new Set();
+  (Array.isArray(ap.peak_window_hours_utc) ? ap.peak_window_hours_utc : []).forEach(h => {
+    const n = Number(h);
+    if (Number.isFinite(n)) peakHoursUtc.add(((n % 24) + 24) % 24);
+  });
+  return { tickSeconds, startHour, startWeekday, peakHoursUtc };
+}
+
+function fmtTickAsTime(tick, ctx) {
+  if (timeDisplayMode === "ticks") return String(tick);
+  const totalSeconds = tick * ctx.tickSeconds;
+  if (timeDisplayMode === "relative") {
+    const h = Math.floor(totalSeconds / 3600);
+    const m = Math.floor((totalSeconds % 3600) / 60);
+    const s = totalSeconds % 60;
+    if (h > 0) return s > 0 ? `${h}h${String(m).padStart(2, "0")}m${String(s).padStart(2, "0")}s` : m > 0 ? `${h}h${String(m).padStart(2, "0")}m` : `${h}h`;
+    if (m > 0) return s > 0 ? `${m}m${String(s).padStart(2, "0")}s` : `${m}m`;
+    return `${s}s`;
+  }
+  // absolute: offset from scenario_start_hour
+  const baseSeconds = ctx.startHour * 3600;
+  const absSeconds = (baseSeconds + totalSeconds) % 86400;
+  const hh = Math.floor(absSeconds / 3600);
+  const mm = Math.floor((absSeconds % 3600) / 60);
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+function fmtTickLabel(tick, ctx) {
+  if (timeDisplayMode === "ticks") return `Step ${tick}`;
+  return fmtTickAsTime(tick, ctx);
+}
+
+function fmtTickRange(start, end, ctx) {
+  if (timeDisplayMode === "ticks") {
+    const dur = end - start;
+    return `Ticks ${start}\u2192${end} (${dur} tick${dur > 1 ? "s" : ""})`;
+  }
+  const durSec = (end - start) * ctx.tickSeconds;
+  const durLabel = durSec >= 3600 ? `${(durSec / 3600).toFixed(1)}h` : durSec >= 60 ? `${Math.round(durSec / 60)}m` : `${durSec}s`;
+  return `${fmtTickAsTime(start, ctx)}\u2192${fmtTickAsTime(end, ctx)} (${durLabel})`;
+}
+
+function timeAxisTitle() {
+  if (timeDisplayMode === "ticks") return "Time step";
+  if (timeDisplayMode === "relative") return "Elapsed time";
+  return "Time (UTC)";
+}
+
+// Peak window highlight state
+let showPeakHighlight = false;
+
+function getPeakTickRanges(ctx, maxTick) {
+  if (!ctx.peakHoursUtc || ctx.peakHoursUtc.size === 0) return [];
+  const secPerTick = ctx.tickSeconds;
+  const ranges = [];
+  let inPeak = false, rangeStart = 0;
+  for (let t = 0; t <= maxTick; t++) {
+    const totalSec = t * secPerTick;
+    const utcHour = Math.floor(((ctx.startHour * 3600 + totalSec) % 86400) / 3600);
+    const isPeak = ctx.peakHoursUtc.has(utcHour);
+    if (isPeak && !inPeak) { rangeStart = t; inPeak = true; }
+    else if (!isPeak && inPeak) { ranges.push([rangeStart, t]); inPeak = false; }
+  }
+  if (inPeak) ranges.push([rangeStart, maxTick]);
+  return ranges;
+}
+
+function isTickInPeak(tick, ctx) {
+  if (!ctx.peakHoursUtc || ctx.peakHoursUtc.size === 0) return false;
+  const totalSec = tick * ctx.tickSeconds;
+  const utcHour = Math.floor(((ctx.startHour * 3600 + totalSec) % 86400) / 3600);
+  return ctx.peakHoursUtc.has(utcHour);
+}
+
+const PEAK_BG_COLOR = "rgba(251,191,36,0.07)";
+const PEAK_BORDER_COLOR = "rgba(251,191,36,0.22)";
+
 let expMode = "discrimination";
 let expData = {
   discrimination: null,
@@ -38,6 +128,13 @@ let loadedScenarioDocs = [];
 let mcData = null; // { policies: [...], metrics: [...], trials: { policy: { metric: [values] } } }
 let mcBoxChart = null, mcCIChart = null;
 let mcVisiblePolicies = new Set();
+
+// Sweep shared state
+let sweepLoaded = false;
+let sweepData = null;
+let sweepLineChart = null;
+let sweepBarChart = null;
+let sweepConvergeChart = null;
 
 // --- Parsing & Analysis ---
 function parseNdjson(text) {
@@ -666,6 +763,7 @@ function renderTabContent(name) {
   if (name === "stats") renderStats();
   if (name === "simulation") renderSimulationTab();
   if (name === "monteCarlo") renderMonteCarlo();
+  if (name === "sweep") renderSweepTab();
 }
 
 function switchTab(name) {
@@ -682,6 +780,7 @@ function hasLoadedData() {
     filesData.length
     || loadedScenarioDocs.length
     || mcData
+    || sweepLoaded
     || expData.discrimination
     || expData.calibrationGrid.length
     || expData.calibrationValidation.length
@@ -755,7 +854,7 @@ function flattenMetadata(obj, prefix = "", out = {}) {
   return out;
 }
 
-const RUN_CATEGORIES = new Set(["comparisons", "discrimination", "monte-carlo", "calibration"]);
+const RUN_CATEGORIES = new Set(["comparisons", "discrimination", "monte-carlo", "calibration", "sweep"]);
 
 function inferRunCategory(normalizedPath) {
   const lower = String(normalizedPath || "").toLowerCase();
@@ -1048,25 +1147,6 @@ function tailPath(value) {
   return parts.length ? parts[parts.length - 1] : normalized;
 }
 
-function _findCalibrationWinnerLabel(scenarioPath) {
-  if (!scenarioPath || !runCatalog.length) return "";
-  const scenarioFile = scenarioPath.replace(/\\/g, "/").split("/").pop() || "";
-  if (!scenarioFile) return "";
-  const stem = scenarioFile.replace(/\.ya?ml$/i, "");
-  for (const r of runCatalog) {
-    if (r.category !== "calibration") continue;
-    const flat = r.metadataFlat || {};
-    const decision = flat["context.decision_status"] || flat["decision.status"] || "";
-    if (decision !== "accepted") continue;
-    const bestSkew = flat["context.best_480.arrival_skew"] || "";
-    const bestDepth = flat["context.best_480.queue_depth_scale"] || "";
-    if (bestSkew && stem.includes(`a${bestSkew}`) && bestDepth && stem.includes(`q${bestDepth}`)) {
-      const label = r.run || r.key || "";
-      return label.replace(/^golden-proof-/, "").replace(/-adaptive-/, " ");
-    }
-  }
-  return "";
-}
 
 function summarizeRunBubbles(run) {
   const flat = run.metadataFlat || {};
@@ -1094,8 +1174,6 @@ function summarizeRunBubbles(run) {
     else push("policies", `${policyCount} (${previewListish(policies, 2)})`, "cmp-primary");
     const scenarioPath = firstMetaValue(flat, ["context.scenario", "context.base_scenario"]) || "";
     const scenarioTail = tailPath(scenarioPath);
-    const winnerLabel = _findCalibrationWinnerLabel(scenarioPath);
-    if (winnerLabel) push("WINNER", winnerLabel, "strong");
     push("scenario", scenarioTail, "cmp-secondary");
     push("cycles", flat["context.cycles"]);
     push("limit", flat["context.limit"]);
@@ -1129,6 +1207,13 @@ function summarizeRunBubbles(run) {
     push("cycles", flat["context.cycles"]);
     push("limit", flat["context.limit"]);
     push("ticks", flat["context.ticks_per_cycle"]);
+  } else if (run.category === "sweep") {
+    const limits = firstMetaValue(flat, ["context.limits"]);
+    const policies = firstMetaValue(flat, ["context.policies"]);
+    push("limits", Array.isArray(limits) ? limits.join(",") : (limits || ""), "cmp-primary");
+    push("policies", countListish(policies) ? `${countListish(policies)} (${previewListish(policies, 2)})` : "", "cmp-secondary");
+    push("scenario", tailPath(firstMetaValue(flat, ["context.scenario", "custom_metadata.scenario"])));
+    push("window", firstMetaValue(flat, ["context.window"]));
   } else {
     push("script", tailPath(firstMetaValue(flat, ["script"])), "meta-primary");
     push("host", firstMetaValue(flat, ["hostname"]));
@@ -1265,7 +1350,7 @@ function updateRunDetailPane() {
     .join(", ");
   runOutputFiles.innerHTML = loadable.length
     ? `Loadable outputs (${loadable.length}): ${preview}${loadable.length > 8 ? ", ..." : ""}`
-    : "No loadable NDJSON/CSV/YAML outputs for this run.";
+    : "No loadable outputs for this run.";
 }
 
 function _renderStructuredMetadata(run, loadable) {
@@ -1388,6 +1473,7 @@ function getSelectedRunEntries() {
 function pickLoadFilesForRun(run) {
   if (!run) return [];
   const byExt = run.files.filter(x => /\.(ndjson|jsonl|json|csv|ya?ml)$/i.test(x.file.name));
+  if (run.category === "sweep") return byExt.filter(x => /\.json$/i.test(x.file.name) && !/metadata\.json$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "comparisons") return byExt.filter(x => /\.ndjson$/i.test(x.file.name) || /\.ya?ml$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "discrimination") return byExt.filter(x => /discrimination-summary\.csv$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "monte-carlo") return byExt.filter(x => /monte-carlo-summary\.csv$/i.test(x.file.name)).map(x => x.file);
@@ -1645,6 +1731,11 @@ function unloadAllData() {
     calibrationSummary: [],
   };
   mcData = null;
+  sweepLoaded = false;
+  sweepData = null;
+  mqDestroyChartIfPresent(sweepLineChart); sweepLineChart = null;
+  mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
+  mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
 
   selectedSeries = null;
   statsExtendedMode = false;
@@ -1659,7 +1750,8 @@ function unloadAllData() {
   mcVisiblePolicies = new Set();
 
   BARS_LEGEND_KEYS.forEach(key => { barsLegendVisibility[key] = true; });
-  barsStatsMode = "peak";
+  barsStatsMode = "max";
+  barsStatsWindow = "all";
   barsStatsSeriesKey = "Idle";
   barsStatsEnabled = true;
 
@@ -1696,21 +1788,37 @@ function loadFiles(fl, opts = {}) {
   let csvMonteLoaded = false;
   let csvExpLoaded = false;
   let yamlLoaded = false;
+  let sweepJsonLoaded = false;
   const tasks = [];
   if (ndjsonFiles.length) {
-    tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result }); r.onerror = N; r.readAsText(F); }))).then(A => {
-      filesData = A.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
-      applyLoadedScenariosToFilesData();
-      activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, A.length - 1); swimIdx = 0; stop();
-      filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
-      kanbanVisibleIdxs = new Set(filesData.map((_, i) => i));
-      barVisibleIdxs = new Set(filesData.map((_, i) => i));
-      const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
-      document.getElementById("playLabel").textContent = "Step 0 / " + mx;
-      document.getElementById("scrub").max = mx;
-      document.getElementById("scrub").value = 0;
-      enableTabs(["stats", "simulation", "kanban", "composition", "bars", "swimlane"]);
-      ndjsonLoaded = true;
+    tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result, fileName: F.name }); r.onerror = N; r.readAsText(F); }))).then(A => {
+      const sweepFiles = [];
+      const metricsFiles = [];
+      A.forEach(x => {
+        if (/\.json$/i.test(x.fileName)) {
+          try { const parsed = JSON.parse(x.t); if (parsed && Array.isArray(parsed.limits) && parsed.data) { sweepFiles.push(parsed); return; } } catch {}
+        }
+        metricsFiles.push(x);
+      });
+      if (sweepFiles.length) {
+        loadSweepData(sweepFiles[sweepFiles.length - 1]);
+        sweepLoaded = true;
+        sweepJsonLoaded = true;
+      }
+      if (metricsFiles.length) {
+        filesData = metricsFiles.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
+        applyLoadedScenariosToFilesData();
+        activeIndex = 0; chartIdxL = 0; chartIdxR = Math.min(1, metricsFiles.length - 1); swimIdx = 0; stop();
+        filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
+        kanbanVisibleIdxs = new Set(filesData.map((_, i) => i));
+        barVisibleIdxs = new Set(filesData.map((_, i) => i));
+        const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
+        document.getElementById("playLabel").textContent = "Step 0 / " + mx;
+        document.getElementById("scrub").max = mx;
+        document.getElementById("scrub").value = 0;
+        enableTabs(["stats", "simulation", "kanban", "composition", "bars", "swimlane"]);
+        ndjsonLoaded = true;
+      }
     }));
   }
   if (yamlFiles.length) {
@@ -1785,13 +1893,14 @@ function loadFiles(fl, opts = {}) {
       if (filesData.length) switchTab("simulation");
       else switchTab("simulation");
     }
+    else if (sweepJsonLoaded) switchTab("sweep");
     else if (csvExpLoaded) switchTab("experiments");
     else if (csvMonteLoaded) switchTab("monteCarlo");
   });
 }
 function updateLoadedCount() {
   if (!loadedFileCount) return;
-  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
+  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (sweepLoaded ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
   loadedFileCount.textContent = count ? `${count} file${count !== 1 ? "s" : ""}` : "0 files";
 }
 function renderFileList() {
@@ -1812,6 +1921,9 @@ function renderFileList() {
   }
   if (expData.calibrationGrid.length || expData.calibrationValidation.length || expData.calibrationSummary.length) {
     chips.push(`<span class="file-chip fc-csv" data-unload="calibration" title="Click to unload">calibration (${expData.calibrationGrid.length}t/${expData.calibrationValidation.length}v)<span class="fc-x">\u00d7</span></span>`);
+  }
+  if (sweepLoaded && sweepData) {
+    chips.push(`<span class="file-chip fc-ndjson" data-unload="sweep" title="Click to unload">sweep (${sweepData.limits.length} limits × ${sweepData.policies.length} policies)<span class="fc-x">\u00d7</span></span>`);
   }
   el.innerHTML = chips.join("");
 }
@@ -1837,6 +1949,13 @@ function renderFileList() {
       expData.calibrationGrid = [];
       expData.calibrationValidation = [];
       expData.calibrationSummary = [];
+    } else if (kind === "sweep") {
+      sweepLoaded = false;
+      sweepData = null;
+      mqDestroyChartIfPresent(sweepLineChart); sweepLineChart = null;
+      mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
+      mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
+      disableTabs(["sweep"]);
     }
     renderFileList();
     updateLoadedCount();
@@ -2761,27 +2880,60 @@ function renderKanbanPolicyTabs() {
 function renderKanbanTab() {
   if (!filesData.length) return;
   renderKanbanPolicyTabs();
+  lockPlayLabelWidth();
   renderSnapshot();
   renderTraces();
 }
+function ensureSnapshotSkeleton() {
+  const el = document.getElementById("kSnap");
+  if (el.querySelector("[data-snap=step]")) return;
+  el.innerHTML =
+    `<span data-snap="step" style="font-weight:600"></span>` +
+    ` <span data-snap="peak" class="peak-badge hidden"></span>` +
+    ` <span data-snap="queue"><b>Queue:</b></span>` +
+    ` <span data-snap="counts"></span>` +
+    ` <span data-snap="story" class="story-tip"></span>`;
+}
 function renderSnapshot() {
   const el = document.getElementById("kSnap");
+  ensureSnapshotSkeleton();
   const t = playhead;
+  const ctx = getTimeContext(activeIndex);
+  const stepEl = el.querySelector("[data-snap=step]");
+  const peakEl = el.querySelector("[data-snap=peak]");
+  const queueEl = el.querySelector("[data-snap=queue]");
+  const countsEl = el.querySelector("[data-snap=counts]");
+  const storyEl = el.querySelector("[data-snap=story]");
+
+  stepEl.textContent = fmtTickLabel(t, ctx);
+
+  const peakNow = isTickInPeak(t, ctx);
+  peakEl.textContent = peakNow ? "PEAK" : "off-peak";
+  peakEl.className = showPeakHighlight ? (peakNow ? "peak-badge peak" : "peak-badge offpeak") : "peak-badge hidden";
+
+  const scrubEl = document.getElementById("scrub");
+  if (scrubEl) scrubEl.classList.toggle("in-peak", showPeakHighlight && peakNow);
+
   const visible = filesData.filter((_, i) => kanbanVisibleIdxs.has(i));
-  const parts = visible.map(d => {
-    if (!d.packed) return "";
-    const f = normalizeEventsForAnalysis(d.events);
-    const w = buildKanbanState(d.packed, f, t);
-    const active = w.queue.length;
-    return `<span><b>${active}</b></span>`;
-  });
-  const f = normalizeEventsForAnalysis(filesData[0]?.events || []);
-  const story = buildNarrativeAtTick(f, t);
   if (!visible.length) {
-    el.innerHTML = `<span style="font-weight:600">Step ${t}</span> <span class="story-tip">Select one or more policies to render Kanban boards.</span>`;
+    queueEl.style.display = "none";
+    countsEl.textContent = "";
+    storyEl.textContent = "Select one or more policies to render Kanban boards.";
+    storyEl.title = "";
     return;
   }
-  el.innerHTML = `<span style="font-weight:600">Step ${t}</span> <span><b>Queue:</b></span> ` + parts.join(" ") + ` <span class="story-tip" title="${mqEscapeHtml(story.join("; "))}">${mqEscapeHtml(story[0] || "")}</span>`;
+  queueEl.style.display = "";
+  const queueCounts = visible.map(d => {
+    if (!d.packed) return "–";
+    const f = normalizeEventsForAnalysis(d.events);
+    return String(buildKanbanState(d.packed, f, t).queue.length);
+  }).join("  ");
+  countsEl.textContent = queueCounts;
+
+  const f = normalizeEventsForAnalysis(filesData[0]?.events || []);
+  const story = buildNarrativeAtTick(f, t);
+  storyEl.textContent = story[0] || "";
+  storyEl.title = story.join("; ");
 }
 function renderTraces() {
   const container = document.getElementById("tracesContainer");
@@ -2846,6 +2998,7 @@ function renderTraces() {
     cards.className = "trace-cards";
     const colData = [w.queue, w.rebase, w.ci, w.ready, w.stale, w.merged];
     const mTickMap = mergeTickByMr(f);
+    const kCtx = getTimeContext(i);
     colData.forEach((arr, ci) => {
       const col = document.createElement("div");
       col.className = "tcol";
@@ -2854,10 +3007,11 @@ function renderTraces() {
         arr.forEach(m => { const mt = mTickMap.get(m) ?? 0; if (!byMT.has(mt)) byMT.set(mt, []); byMT.get(mt).push(m); });
         Array.from(byMT.keys()).sort((a, b) => b - a).forEach(mt => {
           const mrs = byMT.get(mt), isRecent = (t - mt) < HIGHLIGHT_TICKS;
+          const mtLabel = timeDisplayMode === "ticks" ? `t=${mt}` : fmtTickAsTime(mt, kCtx);
           if (mrs.length > 1) {
             const grp = document.createElement("div");
             grp.className = "merge-group" + (isRecent ? " recent" : "");
-            grp.innerHTML = `<span class="mg-label">t=${mt} (${mrs.length})</span>`;
+            grp.innerHTML = `<span class="mg-label">${mqEscapeHtml(mtLabel)} (${mrs.length})</span>`;
             mrs.forEach(m => { const c = document.createElement("div"); c.className = "kcard" + (forceMergedRecent.has(m) ? " force-merged" : isRecent ? " just-merged" : " muted"); c.textContent = "!" + m; grp.appendChild(c); });
             col.appendChild(grp);
           } else {
@@ -2908,8 +3062,10 @@ const BARS_LEGEND_COLORS = {
   "CI": C0.active,
   "Ready": C0.pool,
 };
-const BARS_STATS_MODES = ["peak", "avg"];
-let barsStatsMode = "peak";
+const BARS_STATS_MODES = ["max", "avg"];
+const BARS_STATS_WINDOWS = ["all", "peak", "off-peak"];
+let barsStatsMode = "max";
+let barsStatsWindow = "all";
 let barsStatsSeriesKey = "Idle";
 let barsStatsEnabled = true;
 
@@ -2943,11 +3099,11 @@ function refreshCharts() {
   document.getElementById("chartTitleR").textContent = filesData[chartIdxR]?.name || "";
   const yMax = getSharedYMax();
   if (pL) {
-    doChart(pL, "chartCanvasL", "L", yMax);
+    doChart(pL, "chartCanvasL", "L", yMax, chartIdxL);
     dSwim(pL, "swimAreaL", { forceFullRange: true });
   }
   if (chartViewMode === "compare" && pR) {
-    doChart(pR, "chartCanvasR", "R", yMax);
+    doChart(pR, "chartCanvasR", "R", yMax, chartIdxR);
     dSwim(pR, "swimAreaR", { forceFullRange: true });
   }
 }
@@ -2961,7 +3117,7 @@ function barsLegendKeyFromDataset(ds) {
   return String(ds?.seriesKey || ds?.label || "");
 }
 
-function getBarsSeriesValues(packed, key) {
+function getBarsSeriesValues(packed, key, windowFilter, fileIdx) {
   const s = packed?.series;
   if (!s) return [];
   const src = (
@@ -2972,13 +3128,23 @@ function getBarsSeriesValues(packed, key) {
             : key === "Ready" ? s.pool
               : []
   );
-  return Array.isArray(src)
-    ? src.map(v => Number(v)).filter(v => Number.isFinite(v))
-    : [];
+  if (!Array.isArray(src)) return [];
+  if (!windowFilter || windowFilter === "all") {
+    return src.map(v => Number(v)).filter(v => Number.isFinite(v));
+  }
+  const ctx = getTimeContext(fileIdx);
+  if (!ctx.peakHoursUtc.size) {
+    return src.map(v => Number(v)).filter(v => Number.isFinite(v));
+  }
+  const wantPeak = windowFilter === "peak";
+  return src.map((v, t) => {
+    const isPeak = isTickInPeak(t, ctx);
+    return (isPeak === wantPeak) ? Number(v) : NaN;
+  }).filter(v => Number.isFinite(v));
 }
 
-function computeBarsStatValue(packed, key, mode) {
-  const values = getBarsSeriesValues(packed, key);
+function computeBarsStatValue(packed, key, mode, windowFilter, fileIdx) {
+  const values = getBarsSeriesValues(packed, key, windowFilter, fileIdx);
   if (!values.length) return null;
   if (mode === "avg") {
     return values.reduce((sum, v) => sum + v, 0) / values.length;
@@ -2994,7 +3160,13 @@ function formatBarsStatLabelValue(value) {
   return n.toFixed(3);
 }
 
-function plBarsStatLine(packed) {
+function _barsStatWindowLabel(win) {
+  if (win === "peak") return "PEAK ";
+  if (win === "off-peak") return "OFF-PEAK ";
+  return "";
+}
+
+function plBarsStatLine(packed, fileIdx) {
   return {
     id: "barsStatLine",
     afterDatasetsDraw(chart) {
@@ -3004,7 +3176,7 @@ function plBarsStatLine(packed) {
       if (!key || !BARS_LEGEND_KEYS.includes(key) || !BARS_STATS_MODES.includes(mode)) return;
       if (barsLegendVisibility[key] === false) return;
 
-      const value = computeBarsStatValue(packed, key, mode);
+      const value = computeBarsStatValue(packed, key, mode, barsStatsWindow, fileIdx);
       if (!Number.isFinite(value)) return;
 
       const yScale = chart?.scales?.y;
@@ -3015,7 +3187,8 @@ function plBarsStatLine(packed) {
       if (!Number.isFinite(y) || y < area.top || y > area.bottom) return;
 
       const color = BARS_LEGEND_COLORS[key] || "#8b949e";
-      const label = `${key} ${mode.toUpperCase()}: ${formatBarsStatLabelValue(value)}`;
+      const winLabel = _barsStatWindowLabel(barsStatsWindow);
+      const label = `${key} ${winLabel}${mode.toUpperCase()}: ${formatBarsStatLabelValue(value)}`;
 
       const ctx = chart.ctx;
       ctx.save();
@@ -3063,13 +3236,15 @@ function renderBarsLegendControls() {
   )).join("");
 
   const statsBodyCls = barsStatsEnabled ? "bars-stat-body" : "bars-stat-body off";
-  statsHost.innerHTML = `<span class="bars-legend-title">Stats</span>`
-    + `<button class="bars-stat-power-btn${barsStatsEnabled ? "" : " active"}" data-bars-stat-enabled="off">OFF</button>`
-    + `<button class="bars-stat-power-btn${barsStatsEnabled ? " active" : ""}" data-bars-stat-enabled="on">ON</button>`
+  statsHost.innerHTML = `<button class="bars-stat-power-btn${barsStatsEnabled ? " active" : ""}" data-bars-stat-enabled="toggle">Stats</button>`
     + `<span class="${statsBodyCls}">`
     + `<span class="bars-legend-subtitle">Mode</span>`
     + BARS_STATS_MODES.map(mode => (
       `<button class="bars-stat-mode-btn${barsStatsMode === mode ? " active" : ""}" data-bars-stat-mode="${mode}">${mode.toUpperCase()}</button>`
+    )).join("")
+    + `<span class="bars-legend-subtitle">Window</span>`
+    + BARS_STATS_WINDOWS.map(win => (
+      `<button class="bars-stat-mode-btn${barsStatsWindow === win ? " active" : ""}" data-bars-stat-window="${win}">${win === "all" ? "All" : win === "peak" ? "Peak" : "Off-peak"}</button>`
     )).join("")
     + `<span class="bars-legend-subtitle">Trace</span>`
     + BARS_LEGEND_KEYS.map(key => {
@@ -3141,11 +3316,13 @@ function renderBarsTab() {
     panel.className = "bars-panel" + (single ? " single" : "");
     panel.innerHTML = `<h3>${mqEscapeHtml(d.name)}</h3><canvas id="barsCanvas${idx}-${n}"></canvas>`;
     host.appendChild(panel);
+    const tCtx = getTimeContext(idx);
+    const barLabels = timeDisplayMode === "ticks" ? d.packed.series.labels : d.packed.series.labels.map(t => fmtTickAsTime(t, tCtx));
     const ctx = panel.querySelector("canvas").getContext("2d");
     const ch = new Chart(ctx, {
       type: "bar",
       data: {
-        labels: d.packed.series.labels,
+        labels: barLabels,
         datasets: [{
           label: "Ready",
           seriesKey: "Ready",
@@ -3199,11 +3376,11 @@ function renderBarsTab() {
           tooltip: { enabled: isTooltipEnabled("bars") }
         },
         scales: {
-          x: { min: 0, max: d.packed.maxTick, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } },
+          x: { min: 0, max: d.packed.maxTick, title: { display: true, text: timeAxisTitle() }, ticks: { maxTicksLimit: 12 } },
           y: { stacked: true, beginAtZero: true, max: sharedYMax }
         }
       },
-      plugins: [plMergePlay(d.packed), plCrosshair(), plBarsStatLine(d.packed)]
+      plugins: [plPeakBand(idx), plMergePlay(d.packed), plCrosshair(), plBarsStatLine(d.packed, idx)]
     });
     ch.data.datasets.forEach((ds, datasetIdx) => {
       const key = barsLegendKeyFromDataset(ds);
@@ -3256,37 +3433,27 @@ const segmentColorForKind = kind => (
 
 let showMergeLines = true;
 function syncMergeLineControls() {
-  const c = document.getElementById("btnMergeLinesComposition");
-  const b = document.getElementById("btnMergeLinesBars");
-  if (c) {
-    c.classList.toggle("active", showMergeLines);
-    c.setAttribute("aria-pressed", showMergeLines ? "true" : "false");
-    c.textContent = showMergeLines ? "ON" : "OFF";
-  }
-  if (b) {
-    b.classList.toggle("active", showMergeLines);
-    b.setAttribute("aria-pressed", showMergeLines ? "true" : "false");
-    b.textContent = showMergeLines ? "ON" : "OFF";
-  }
+  [document.getElementById("btnMergeLinesComposition"), document.getElementById("btnMergeLinesBars"), document.getElementById("btnMergeLinesSwim")].forEach(el => {
+    if (!el) return;
+    el.classList.toggle("active", showMergeLines);
+    el.setAttribute("aria-pressed", showMergeLines ? "true" : "false");
+  });
 }
 function applyMergeLinesSetting() {
   if (chartInstL) chartInstL.update("none");
   if (chartInstR) chartInstR.update("none");
   barCharts.forEach(ch => ch.update("none"));
+  if (document.getElementById("panelSwimlane")?.classList.contains("active")) renderSwimlaneTab();
 }
 function onMergeLineControlChange(checked) {
   showMergeLines = !!checked;
   syncMergeLineControls();
   applyMergeLinesSetting();
 }
-const btnMergeLinesComposition = document.getElementById("btnMergeLinesComposition");
-if (btnMergeLinesComposition) {
-  btnMergeLinesComposition.addEventListener("click", () => onMergeLineControlChange(!showMergeLines));
-}
-const btnMergeLinesBars = document.getElementById("btnMergeLinesBars");
-if (btnMergeLinesBars) {
-  btnMergeLinesBars.addEventListener("click", () => onMergeLineControlChange(!showMergeLines));
-}
+["btnMergeLinesComposition", "btnMergeLinesBars", "btnMergeLinesSwim"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("click", () => onMergeLineControlChange(!showMergeLines));
+});
 syncMergeLineControls();
 const barsLegendControlsEl = document.getElementById("barsLegendControls");
 if (barsLegendControlsEl) {
@@ -3303,9 +3470,7 @@ if (barsLegendControlsEl) {
 
     const statsEnabledBtn = e.target.closest("button[data-bars-stat-enabled]");
     if (statsEnabledBtn) {
-      const next = String(statsEnabledBtn.dataset.barsStatEnabled || "").toLowerCase();
-      if (next !== "on" && next !== "off") return;
-      barsStatsEnabled = next === "on";
+      barsStatsEnabled = !barsStatsEnabled;
       renderBarsLegendControls();
       barCharts.forEach(ch => ch.update("none"));
       return;
@@ -3316,6 +3481,16 @@ if (barsLegendControlsEl) {
       const mode = String(statsModeBtn.dataset.barsStatMode || "").toLowerCase();
       if (!BARS_STATS_MODES.includes(mode)) return;
       barsStatsMode = mode;
+      renderBarsLegendControls();
+      barCharts.forEach(ch => ch.update("none"));
+      return;
+    }
+
+    const statsWindowBtn = e.target.closest("button[data-bars-stat-window]");
+    if (statsWindowBtn) {
+      const win = String(statsWindowBtn.dataset.barsStatWindow || "");
+      if (!BARS_STATS_WINDOWS.includes(win)) return;
+      barsStatsWindow = win;
       renderBarsLegendControls();
       barCharts.forEach(ch => ch.update("none"));
       return;
@@ -3817,18 +3992,25 @@ function renderLockedSwimTip(preferredSwimId = null) {
   const tickE = evs.find(e => e.event === "tick" && e.tick === st.lockTick);
   const snapE = evs.find(e => e.event === "snapshot" && e.tick === st.lockTick);
   const seg = st.lockSeg;
-  const segTxt = seg ? `${seg.kind} ${seg.start}→${seg.end}` : "n/a";
+  const lockOwner = getSwimOwner(swimId);
+  const lockOwnerIdx = lockOwner ? filesData.indexOf(lockOwner) : activeIndex;
+  const lockTCtx = getTimeContext(lockOwnerIdx);
+  const segTxt = seg ? (timeDisplayMode === "ticks" ? `${seg.kind} ${seg.start}→${seg.end}` : `${seg.kind} ${fmtTickRange(seg.start, seg.end, lockTCtx)}`) : "n/a";
   const mrTicks = st.mrEventTicks && st.mrEventTicks.length ? st.mrEventTicks : [st.lockMinTick, st.lockMaxTick];
   const eventIdx = mrTicks.indexOf(st.lockTick);
   const lo = st.lockMinTick ?? 0;
   const hi = st.lockMaxTick ?? (st.maxTick || packed.maxTick);
+  const scrubLabel = timeDisplayMode === "ticks"
+    ? `Lock tick scrubber (${lo}→${hi}${eventIdx >= 0 ? `, MR event ${eventIdx + 1}/${mrTicks.length}` : ""})`
+    : `Lock scrubber (${fmtTickAsTime(lo, lockTCtx)}→${fmtTickAsTime(hi, lockTCtx)}${eventIdx >= 0 ? `, MR event ${eventIdx + 1}/${mrTicks.length}` : ""})`;
+  const lockTickLabel = timeDisplayMode === "ticks" ? `t${st.lockTick}` : fmtTickAsTime(st.lockTick, lockTCtx);
   let html = `<div class="head">` +
     `<span class="head-title">MR !${st.lockMr}</span>` +
     `<span class="head-sub">${ownerName} lane</span></div>`;
   html += `<div class="sum">Lane: <strong>${SWIM_COL_LABELS[lane] || lane}</strong><br>Segment: ${mqEscapeHtml(segTxt)}</div>`;
-  html += `<div class="scrub"><div class="k">Lock tick scrubber (${lo}→${hi}${eventIdx >= 0 ? `, MR event ${eventIdx + 1}/${mrTicks.length}` : ""})</div>` +
+  html += `<div class="scrub"><div class="k">${mqEscapeHtml(scrubLabel)}</div>` +
     `<div class="scrub-row"><input class="lock-scrub" type="range" min="${lo}" max="${hi}" value="${st.lockTick}" step="1" />` +
-    `<span class="tick-val">t${st.lockTick}</span></div></div>`;
+    `<span class="tick-val">${mqEscapeHtml(lockTickLabel)}</span></div></div>`;
   html += `<div class="details"><div class="grid">` +
     `<div class="k">Target head</div><div class="v">${mqEscapeHtml(snapE?.target_head || "n/a")}</div>` +
     `<div class="k">Open MRs</div><div class="v">${snapE?.open_mrs ?? tickE?.open_mrs ?? "n/a"}</div>` +
@@ -3842,7 +4024,8 @@ function renderLockedSwimTip(preferredSwimId = null) {
     `<div class="k">Transitions failed</div><div class="v">${hist.transFail}</div>` +
     `</div>`;
   html += `<div class="k">Recent PR history / transitions</div>`;
-  html += `<div class="history-scroll"><ul>${hist.recent.length ? hist.recent.map(h => `<li><strong>t${h.tick}</strong> ${mqEscapeHtml(h.msg)}</li>`).join("") : "<li>No events up to this tick.</li>"}</ul></div>`;
+  const fmtHistTick = h => timeDisplayMode === "ticks" ? `t${h.tick}` : fmtTickAsTime(h.tick, lockTCtx);
+  html += `<div class="history-scroll"><ul>${hist.recent.length ? hist.recent.map(h => `<li><strong>${fmtHistTick(h)}</strong> ${mqEscapeHtml(h.msg)}</li>`).join("") : "<li>No events up to this tick.</li>"}</ul></div>`;
   html += `</div>`;
   html += `<div class="hint">Drag the header to move. Arrow Left/Right jumps event ticks. Arrow Up/Down switches lane. Shift+click or Esc unlocks.</div>`;
   const lockWidth = 860;
@@ -3959,14 +4142,16 @@ function getSharedYMax() {
   return mx > 0 ? mx : undefined;
 }
 
-function doChart(p, canvasId, side, sharedYMax) {
+function doChart(p, canvasId, side, sharedYMax, fileIdx) {
   const cvs = document.getElementById(canvasId); if (!cvs) return;
   if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
   const x0 = 0;
   const x1 = p.maxTick;
   const yOpts = { stacked: true, beginAtZero: true };
   if (sharedYMax != null) { yOpts.max = sharedYMax; }
-  const inst = new Chart(cvs, { type: "bar", data: { labels: p.series.labels, datasets: [
+  const tCtx = getTimeContext(fileIdx);
+  const chartLabels = timeDisplayMode === "ticks" ? p.series.labels : p.series.labels.map(t => fmtTickAsTime(t, tCtx));
+  const inst = new Chart(cvs, { type: "bar", data: { labels: chartLabels, datasets: [
     { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
     { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
     { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
@@ -3974,8 +4159,8 @@ function doChart(p, canvasId, side, sharedYMax) {
     { label: "Open (total)", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
   ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
     plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: MQSIM_LEGEND_FONT_SIZE } }, onClick: handleLegendToggle }, tooltip: { enabled: isTooltipEnabled("composition") } },
-    scales: { x: { min: x0, max: x1, title: { display: true, text: "Time step" }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
-  }, plugins: [plMergePlay(p), plCrosshair()] });
+    scales: { x: { min: x0, max: x1, title: { display: true, text: timeAxisTitle() }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
+  }, plugins: [plPeakBand(fileIdx), plMergePlay(p), plCrosshair()] });
   if (side === "L") chartInstL = inst; else chartInstR = inst;
 }
 
@@ -4001,11 +4186,11 @@ function syncWindow() {
   const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
   const yMax = getSharedYMax();
   if (pL) {
-    doChart(pL, "chartCanvasL", "L", yMax);
+    doChart(pL, "chartCanvasL", "L", yMax, chartIdxL);
     dSwim(pL, "swimAreaL", { forceFullRange: true });
   }
   if (chartViewMode === "compare" && pR) {
-    doChart(pR, "chartCanvasR", "R", yMax);
+    doChart(pR, "chartCanvasR", "R", yMax, chartIdxR);
     dSwim(pR, "swimAreaR", { forceFullRange: true });
   }
   const pS = filesData[swimIdx]?.packed;
@@ -4046,7 +4231,7 @@ function dSwim(p, swimId, opts = {}) {
       `State: ${kindLabel(s.kind)}<br>` +
       `Priority: ${mqEscapeHtml(labels.priorityLabel)}<br>` +
       `Service: ${mqEscapeHtml(labels.serviceLabels)}<br>` +
-      `Ticks ${s.start}→${s.end} (${dur} tick${dur > 1 ? "s" : ""})` +
+      `${fmtTickRange(s.start, s.end, swimTCtx)}` +
       `</div>`
     )
       .style("display", "block")
@@ -4075,9 +4260,23 @@ function dSwim(p, swimId, opts = {}) {
     ? Math.max(16, Math.min(52, Math.floor(targetHeight / Math.max(1, mrL.length))))
     : 14;
   const H = pad.t + rowH * mrL.length + pad.b, y = d3.scaleBand().domain(mrL.map(String)).range([pad.t, pad.t + rowH * mrL.length]).padding(0.12);
+  const ownerIdx = owner ? filesData.indexOf(owner) : activeIndex;
+  const swimTCtx = getTimeContext(ownerIdx);
   const x = d3.scaleLinear().domain([x0, x1]).range([pad.l, w - pad.r]);
   const svg = sw.append("svg").attr("width", w).attr("height", H).style("outline", "none");
-  svg.append("g").attr("transform", `translate(0,${H - pad.b})`).call(d3.axisBottom(x).ticks(5));
+  const xAxis = d3.axisBottom(x).ticks(5);
+  if (timeDisplayMode !== "ticks") {
+    xAxis.tickFormat(tick => fmtTickAsTime(tick, swimTCtx));
+  }
+  svg.append("g").attr("transform", `translate(0,${H - pad.b})`).call(xAxis);
+  if (showPeakHighlight) {
+    const peakRanges = getPeakTickRanges(swimTCtx, p.maxTick);
+    peakRanges.forEach(([t0, t1]) => {
+      const px0 = x(t0), px1 = x(t1);
+      svg.append("rect").attr("x", px0).attr("y", pad.t).attr("width", px1 - px0).attr("height", H - pad.t - pad.b)
+        .attr("fill", PEAK_BG_COLOR).attr("stroke", PEAK_BORDER_COLOR).attr("stroke-width", 0.5).attr("pointer-events", "none");
+    });
+  }
   if (st.locked && st.lockMr != null) {
     const activeY = y(String(st.lockMr));
     const activeBw = y.bandwidth();
@@ -4122,7 +4321,7 @@ function dSwim(p, swimId, opts = {}) {
       .on("mouseout", clearHoverTip);
   });
   // Merged markers — full row height line + circle
-  visible.filter(s => s.kind === "merged").forEach(s => {
+  if (showMergeLines) visible.filter(s => s.kind === "merged").forEach(s => {
     const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr));
     svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
       .attr("stroke", "#58a6ff").attr("stroke-width", 3).attr("opacity", 1);
@@ -4134,7 +4333,7 @@ function dSwim(p, swimId, opts = {}) {
       .on("mouseout", clearHoverTip);
   });
   // Force-merge markers — full row height diamond (no spanning dashed lines)
-  visible.filter(s => s.kind === "force_merge").forEach(s => {
+  if (showMergeLines) visible.filter(s => s.kind === "force_merge").forEach(s => {
     const mx = x(Math.max(s.start, x0)), yt = y(String(s.mr)), cy = yt + bw / 2;
     const r = Math.max(5, bw * 0.6);
     svg.append("line").attr("x1", mx).attr("x2", mx).attr("y1", yt - 1).attr("y2", yt + bw + 1)
@@ -4208,8 +4407,30 @@ function dSwim(p, swimId, opts = {}) {
 
 // --- Playback ---
 function stop() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.getElementById("btnPlay").textContent = "Play"; }
+let _playLabelLockedWidth = 0;
+function lockPlayLabelWidth() {
+  const el = document.getElementById("playLabel");
+  if (!el) return;
+  const mx = globalMaxTick();
+  const ctx = getTimeContext(activeIndex);
+  const widest = timeDisplayMode === "ticks"
+    ? "Step " + mx + " / " + mx
+    : fmtTickAsTime(mx, ctx) + " / " + fmtTickAsTime(mx, ctx);
+  el.style.minWidth = "";
+  el.textContent = widest;
+  _playLabelLockedWidth = el.offsetWidth + 2;
+  el.style.minWidth = _playLabelLockedWidth + "px";
+}
 function updatePlayLabel() {
-  document.getElementById("playLabel").textContent = "Step " + playhead + " / " + globalMaxTick();
+  const el = document.getElementById("playLabel");
+  if (!el) return;
+  const mx = globalMaxTick();
+  const ctx = getTimeContext(activeIndex);
+  if (timeDisplayMode === "ticks") {
+    el.textContent = "Step " + playhead + " / " + mx;
+  } else {
+    el.textContent = fmtTickAsTime(playhead, ctx) + " / " + fmtTickAsTime(mx, ctx);
+  }
 }
 function tick() { const mx = globalMaxTick(); if (!mx) { stop(); return; } playhead++;
   if (playhead > mx) { if (document.getElementById("chkLoop").checked) playhead = 0; else { playhead = mx; stop(); return; } }
@@ -4275,6 +4496,84 @@ document.addEventListener("keydown", e => {
     }
   }
 });
+
+// =========================================================================
+// Time toggle: wire up all [data-time-toggle] groups
+(function initTimeToggles() {
+  document.querySelectorAll(".time-toggle[data-time-toggle]").forEach(group => {
+    group.addEventListener("click", e => {
+      const btn = e.target.closest("button[data-tmode]");
+      if (!btn) return;
+      const mode = btn.dataset.tmode;
+      timeDisplayMode = mode;
+      document.querySelectorAll(".time-toggle[data-time-toggle] button").forEach(b =>
+        b.classList.toggle("active", b.dataset.tmode === mode)
+      );
+      refreshAllTimeViews();
+    });
+  });
+})();
+
+function refreshAllTimeViews() {
+  lockPlayLabelWidth();
+  if (typeof renderSnapshot === "function") renderSnapshot();
+  if (typeof renderTraces === "function") renderTraces();
+  if (typeof updatePlayLabel === "function") updatePlayLabel();
+  if (typeof refreshCharts === "function") refreshCharts();
+  if (typeof renderBarsTab === "function") renderBarsTab();
+  const pS = filesData[swimIdx]?.packed;
+  if (pS && typeof dSwim === "function") {
+    dSwim(pS, "swimAreaSingle", { forceFullRange: true });
+  }
+  if (typeof renderLockedSwimTip === "function") renderLockedSwimTip();
+}
+
+// =========================================================================
+// Peak highlight toggle: wire up all [data-peak-toggle] buttons
+(function initPeakToggles() {
+  document.querySelectorAll("[data-peak-toggle]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      showPeakHighlight = !showPeakHighlight;
+      document.querySelectorAll("[data-peak-toggle]").forEach(b =>
+        b.classList.toggle("active", showPeakHighlight)
+      );
+      refreshAllTimeViews();
+    });
+  });
+})();
+
+// Chart.js plugin: draw peak window background bands
+function plPeakBand(fileIdx) {
+  return {
+    id: "peakBand",
+    beforeDatasetsDraw(chart) {
+      if (!showPeakHighlight) return;
+      const ctx = getTimeContext(fileIdx);
+      const area = chart.chartArea;
+      if (!area) return;
+      const xScale = chart.scales.x;
+      if (!xScale) return;
+      const maxTick = xScale.max || 0;
+      const ranges = getPeakTickRanges(ctx, maxTick);
+      if (!ranges.length) return;
+      const g = chart.ctx;
+      g.save();
+      ranges.forEach(([t0, t1]) => {
+        const x0 = xScale.getPixelForValue(t0);
+        const x1 = xScale.getPixelForValue(t1);
+        g.fillStyle = PEAK_BG_COLOR;
+        g.fillRect(x0, area.top, x1 - x0, area.bottom - area.top);
+        g.strokeStyle = PEAK_BORDER_COLOR;
+        g.lineWidth = 1;
+        g.beginPath();
+        g.moveTo(x0, area.top); g.lineTo(x0, area.bottom);
+        g.moveTo(x1, area.top); g.lineTo(x1, area.bottom);
+        g.stroke();
+      });
+      g.restore();
+    }
+  };
+}
 
 // =========================================================================
 // Run Browser splitter: drag to resize list vs detail pane
