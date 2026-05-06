@@ -32,7 +32,7 @@
     .pb-btn { background: #21262d; border: 1px solid var(--border); color: var(--text); padding: 0.25rem 0.6rem; border-radius: 5px; cursor: pointer; font-size: 0.8rem; }
     .pb-btn:hover { background: #30363d; }
     .pb-btn.primary { background: #1f3d5c; border-color: #388bfd; }
-    .pb-label { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; display: inline-block; white-space: nowrap; }
+    .pb-label { color: var(--muted); font-size: 0.78rem; font-variant-numeric: tabular-nums; display: inline-block; white-space: nowrap; text-align: right; }
     .pb-scrub { width: min(260px, 30vw); }
     .pb-speed { background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 4px; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
 
@@ -210,6 +210,10 @@
     .file-chip.fc-csv { border-color: rgba(210,153,34,0.35); }
 
     /* Stats tab */
+    .stats-subtab-bar { display: flex; gap: 2px; margin-bottom: 0.8rem; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+    .stats-subtab { padding: 0.35rem 0.75rem; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 0.8rem; font-weight: 500; position: relative; top: 1px; }
+    .stats-subtab:hover { color: var(--text); background: rgba(255,255,255,0.03); }
+    .stats-subtab.active { color: var(--text); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg); }
     .hero-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.6rem; margin-bottom: 1.2rem; }
     .hero-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.9rem 1rem; }
     .hero-card .label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
@@ -217,12 +221,9 @@
     .hero-card .sub { font-size: 0.7rem; color: var(--muted); margin-top: 0.25rem; }
     .hero-card .winner { font-size: 0.68rem; color: var(--accent); margin-top: 0.15rem; }
     .cmp-wrap {
-      overflow: auto;
+      overflow-x: auto;
       border: 1px solid var(--border);
       border-radius: 8px;
-      /* Keep the stats table scrollable when zoom increases row heights. */
-      max-height: min(72vh, calc(100vh - 260px));
-      min-height: 220px;
     }
     .cmp { border-collapse: collapse; font-size: 0.8rem; min-width: 100%; table-layout: fixed; }
     .cmp th, .cmp td { border: 1px solid var(--border); padding: 0.38rem 0.55rem; text-align: right; font-variant-numeric: tabular-nums; }
@@ -297,6 +298,8 @@
     .kanban-legend .kleg-chip.just-merged { background: #0d3320; border-color: var(--green); box-shadow: 0 0 5px 1px rgba(46,160,67,0.45); }
     .kanban-legend .kleg-chip.force-merged { background: #3d1418; border-color: var(--red); box-shadow: 0 0 5px 1px rgba(248,81,73,0.45); }
     .kanban-legend .kleg-chip.ci-failed { background: #2d1418; border-color: var(--red); }
+    .kanban-legend .kleg-chip.just-ready { background: #0d2d33; border-color: #39d2c0; box-shadow: 0 0 5px 1px rgba(57,210,192,0.45); }
+    .kanban-legend .kleg-chip.just-stale { background: #2d2413; border-color: #d29922; box-shadow: 0 0 5px 1px rgba(210,153,34,0.45); }
     .trace { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; transition: flex 0.15s; flex: 1 1 0; min-height: 0; }
     .trace-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0.65rem; cursor: default; user-select: none; background: var(--panel); border-bottom: 1px solid var(--border); flex-shrink: 0; }
     .trace-header .tname { font-size: 0.8rem; font-weight: 600; color: var(--accent); }
@@ -313,10 +316,24 @@
     .kcard.just-merged { background: #0d3320; border-color: var(--green); box-shadow: 0 0 7px 2px rgba(46,160,67,0.55); transform: scale(1.06); }
     .kcard.force-merged { background: #3d1418; border-color: var(--red); box-shadow: 0 0 7px 2px rgba(248,81,73,0.55); transform: scale(1.06); color: var(--red); }
     .kcard.ci-failed { background: #2d1418; border-color: var(--red); box-shadow: 0 0 5px 1px rgba(248,81,73,0.35); color: var(--red); }
+    .kcard.just-ready { background: #0d2d33; border-color: #39d2c0; box-shadow: 0 0 7px 2px rgba(57,210,192,0.5); transform: scale(1.06); color: #7eeee0; }
+    .kcard.just-stale { background: #2d2413; border-color: #d29922; box-shadow: 0 0 6px 1px rgba(210,153,34,0.45); transform: scale(1.04); color: #f2cc60; }
     .kcard.muted { opacity: 0.5; }
     .kcard.queue-unvisited { background: #1a2330; border-color: #334357; color: #9fb3c8; }
     .kcard.queue-visited { background: #17312a; border-color: #2f7a65; color: #8dd3bf; }
     .kcard.queue-visited-new { background: #2a2413; border-color: #d29922; color: #f2cc60; box-shadow: 0 0 6px 1px rgba(210,153,34,0.45); transform: scale(1.04); }
+    .kanban-tip { position: fixed; display: none; background: #1c2128; border: 1px solid #58a6ff; border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.78rem; color: #e6edf3; z-index: 9999; width: min(440px, calc(100vw - 24px)); max-height: min(480px, calc(100vh - 40px)); overflow-y: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
+    .kanban-tip .kt-head { display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem; }
+    .kanban-tip .kt-mr { font-weight: 700; color: #58a6ff; font-size: 0.88rem; }
+    .kanban-tip .kt-state { font-size: 0.72rem; color: var(--muted); margin-left: auto; }
+    .kanban-tip .kt-grid { display: grid; grid-template-columns: auto 1fr; gap: 0.15rem 0.7rem; margin: 0.35rem 0; }
+    .kanban-tip .kt-grid .k { color: var(--muted); font-size: 0.72rem; white-space: nowrap; }
+    .kanban-tip .kt-grid .v { color: #e6edf3; font-variant-numeric: tabular-nums; font-size: 0.78rem; }
+    .kanban-tip .kt-history { margin-top: 0.35rem; padding-top: 0.3rem; border-top: 1px solid #30363d; max-height: 180px; overflow-y: auto; }
+    .kanban-tip .kt-history ul { margin: 0 0 0 0.8rem; padding: 0; }
+    .kanban-tip .kt-history li { margin-bottom: 0.18rem; line-height: 1.26; color: #c9d1d9; font-size: 0.72rem; }
+    .kanban-tip .kt-close { position: absolute; top: 0.3rem; right: 0.5rem; color: var(--muted); cursor: pointer; font-size: 0.8rem; background: none; border: none; }
+    .kanban-tip .kt-close:hover { color: #e6edf3; }
     .scenario-info { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.58rem 0.82rem; margin-bottom: 0.7rem; font-size: 0.78rem; color: var(--muted); display: flex; align-items: center; gap: 0.65rem 1rem; flex-wrap: wrap; }
     .scenario-info .si-main { display: flex; flex-wrap: wrap; align-items: center; gap: 0.38rem 1.05rem; min-width: 0; flex: 1 1 560px; }
     .scenario-info .si-item { display: flex; gap: 0.3rem; align-items: center; white-space: nowrap; }
@@ -630,7 +647,7 @@
 
     /* Simulation tab */
     #panelSimulation { gap: 0.65rem; }
-    #simulationContent {
+    #simScenarioView, #simCalibrationView, #simMetadataView {
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
@@ -703,6 +720,12 @@
     .sim-kv .k { color: var(--muted); font-weight: 500; }
     .sim-kv .v { color: var(--text); font-variant-numeric: tabular-nums; }
     .sim-table-wrap { overflow: auto; max-height: min(60vh, 560px); border: 1px solid var(--border); border-radius: 8px; background: #0d1117; }
+    .sim-table-wrap.no-max { max-height: none; }
+    #simMetadataView .sim-meta-row { cursor: pointer; transition: background 0.12s; }
+    #simMetadataView .sim-meta-row:hover { background: rgba(88,166,255,0.06); }
+    #simMetadataView .sim-meta-row.expanded { background: rgba(88,166,255,0.04); }
+    #simMetadataView .sim-meta-detail { display: none; padding: 0.5rem 0.85rem 0.7rem; border-bottom: 1px solid var(--border); }
+    #simMetadataView .sim-meta-detail.open { display: block; }
     .sim-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
     .sim-table th, .sim-table td { border: 1px solid var(--border); padding: 0.38rem 0.54rem; text-align: right; font-variant-numeric: tabular-nums; }
     .sim-table thead th { position: sticky; top: 0; background: #161b22; z-index: 1; }
@@ -772,7 +795,7 @@
     .sim-delta-bad { color: #f85149; }
     .sim-empty { color: var(--muted); font-size: 0.8rem; }
     @media (max-width: 960px) {
-      #simulationContent { gap: 0.62rem; }
+      #simScenarioView, #simCalibrationView, #simMetadataView { gap: 0.62rem; }
       .sim-grid { grid-template-columns: 1fr; }
       .sim-kv { grid-template-columns: 1fr; }
       .sim-split { grid-template-columns: 1fr; }
@@ -887,15 +910,51 @@
         <div id="scenarioInfoCard"></div>
       </div>
     </div>
-    <div class="hero-cards" id="heroCards"></div>
-    <div class="metric-picker" id="metricPicker"></div>
-    <div class="stats-extended" id="statsExtended"></div>
-    <div class="cmp-wrap"><table class="cmp" id="cmpTable"></table></div>
+    <div class="stats-subtab-bar" id="statsSubtabBar" style="display:none">
+      <button class="stats-subtab active" data-subtab="metrics">Metrics</button>
+      <button class="stats-subtab" data-subtab="perlabel">Per-Priority</button>
+    </div>
+    <div id="statsMetricsView">
+      <div class="hero-cards" id="heroCards"></div>
+      <div class="metric-picker" id="metricPicker"></div>
+      <div class="stats-extended" id="statsExtended"></div>
+      <div class="cmp-wrap"><table class="cmp" id="cmpTable"></table></div>
+    </div>
+    <div id="statsPerLabelView" style="display:none">
+      <div class="sweep-chart-row">
+        <div class="sweep-chart-panel" style="flex:1.2">
+          <h3 class="sweep-chart-title">Median Time-to-Merge by Priority</h3>
+          <div class="sweep-chart-wrap"><canvas id="perLabelCanvas"></canvas></div>
+        </div>
+        <div class="sweep-chart-panel" style="flex:0.8">
+          <h3 class="sweep-chart-title">P95 Tail Latency by Priority</h3>
+          <div class="sweep-chart-wrap"><canvas id="perLabelP95Canvas"></canvas></div>
+        </div>
+      </div>
+      <div class="cmp-wrap" style="margin-top:1rem"><table class="cmp" id="perLabelTable"></table></div>
+    </div>
   </div>
 
   <!-- Tab: Simulation -->
   <div class="tab-panel" id="panelSimulation">
-    <div id="simulationContent"></div>
+    <div class="tab-control-row" id="simControlRow">
+      <div class="tab-control-group">
+        <span class="tab-control-title">Units</span>
+        <div class="time-toggle" data-time-toggle="sim">
+          <button data-tmode="ticks" class="active">Ticks</button>
+          <button data-tmode="relative">Relative</button>
+          <button data-tmode="absolute">Absolute</button>
+        </div>
+      </div>
+    </div>
+    <div class="stats-subtab-bar" id="simSubtabBar">
+      <button class="stats-subtab active" data-simtab="scenario">Scenario</button>
+      <button class="stats-subtab" data-simtab="calibration">Calibration</button>
+      <button class="stats-subtab" data-simtab="metadata">Metadata</button>
+    </div>
+    <div id="simScenarioView"></div>
+    <div id="simCalibrationView" style="display:none"></div>
+    <div id="simMetadataView" style="display:none"></div>
   </div>
 
   <!-- Tab: Kanban -->
@@ -944,12 +1003,15 @@
       <span class="kleg-group sep">
         <span class="kleg-title">Transitions</span>
         <span class="kleg-item"><i class="kleg-chip just-rebased"></i>just rebased</span>
+        <span class="kleg-item"><i class="kleg-chip just-ready"></i>CI passed</span>
+        <span class="kleg-item"><i class="kleg-chip just-stale"></i>just stale</span>
         <span class="kleg-item"><i class="kleg-chip just-merged"></i>just merged</span>
         <span class="kleg-item"><i class="kleg-chip force-merged"></i>force merged</span>
         <span class="kleg-item"><i class="kleg-chip ci-failed"></i>CI failed</span>
       </span>
     </div>
     <div class="traces-container" id="tracesContainer"></div>
+    <div class="kanban-tip" id="kanbanTip"></div>
   </div>
 
   <!-- Tab: Composition -->

@@ -4,7 +4,7 @@
  */
 
 const C0 = { other: "rgba(110,118,129,0.9)", active: "rgba(163,113,247,0.9)", pool: "rgba(46,160,67,0.9)", stale: "rgba(210,153,34,0.9)", pending: "#6e7681", running: "#a371f7", success: "#2ea043", merged: "rgba(31,111,235,0.55)", failed: "#f85149", force_merge: "#f85149" };
-const BASE_MS = 500, HIGHLIGHT_TICKS = 3;
+const BASE_MS = 500, HIGHLIGHT_TICKS = 4;
 const MERGE_LABELS_PRIORITY = [
   "bot/approved: critical",
   "bot/approved: urgent",
@@ -135,6 +135,25 @@ let sweepData = null;
 let sweepLineChart = null;
 let sweepBarChart = null;
 let sweepConvergeChart = null;
+
+// Per-label merge time data
+let perLabelData = null;
+let perLabelChart = null;
+let perLabelP95Chart = null;
+let statsSubtab = "metrics"; // "metrics" | "perlabel"
+let simSubtab = "scenario"; // "scenario" | "calibration" | "metadata"
+
+function _isPerLabelData(obj) {
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return false;
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return false;
+  const first = obj[keys[0]];
+  if (!first || typeof first !== "object") return false;
+  const subKeys = Object.keys(first);
+  if (subKeys.length === 0) return false;
+  const sample = first[subKeys[0]];
+  return sample && typeof sample === "object" && "count" in sample && "mean_seconds" in sample;
+}
 
 // --- Parsing & Analysis ---
 function parseNdjson(text) {
@@ -781,6 +800,7 @@ function hasLoadedData() {
     || loadedScenarioDocs.length
     || mcData
     || sweepLoaded
+    || perLabelData
     || expData.discrimination
     || expData.calibrationGrid.length
     || expData.calibrationValidation.length
@@ -1474,7 +1494,7 @@ function pickLoadFilesForRun(run) {
   if (!run) return [];
   const byExt = run.files.filter(x => /\.(ndjson|jsonl|json|csv|ya?ml)$/i.test(x.file.name));
   if (run.category === "sweep") return byExt.filter(x => /\.json$/i.test(x.file.name) && !/metadata\.json$/i.test(x.file.name)).map(x => x.file);
-  if (run.category === "comparisons") return byExt.filter(x => /\.ndjson$/i.test(x.file.name) || /\.ya?ml$/i.test(x.file.name)).map(x => x.file);
+  if (run.category === "comparisons") return byExt.filter(x => /\.ndjson$/i.test(x.file.name) || /\.ya?ml$/i.test(x.file.name) || /per-label-merge-times\.json$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "discrimination") return byExt.filter(x => /discrimination-summary\.csv$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "monte-carlo") return byExt.filter(x => /monte-carlo-summary\.csv$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "calibration") return byExt.filter(x => /calibration-.*\.csv$/i.test(x.file.name) || /-grid\.csv$/i.test(x.file.name) || /-validation\.csv$/i.test(x.file.name) || /adaptive-vs-fixed-summary\.csv$/i.test(x.file.name) || /selected-scenario\.ya?ml$/i.test(x.file.name) || /scenario.*\.ya?ml$/i.test(x.file.name)).map(x => x.file);
@@ -1715,6 +1735,7 @@ function unloadAllData() {
   barCharts.clear();
 
   if (typeof destroyExperimentCharts === "function") destroyExperimentCharts();
+  if (typeof _destroySimCharts === "function") _destroySimCharts();
   mqDestroyChartIfPresent(mcBoxChart);
   mcBoxChart = null;
   mqDestroyChartIfPresent(mcCIChart);
@@ -1736,6 +1757,11 @@ function unloadAllData() {
   mqDestroyChartIfPresent(sweepLineChart); sweepLineChart = null;
   mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
   mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
+  perLabelData = null;
+  mqDestroyChartIfPresent(perLabelChart); perLabelChart = null;
+  mqDestroyChartIfPresent(perLabelP95Chart); perLabelP95Chart = null;
+  statsSubtab = "metrics";
+  simSubtab = "scenario";
 
   selectedSeries = null;
   statsExtendedMode = false;
@@ -1761,7 +1787,8 @@ function unloadAllData() {
     scrub.value = 0;
   }
   const playLabel = document.getElementById("playLabel");
-  if (playLabel) playLabel.textContent = "Step 0 / 0";
+  if (playLabel) { playLabel.textContent = "Step 0 / 0"; playLabel.style.minWidth = ""; }
+  _playLabelLockedWidth = 0;
 
   const mcContent = document.getElementById("mcContent");
   if (mcContent) mcContent.style.display = "none";
@@ -1793,10 +1820,15 @@ function loadFiles(fl, opts = {}) {
   if (ndjsonFiles.length) {
     tasks.push(Promise.all(ndjsonFiles.map(F => new Promise((R, N) => { const r = new FileReader(); r.onload = () => R({ n: F.name.replace(/(-metrics)?\.(ndjson|jsonl|json)$/i, ""), t: r.result, fileName: F.name }); r.onerror = N; r.readAsText(F); }))).then(A => {
       const sweepFiles = [];
+      const perLabelFiles = [];
       const metricsFiles = [];
       A.forEach(x => {
         if (/\.json$/i.test(x.fileName)) {
-          try { const parsed = JSON.parse(x.t); if (parsed && Array.isArray(parsed.limits) && parsed.data) { sweepFiles.push(parsed); return; } } catch {}
+          try {
+            const parsed = JSON.parse(x.t);
+            if (parsed && Array.isArray(parsed.limits) && parsed.data) { sweepFiles.push(parsed); return; }
+            if (parsed && _isPerLabelData(parsed)) { perLabelFiles.push(parsed); return; }
+          } catch {}
         }
         metricsFiles.push(x);
       });
@@ -1804,6 +1836,10 @@ function loadFiles(fl, opts = {}) {
         loadSweepData(sweepFiles[sweepFiles.length - 1]);
         sweepLoaded = true;
         sweepJsonLoaded = true;
+      }
+      if (perLabelFiles.length) {
+        perLabelData = perLabelFiles[perLabelFiles.length - 1];
+        enableTabs(["stats"]);
       }
       if (metricsFiles.length) {
         filesData = metricsFiles.map(x => ({ name: x.n, events: parseNdjson(x.t) }));
@@ -1900,7 +1936,7 @@ function loadFiles(fl, opts = {}) {
 }
 function updateLoadedCount() {
   if (!loadedFileCount) return;
-  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (sweepLoaded ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
+  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (sweepLoaded ? 1 : 0) + (perLabelData ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
   loadedFileCount.textContent = count ? `${count} file${count !== 1 ? "s" : ""}` : "0 files";
 }
 function renderFileList() {
@@ -1924,6 +1960,10 @@ function renderFileList() {
   }
   if (sweepLoaded && sweepData) {
     chips.push(`<span class="file-chip fc-ndjson" data-unload="sweep" title="Click to unload">sweep (${sweepData.limits.length} limits × ${sweepData.policies.length} policies)<span class="fc-x">\u00d7</span></span>`);
+  }
+  if (perLabelData) {
+    const pCount = Object.keys(perLabelData).length;
+    chips.push(`<span class="file-chip fc-csv" data-unload="perlabel" title="Click to unload">per-label (${pCount} policies)<span class="fc-x">\u00d7</span></span>`);
   }
   el.innerHTML = chips.join("");
 }
@@ -1956,6 +1996,11 @@ function renderFileList() {
       mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
       mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
       disableTabs(["sweep"]);
+    } else if (kind === "perlabel") {
+      perLabelData = null;
+      mqDestroyChartIfPresent(perLabelChart); perLabelChart = null;
+      mqDestroyChartIfPresent(perLabelP95Chart); perLabelP95Chart = null;
+      statsSubtab = "metrics";
     }
     renderFileList();
     updateLoadedCount();
@@ -2394,13 +2439,37 @@ function buildPolicyExtended(fileData, scenarioMeta, arrivalProfile) {
 }
 
 function renderSimulationTab() {
-  const el = document.getElementById("simulationContent");
-  if (!el) return;
-  if (!filesData.length && !loadedScenarioDocs.length && !Object.keys(loadedRunMetadataByCategory).length) {
-    el.innerHTML = `<div class="sim-card full sim-empty">Load NDJSON traces (and optionally a run folder metadata.json) to view simulation parameters.</div>`;
+  const scenarioView = document.getElementById("simScenarioView");
+  const calibrationView = document.getElementById("simCalibrationView");
+  const metadataView = document.getElementById("simMetadataView");
+  if (!scenarioView) return;
+
+  const noData = !filesData.length && !loadedScenarioDocs.length && !Object.keys(loadedRunMetadataByCategory).length;
+  if (noData) {
+    scenarioView.innerHTML = `<div class="sim-card full sim-empty">Load NDJSON traces or a scenario YAML to view simulation parameters.</div>`;
+    if (calibrationView) calibrationView.innerHTML = "";
+    if (metadataView) metadataView.innerHTML = "";
     return;
   }
 
+  // Resolve sub-tab visibility
+  const subtabBar = document.getElementById("simSubtabBar");
+  if (subtabBar) subtabBar.querySelectorAll(".stats-subtab").forEach(b => b.classList.toggle("active", b.dataset.simtab === simSubtab));
+  if (scenarioView) scenarioView.style.display = simSubtab === "scenario" ? "" : "none";
+  if (calibrationView) calibrationView.style.display = simSubtab === "calibration" ? "" : "none";
+  if (metadataView) metadataView.style.display = simSubtab === "metadata" ? "" : "none";
+
+  const simCtx = _getSimContext();
+
+  if (simSubtab === "scenario") _renderSimScenario(scenarioView, simCtx);
+  else {
+    _destroySimCharts();
+    if (simSubtab === "calibration") _renderSimCalibration(calibrationView, simCtx);
+    else if (simSubtab === "metadata") _renderSimMetadata(metadataView, simCtx);
+  }
+}
+
+function _getSimContext() {
   const ownerFile = filesData[0] || null;
   const scenarioDocEntry = ownerFile
     ? resolveScenarioDocForTrace(ownerFile.events || [], ownerFile.name)
@@ -2409,306 +2478,718 @@ function renderSimulationTab() {
     ? ((ownerFile.events || []).find(e => e.event === "scenario_meta") || {})
     : (scenarioDocEntry ? scenarioMetaFromYaml(scenarioDocEntry.doc, scenarioDocEntry.fileName) : {});
 
-  const scenarioCards = [];
-  const calibrationCards = [];
-  const runtimeCards = [];
-  const metadataCards = [];
+  const rawScenario = scenarioDocEntry?.doc || {};
+  const embeddedScenarioMetadata = scenarioMeta.scenario_metadata || {};
+  const cal = embeddedScenarioMetadata.calibration_targets || {};
+  const perfDims = cal.performance_dimensions || {};
+  const arrivalProfile = cal.arrival_profile || {};
+  const opFail = scenarioMeta.operation_failure_rate || {};
+  const tickSeconds = Number(scenarioMeta.tick_seconds) || Number(embeddedScenarioMetadata.tick_seconds) || 60;
+  const modeledWindowTicks = Number(embeddedScenarioMetadata.window_ticks) || Number(scenarioMeta.total_time_ticks) || Number(ownerFile?.metrics?.total_time_ticks) || 0;
+  const mrCatalog = scenarioMeta.mr_catalog && typeof scenarioMeta.mr_catalog === "object" ? scenarioMeta.mr_catalog : {};
+  const catalogEntries = Object.values(mrCatalog).filter(x => x && typeof x === "object");
+  const rawMrs = Array.isArray(rawScenario.merge_requests) ? rawScenario.merge_requests : [];
+  const initialOpenCount = rawMrs.filter(mr => Number(mr?.arrival_tick) <= 0).length;
+  const arrivalCount = Array.isArray(scenarioMeta.arrivals) ? scenarioMeta.arrivals.length : 0;
+  const limit = Number(loadedRunMetadataByCategory?.comparisons?.context?.limit
+    || loadedRunMetadataByCategory?.calibration?.context?.limit
+    || embeddedScenarioMetadata.limit) || null;
 
-  if (ownerFile || scenarioDocEntry) {
-    const rawScenario = scenarioDocEntry?.doc || {};
-    const embeddedScenarioMetadata = scenarioMeta.scenario_metadata || {};
-    const cal = embeddedScenarioMetadata.calibration_targets || {};
-    const perfDims = cal.performance_dimensions || {};
-    const arrivalProfile = cal.arrival_profile || {};
-    const opFail = scenarioMeta.operation_failure_rate || {};
-    const tickSeconds = Number(scenarioMeta.tick_seconds)
-      || Number(embeddedScenarioMetadata.tick_seconds)
-      || 60;
-    const modeledWindowTicks = Number(embeddedScenarioMetadata.window_ticks)
-      || Number(scenarioMeta.total_time_ticks)
-      || Number(ownerFile?.metrics?.total_time_ticks)
-      || 0;
-    const timelineBase = computeHourlyTimeline({
-      events: ownerFile?.events || [],
-      scenarioMeta,
-      arrivalProfile,
-      tickSeconds,
-      totalTicks: modeledWindowTicks,
-    });
+  const timelineBase = computeHourlyTimeline({
+    events: ownerFile?.events || [],
+    scenarioMeta,
+    arrivalProfile,
+    tickSeconds,
+    totalTicks: modeledWindowTicks,
+  });
 
-    const mrCatalog = scenarioMeta.mr_catalog && typeof scenarioMeta.mr_catalog === "object" ? scenarioMeta.mr_catalog : {};
-    const catalogEntries = Object.values(mrCatalog).filter(x => x && typeof x === "object");
-    const forceCount = Array.isArray(scenarioMeta.force_merges) ? scenarioMeta.force_merges.length : 0;
-    const cancelCount = Array.isArray(scenarioMeta.cancellations) ? scenarioMeta.cancellations.length : 0;
-    const arrivalCount = Array.isArray(scenarioMeta.arrivals) ? scenarioMeta.arrivals.length : 0;
-    const rawMrs = Array.isArray(rawScenario.merge_requests) ? rawScenario.merge_requests : [];
-    const initialOpenCount = rawMrs.filter(mr => Number(mr?.arrival_tick) <= 0).length;
-
-    const priorityCounts = {};
-    const serviceCounts = {};
-    catalogEntries.forEach(entry => {
-      const p = String(entry.priority_label || "").trim() || "none";
-      priorityCounts[p] = (priorityCounts[p] || 0) + 1;
-      const services = Array.isArray(entry.service_labels) ? entry.service_labels : [];
-      services.forEach(lbl => {
-        const key = String(lbl).trim();
-        if (!key) return;
-        serviceCounts[key] = (serviceCounts[key] || 0) + 1;
-      });
-    });
-    const priorityRows = Object.entries(priorityCounts)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${mqEscapeHtml(v)}</td></tr>`)
-      .join("");
-    const serviceRows = Object.entries(serviceCounts)
-      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-      .slice(0, 14)
-      .map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${mqEscapeHtml(v)}</td></tr>`)
-      .join("");
-
-    const scenarioPeakHours = Array.isArray(arrivalProfile.peak_window_hours_utc)
-      ? arrivalProfile.peak_window_hours_utc.join(", ")
-      : "";
-    const profileName = embeddedScenarioMetadata.profile
-      || embeddedScenarioMetadata.calibration_profile
-      || "—";
-    scenarioCards.push(`
-      <div class="sim-card full">
-        <h3>Scenario Overview <span class="sim-badge">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></h3>
-        <div class="sim-strip">
-          <div class="sim-pill"><span class="k">Scenario</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.name || "—")}</span></div>
-          <div class="sim-pill"><span class="k">Profile</span><span class="v">${mqEscapeHtml(profileName)}</span></div>
-          <div class="sim-pill"><span class="k">Trace</span><span class="v">${mqEscapeHtml(ownerFile?.name || "scenario-only")}</span></div>
-          <div class="sim-pill"><span class="k">Modeled hours</span><span class="v">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></div>
-          <div class="sim-pill"><span class="k">Window ticks</span><span class="v">${mqEscapeHtml(modeledWindowTicks || "—")}</span></div>
-          <div class="sim-pill"><span class="k">Tick seconds</span><span class="v">${mqEscapeHtml(tickSeconds)}</span></div>
-          <div class="sim-pill"><span class="k">Modeled arrivals</span><span class="v">${mqEscapeHtml(timelineBase.total_arrivals || arrivalCount)}</span></div>
-          <div class="sim-pill"><span class="k">Modeled merges</span><span class="v">${mqEscapeHtml(timelineBase.total_merges)}</span></div>
-          <div class="sim-pill"><span class="k">Peak-window mph</span><span class="v">${fmtSim(timelineBase.throughput_peak_window_mph, 3)}</span></div>
-          <div class="sim-pill"><span class="k">Off-peak mph</span><span class="v">${fmtSim(timelineBase.throughput_offpeak_window_mph, 3)}</span></div>
-          <div class="sim-pill"><span class="k">Peak8 mph</span><span class="v">${fmtSim(timelineBase.throughput_peak8_mph, 3)}</span></div>
-          <div class="sim-pill"><span class="k">Merge p95 (s)</span><span class="v">${fmtSim(timelineBase.merge_interval_p95_seconds, 1)}</span></div>
-        </div>
-        <div class="sim-subtle">Dense overview: key modeled-time and throughput profile metrics are prioritized first; detailed metadata is available below on demand.</div>
-        <details class="sim-collapse" open>
-          <summary>Scenario metadata details</summary>
-          <div class="sim-collapse-body">
-            <div class="sim-kv">
-              <span class="k">Scenario file</span><span class="v">${mqEscapeHtml(scenarioDocEntry?.fileName || scenarioMeta.scenario_source_file || "embedded only")}</span>
-              <span class="k">Project filter</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.project_filter || "")}</span>
-              <span class="k">Seed</span><span class="v">${mqEscapeHtml(embeddedScenarioMetadata.seed ?? "")}</span>
-              <span class="k">Catalog entries</span><span class="v">${mqEscapeHtml(catalogEntries.length)}</span>
-              <span class="k">Initial open MRs</span><span class="v">${mqEscapeHtml(initialOpenCount || "")}</span>
-              <span class="k">Total MRs</span><span class="v">${mqEscapeHtml(scenarioMeta.total_mrs ?? "")}</span>
-              <span class="k">Pipeline duration (ticks)</span><span class="v">${mqEscapeHtml(scenarioMeta.pipeline_duration?.min ?? "")} - ${mqEscapeHtml(scenarioMeta.pipeline_duration?.max ?? "")}</span>
-              <span class="k">Pipeline failure rate</span><span class="v">${fmtSim((Number(scenarioMeta.failure_rate) || 0) * 100, 2)}%</span>
-              <span class="k">Operation failure rate</span><span class="v">merge ${fmtSim((Number(opFail.merge) || 0) * 100, 2)}% / rebase ${fmtSim((Number(opFail.rebase) || 0) * 100, 2)}%</span>
-              <span class="k">Force-merges / cancellations</span><span class="v">${mqEscapeHtml(forceCount)} / ${mqEscapeHtml(cancelCount)}</span>
-              <span class="k">Scenario start (UTC)</span><span class="v">${mqEscapeHtml(arrivalProfile.scenario_start_hour ?? "0")}:00 ${mqEscapeHtml(arrivalProfile.scenario_start_weekday || "—")}</span>
-              <span class="k">Peak window (UTC)</span><span class="v">${mqEscapeHtml(scenarioPeakHours || "—")} ${scenarioPeakHours ? `<span class="sim-badge peak">peak</span>` : ""}</span>
-            </div>
-            ${(priorityRows || serviceRows) ? `
-              <div class="sim-split" style="margin-top:0.45rem;">
-                <div class="sim-table-wrap">
-                  <table class="sim-table dense">
-                    <thead><tr><th>Priority label</th><th>MRs</th></tr></thead>
-                    <tbody>${priorityRows || `<tr><td colspan="2">No priority labels found.</td></tr>`}</tbody>
-                  </table>
-                </div>
-                <div class="sim-table-wrap">
-                  <table class="sim-table dense">
-                    <thead><tr><th>Tenant label</th><th>MRs</th></tr></thead>
-                    <tbody>${serviceRows || `<tr><td colspan="2">No tenant labels found.</td></tr>`}</tbody>
-                  </table>
-                </div>
-              </div>
-            ` : ""}
-          </div>
-        </details>
-      </div>
-    `);
-
-    const hourlyRows = timelineBase.rows.map(r => `
-      <tr>
-        <td>h${mqEscapeHtml(r.hour_index)}</td>
-        <td>${mqEscapeHtml(String(r.utc_hour).padStart(2, "0"))}:00</td>
-        <td>${mqEscapeHtml(r.is_peak ? "peak" : "off-peak")}</td>
-        <td>${mqEscapeHtml(r.arrivals)}</td>
-        <td>${mqEscapeHtml(r.merges)}</td>
-        <td>${fmtSim(r.throughput_mph, 3)}</td>
-      </tr>
-    `).join("");
-    scenarioCards.push(`
-      <div class="sim-card full">
-        <h3>Hourly Scenario Timeline <span class="sim-badge">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))}</span></h3>
-        <div class="sim-subtle">Per-hour modeled timeline showing arrivals and throughput. This is the easy-read modeled time view (hour-by-hour), not just full-window averages.</div>
-        <div class="sim-table-wrap">
-          <table class="sim-table dense">
-            <thead>
-              <tr>
-                <th>Hour bucket</th>
-                <th>UTC hour</th>
-                <th>Window</th>
-                <th>Added MRs</th>
-                <th>Merged MRs</th>
-                <th>Throughput/h</th>
-              </tr>
-            </thead>
-            <tbody>${hourlyRows || `<tr><td colspan="6">No hourly rows available.</td></tr>`}</tbody>
-          </table>
-        </div>
-      </div>
-    `);
-
-    const policyExtended = filesData.map(d => buildPolicyExtended(d, scenarioMeta, arrivalProfile));
-    const primaryPolicy = policyExtended[0] || null;
-
-    if (Object.keys(perfDims).length && primaryPolicy) {
-      const targetRows = [
-        ["merge_per_hour_24h", "merge_per_hour_24h", primaryPolicy.throughput_24h_mph],
-        ["merge_per_hour_active_hours", "merge_per_hour_active_hours", primaryPolicy.throughput_active_mph],
-        ["merge_per_hour_peak8", "merge_per_hour_peak8", primaryPolicy.throughput_peak8_mph],
-        ["merge_per_hour_peak8_p90", "merge_per_hour_peak8_p90", primaryPolicy.throughput_peak8_p90_mph],
-        ["rebase_per_merge_global", "rebase_per_merge_global", primaryPolicy.rebase_per_merge],
-        ["merge_interval_seconds_p95", "merge_interval_seconds_p95", primaryPolicy.merge_interval_p95_seconds],
-      ].filter(([k]) => Number.isFinite(Number(perfDims[k])));
-      const rows = targetRows.map(([key, label, measured]) => {
-        const target = Number(perfDims[key]);
-        return `<tr>
-          <td>${mqEscapeHtml(label)}</td>
-          <td>${fmtSim(target, 4)}</td>
-          <td>${fmtSim(measured, 4)}</td>
-          <td>${formatDeltaCell(measured, target, 1)}</td>
-        </tr>`;
-      }).join("");
-      calibrationCards.push(`
-        <div class="sim-card">
-          <h3>Calibration: Target vs Measured</h3>
-          <div class="sim-subtle">Primary policy under view: <strong>${mqEscapeHtml(primaryPolicy.policy)}</strong>. Target and measured values are shown side-by-side per dimension.</div>
-          <div class="sim-table-wrap">
-            <table class="sim-table dense">
-              <thead><tr><th>Dimension</th><th>Target</th><th>Measured</th><th>Delta</th></tr></thead>
-              <tbody>${rows}</tbody>
-            </table>
-          </div>
-        </div>
-      `);
-    }
-
-    if (policyExtended.length) {
-      const peakTarget = Number(perfDims.merge_per_hour_peak8);
-      const offPeakTarget = Number(perfDims.merge_per_hour_24h);
-      const runtimeRows = policyExtended.map(p => `<tr>
-        <td class="sticky-col">${mqEscapeHtml(p.policy)}</td>
-        <td>${mqEscapeHtml(fmtHoursLabel(p.modeled_hours))}</td>
-        <td>${fmtSim(p.throughput_24h_mph, 3)}</td>
-        <td>${fmtSim(p.throughput_active_mph, 3)}</td>
-        <td>${fmtSim(p.throughput_peak8_mph, 3)}</td>
-        <td>${fmtSim(p.throughput_peak8_p90_mph, 3)}</td>
-        <td>${fmtSim(p.throughput_peak_window_mph, 3)} ${Number.isFinite(peakTarget) ? `<span class="sim-badge peak">${formatDeltaCell(p.throughput_peak_window_mph, peakTarget, 1)}</span>` : ""}</td>
-        <td>${fmtSim(p.throughput_offpeak_window_mph, 3)} ${Number.isFinite(offPeakTarget) ? `<span class="sim-badge offpeak">${formatDeltaCell(p.throughput_offpeak_window_mph, offPeakTarget, 1)}</span>` : ""}</td>
-        <td>${fmtSim(p.rebases, 0)}</td>
-        <td>${fmtSim(p.rebase_per_merge, 3)}</td>
-        <td>${fmtSim(p.merge_interval_p95_seconds, 1)}</td>
-        <td>${fmtSim(p.merged, 0)}</td>
-        <td>${fmtSim(p.total_arrivals, 0)}</td>
-        <td>${fmtSim(p.total_ticks, 0)}</td>
-      </tr>`).join("");
-      runtimeCards.push(`
-        <div class="sim-card full">
-          <h3>Per-Policy Runtime Metrics (Extended + Peak/Off-peak Matching)</h3>
-          <div class="sim-subtle">Expanded per-policy view includes hourly-derived extended metrics, modeled time in hours, and peak/off-peak target matching indicators.</div>
-          <div class="sim-table-wrap">
-            <table class="sim-table dense">
-              <thead>
-                <tr>
-                  <th class="sticky-col">Policy</th>
-                  <th>Modeled window</th>
-                  <th>Throughput/h (24h)</th>
-                  <th>Active h throughput</th>
-                  <th>Peak8 throughput</th>
-                  <th>Peak8 p90</th>
-                  <th>Peak-window avg</th>
-                  <th>Off-peak avg</th>
-                  <th>Rebases</th>
-                  <th>Rebase/Merge</th>
-                  <th>Merge p95 (s)</th>
-                  <th>Merged</th>
-                  <th>Added MRs</th>
-                  <th>Total ticks</th>
-                </tr>
-              </thead>
-              <tbody>${runtimeRows}</tbody>
-            </table>
-          </div>
-        </div>
-      `);
-    }
-  }
-
-  const categories = Object.keys(loadedRunMetadataByCategory);
-  if (categories.length) {
-    const rows = categories
-      .sort((a, b) => a.localeCompare(b))
-      .map(cat => {
-        const meta = loadedRunMetadataByCategory[cat] || {};
-        const ctx = meta.context || {};
-        return `<tr>
-          <td>${mqEscapeHtml(cat)}</td>
-          <td>${mqEscapeHtml(meta.generated_at_iso || "")}</td>
-          <td>${mqEscapeHtml(ctx.policy || ctx.policy_set || "")}</td>
-          <td>${mqEscapeHtml(ctx.scenario || "")}</td>
-        </tr>`;
-      })
-      .join("");
-    metadataCards.push(`
-      <div class="sim-table-wrap">
-        <table class="sim-table dense">
-          <thead><tr><th>Category</th><th>Generated</th><th>Policy/Set</th><th>Scenario</th></tr></thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-    `);
-  }
-
-  const sectionHtml = [
-    `<div class="sim-section">
-      <div class="sim-section-title">Scenario Model & Timeline</div>
-      <div class="sim-grid compact">${scenarioCards.join("") || `<div class="sim-card full sim-empty">Load a scenario YAML or NDJSON trace to view modeled-time and hourly scenario details.</div>`}</div>
-    </div>`,
-  ];
-  if (calibrationCards.length || runtimeCards.length) {
-    sectionHtml.push(`<div class="sim-section">
-      <div class="sim-section-title runtime">Performance & Calibration</div>
-      <div class="sim-grid compact">${runtimeCards.join("")}${calibrationCards.join("")}</div>
-    </div>`);
-  }
-  if (metadataCards.length) {
-    sectionHtml.push(`
-      <div class="sim-section">
-        <div class="sim-section-title">Run Metadata</div>
-        <div class="sim-grid compact">
-          <div class="sim-card full">
-              <details class="sim-collapse">
-              <summary>Loaded run metadata context</summary>
-              <div class="sim-collapse-body">${metadataCards.join("")}</div>
-            </details>
-          </div>
-        </div>
-      </div>
-    `);
-  }
-  el.innerHTML = sectionHtml.join("");
+  return {
+    ownerFile, scenarioDocEntry, scenarioMeta, rawScenario,
+    embeddedScenarioMetadata, cal, perfDims, arrivalProfile, opFail,
+    tickSeconds, modeledWindowTicks, mrCatalog, catalogEntries,
+    rawMrs, initialOpenCount, arrivalCount, limit, timelineBase,
+  };
 }
 
+function _simFmtDuration(ticks, tickSeconds) {
+  if (timeDisplayMode === "ticks") return Number.isInteger(ticks) ? `${ticks} ticks` : `${ticks.toFixed(1)} ticks`;
+  const secs = ticks * tickSeconds;
+  if (secs < 120) return `${secs.toFixed(0)}s`;
+  return `${(secs / 60).toFixed(1)}m`;
+}
+
+let _simCiChart = null, _simPriorityChart = null, _simTenantChart = null, _simTimelineChart = null;
+
+function _destroySimCharts() {
+  mqDestroyChartIfPresent(_simCiChart); _simCiChart = null;
+  mqDestroyChartIfPresent(_simPriorityChart); _simPriorityChart = null;
+  mqDestroyChartIfPresent(_simTenantChart); _simTenantChart = null;
+  mqDestroyChartIfPresent(_simTimelineChart); _simTimelineChart = null;
+}
+
+function _renderSimScenario(el, ctx) {
+  _destroySimCharts();
+  const { scenarioDocEntry, scenarioMeta, embeddedScenarioMetadata, arrivalProfile, opFail, tickSeconds, modeledWindowTicks, catalogEntries, initialOpenCount, arrivalCount, limit, timelineBase, ownerFile } = ctx;
+
+  const scenarioPeakHours = Array.isArray(arrivalProfile.peak_window_hours_utc) ? arrivalProfile.peak_window_hours_utc : [];
+  const scenarioFile = scenarioDocEntry?.fileName || scenarioMeta.scenario_source_file || "embedded only";
+  const shortFile = scenarioFile.split("/").pop();
+  const calibrationName = embeddedScenarioMetadata.name
+    || loadedRunMetadataByCategory?.comparisons?.custom_metadata?.calibration
+    || loadedRunMetadataByCategory?.calibration?.custom_metadata?.purpose
+    || "—";
+
+  const forceCount = Array.isArray(scenarioMeta.force_merges) ? scenarioMeta.force_merges.length : 0;
+  const cancelCount = Array.isArray(scenarioMeta.cancellations) ? scenarioMeta.cancellations.length : 0;
+
+  const pdMin = scenarioMeta.pipeline_duration?.min;
+  const pdMax = scenarioMeta.pipeline_duration?.max;
+  const pdFmt = pdMin != null ? `${_simFmtDuration(pdMin, tickSeconds)} – ${_simFmtDuration(pdMax, tickSeconds)}` : "—";
+
+  const failRate = Number(scenarioMeta.failure_rate) || 0;
+  const mergeFailRate = Number(opFail.merge) || 0;
+  const rebaseFailRate = Number(opFail.rebase) || 0;
+
+  const sections = [];
+
+  // Section 1: Scenario Details
+  sections.push(`<div class="sim-section">
+    <div class="sim-section-title">Scenario Details</div>
+    <div class="sim-card full">
+      <div class="sim-kv">
+        <span class="k">Scenario file</span><span class="v">${mqEscapeHtml(shortFile)}</span>
+        <span class="k">Calibration</span><span class="v">${mqEscapeHtml(calibrationName)}</span>
+        <span class="k">Total MRs</span><span class="v">${mqEscapeHtml(String(scenarioMeta.total_mrs ?? "—"))}</span>
+        <span class="k">Initial open MRs</span><span class="v">${initialOpenCount || "—"}</span>
+        <span class="k">Dynamic arrivals</span><span class="v">${arrivalCount}</span>
+        ${limit ? `<span class="k">Limit (concurrency cap)</span><span class="v">${limit}</span>` : ""}
+        <span class="k">Modeled window</span><span class="v">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))} (${modeledWindowTicks} ticks × ${tickSeconds}s)</span>
+        <span class="k">Pipeline duration</span><span class="v">${mqEscapeHtml(pdFmt)}</span>
+        <span class="k">Pipeline failure rate</span><span class="v">${(failRate * 100).toFixed(2)}%</span>
+        <span class="k">Operation failure rate</span><span class="v">merge ${(mergeFailRate * 100).toFixed(3)}% / rebase ${(rebaseFailRate * 100).toFixed(3)}%</span>
+        <span class="k">Force-merges / cancellations</span><span class="v">${forceCount} / ${cancelCount}</span>
+        <span class="k">Scenario start (UTC)</span><span class="v">${mqEscapeHtml(String(arrivalProfile.scenario_start_hour ?? "0"))}:00 ${mqEscapeHtml(arrivalProfile.scenario_start_weekday || "")}</span>
+        <span class="k">Peak window (UTC)</span><span class="v">${scenarioPeakHours.length ? scenarioPeakHours.join(", ") : "—"}</span>
+      </div>
+    </div>
+  </div>`);
+
+  // Section 2: CI Pipeline
+  const ciData = _getCiDistributionData(ownerFile, tickSeconds);
+  if (ciData) {
+    const bucketRows = ciData.buckets.map(b =>
+      `<tr><td>${b.label}</td><td>${b.count}</td><td>${b.pct}%</td></tr>`
+    ).join("");
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title">CI Pipeline</div>
+      <div class="sim-card full">
+        <div class="sim-split">
+          <div class="sim-kv">
+            <span class="k">Pipelines observed</span><span class="v">${ciData.total}</span>
+            <span class="k">Min</span><span class="v">${ciData.fmtMin}</span>
+            <span class="k">Median</span><span class="v">${ciData.fmtMedian}</span>
+            <span class="k">Mean</span><span class="v">${ciData.fmtMean}</span>
+            <span class="k">P95</span><span class="v">${ciData.fmtP95}</span>
+            <span class="k">Max</span><span class="v">${ciData.fmtMax}</span>
+          </div>
+          <div class="sim-table-wrap"><table class="sim-table dense">
+            <thead><tr><th>Duration</th><th>Count</th><th>%</th></tr></thead>
+            <tbody>${bucketRows}</tbody>
+          </table></div>
+        </div>
+        <div style="height:180px;margin-top:0.6rem"><canvas id="simCiChart"></canvas></div>
+      </div>
+    </div>`);
+  }
+
+  // Section 3: MR Labels
+  const priorityCounts = {};
+  const serviceCounts = {};
+  catalogEntries.forEach(entry => {
+    const p = String(entry.priority_label || "").trim() || "none";
+    priorityCounts[p] = (priorityCounts[p] || 0) + 1;
+    (Array.isArray(entry.service_labels) ? entry.service_labels : []).forEach(lbl => {
+      const key = String(lbl).trim();
+      if (key) serviceCounts[key] = (serviceCounts[key] || 0) + 1;
+    });
+  });
+
+  if (Object.keys(priorityCounts).length || Object.keys(serviceCounts).length) {
+    const prioritySorted = Object.entries(priorityCounts).sort((a, b) => b[1] - a[1]);
+    const serviceSorted = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1]);
+    const priorityRows = prioritySorted.map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${v}</td></tr>`).join("");
+    const serviceRows = serviceSorted.map(([k, v]) => `<tr><td>${mqEscapeHtml(k)}</td><td>${v}</td></tr>`).join("");
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title">MR Labels</div>
+      <div class="sim-card full">
+        <div class="sim-split">
+          <div class="sim-table-wrap"><table class="sim-table dense"><thead><tr><th>Priority</th><th>Count</th></tr></thead><tbody>${priorityRows}</tbody></table></div>
+          <div class="sim-table-wrap"><table class="sim-table dense"><thead><tr><th>Tenant</th><th>Count</th></tr></thead><tbody>${serviceRows}</tbody></table></div>
+        </div>
+        <div class="sim-split" style="margin-top:0.6rem">
+          <div style="height:160px"><canvas id="simPriorityChart"></canvas></div>
+          <div style="height:160px"><canvas id="simTenantChart"></canvas></div>
+        </div>
+      </div>
+    </div>`);
+  }
+
+  // Section 4: Hourly Merge Queue Timeline
+  const hourlyRows = timelineBase.rows.map(r => `<tr${r.is_peak ? ' style="background:rgba(88,166,255,0.04)"' : ""}>
+    <td>h${r.hour_index}</td><td>${String(r.utc_hour).padStart(2, "0")}:00</td>
+    <td>${r.is_peak ? "peak" : "off-peak"}</td><td>${r.arrivals}</td><td>${r.merges}</td><td>${fmtSim(r.throughput_mph, 3)}</td>
+  </tr>`).join("");
+  if (hourlyRows) {
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title">Hourly Merge Queue Timeline</div>
+      <div class="sim-card full">
+        <div style="height:200px;margin-bottom:0.6rem"><canvas id="simTimelineChart"></canvas></div>
+        <div class="sim-table-wrap no-max"><table class="sim-table dense">
+          <thead><tr><th>Hour</th><th>UTC</th><th>Window</th><th>Arrivals</th><th>Merges</th><th>Throughput/h</th></tr></thead>
+          <tbody>${hourlyRows}</tbody>
+        </table></div>
+      </div>
+    </div>`);
+  }
+
+  el.innerHTML = sections.join("");
+
+  // Render charts after DOM insertion
+  _renderSimScenarioCharts(ctx, ciData);
+}
+
+function _getCiDistributionData(ownerFile, tickSeconds) {
+  if (!ownerFile || !ownerFile.packed || !ownerFile.packed.segs) return null;
+  const ciTicks = ownerFile.packed.segs.filter(s => s.kind === "running").map(s => s.end - s.start);
+  if (!ciTicks.length) return null;
+
+  ciTicks.sort((a, b) => a - b);
+  const total = ciTicks.length;
+  const minT = ciTicks[0], maxT = ciTicks[total - 1];
+  const mean = ciTicks.reduce((a, b) => a + b, 0) / total;
+  const mid = Math.floor(total / 2);
+  const median = total % 2 ? ciTicks[mid] : (ciTicks[mid - 1] + ciTicks[mid]) / 2;
+  const p95 = ciTicks[Math.floor(total * 0.95)];
+
+  const bucketSize = Math.max(1, Math.ceil((maxT - minT + 1) / 8));
+  const buckets = [];
+  for (let start = minT; start <= maxT; start += bucketSize) {
+    const end = Math.min(start + bucketSize - 1, maxT);
+    const count = ciTicks.filter(t => t >= start && t <= end).length;
+    const pct = (count / total * 100).toFixed(1);
+    const label = `${_simFmtDuration(start, tickSeconds)} – ${_simFmtDuration(end, tickSeconds)}`;
+    buckets.push({ start, end, count, pct, label });
+  }
+
+  return {
+    total, minT, maxT, mean, median, p95, buckets, tickSeconds,
+    fmtMin: _simFmtDuration(minT, tickSeconds),
+    fmtMedian: _simFmtDuration(median, tickSeconds),
+    fmtMean: _simFmtDuration(mean, tickSeconds),
+    fmtP95: _simFmtDuration(p95, tickSeconds),
+    fmtMax: _simFmtDuration(maxT, tickSeconds),
+  };
+}
+
+function _renderSimScenarioCharts(ctx, ciData) {
+  const chartDefaults = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: { legend: { display: false } },
+    scales: {
+      x: { ticks: { color: "#8b949e", font: { size: 10 } }, grid: { color: "#21262d" } },
+      y: { ticks: { color: "#8b949e", font: { size: 10 } }, grid: { color: "#21262d" }, beginAtZero: true },
+    },
+  };
+
+  // CI Pipeline bar chart
+  if (ciData) {
+    const canvas = document.getElementById("simCiChart");
+    if (canvas) {
+      _simCiChart = new Chart(canvas, {
+        type: "bar",
+        data: {
+          labels: ciData.buckets.map(b => b.label),
+          datasets: [{ data: ciData.buckets.map(b => b.count), backgroundColor: "rgba(88,166,255,0.6)", borderColor: "rgba(88,166,255,0.9)", borderWidth: 1 }],
+        },
+        options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, tooltip: { callbacks: { label: tip => `${tip.raw} pipelines (${(tip.raw / ciData.total * 100).toFixed(1)}%)` } } } },
+      });
+    }
+  }
+
+  // Priority label chart
+  const { catalogEntries } = ctx;
+  const priorityCounts = {};
+  const serviceCounts = {};
+  catalogEntries.forEach(entry => {
+    const p = String(entry.priority_label || "").trim() || "none";
+    priorityCounts[p] = (priorityCounts[p] || 0) + 1;
+    (Array.isArray(entry.service_labels) ? entry.service_labels : []).forEach(lbl => {
+      const key = String(lbl).trim();
+      if (key) serviceCounts[key] = (serviceCounts[key] || 0) + 1;
+    });
+  });
+
+  const prioritySorted = Object.entries(priorityCounts).sort((a, b) => b[1] - a[1]);
+  const serviceSorted = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+
+  const prioCanvas = document.getElementById("simPriorityChart");
+  if (prioCanvas && prioritySorted.length) {
+    _simPriorityChart = new Chart(prioCanvas, {
+      type: "bar",
+      data: {
+        labels: prioritySorted.map(([k]) => k.replace("bot/approved: ", "").replace("bot/approved", "default")),
+        datasets: [{ data: prioritySorted.map(([, v]) => v), backgroundColor: "rgba(163,113,247,0.6)", borderColor: "rgba(163,113,247,0.9)", borderWidth: 1 }],
+      },
+      options: chartDefaults,
+    });
+  }
+
+  const tenantCanvas = document.getElementById("simTenantChart");
+  if (tenantCanvas && serviceSorted.length) {
+    _simTenantChart = new Chart(tenantCanvas, {
+      type: "bar",
+      data: {
+        labels: serviceSorted.map(([k]) => k.replace("tenant-", "")),
+        datasets: [{ data: serviceSorted.map(([, v]) => v), backgroundColor: "rgba(210,153,34,0.6)", borderColor: "rgba(210,153,34,0.9)", borderWidth: 1 }],
+      },
+      options: chartDefaults,
+    });
+  }
+
+  // Hourly timeline chart
+  const { timelineBase } = ctx;
+  const timelineCanvas = document.getElementById("simTimelineChart");
+  if (timelineCanvas && timelineBase.rows.length) {
+    const rows = timelineBase.rows;
+    const peakHours = new Set(Array.isArray(ctx.arrivalProfile.peak_window_hours_utc) ? ctx.arrivalProfile.peak_window_hours_utc : []);
+    _simTimelineChart = new Chart(timelineCanvas, {
+      type: "bar",
+      data: {
+        labels: rows.map(r => `${String(r.utc_hour).padStart(2, "0")}:00`),
+        datasets: [
+          {
+            label: "Arrivals",
+            data: rows.map(r => r.arrivals),
+            backgroundColor: rows.map(r => r.is_peak ? "rgba(88,166,255,0.5)" : "rgba(88,166,255,0.25)"),
+            borderColor: "rgba(88,166,255,0.8)",
+            borderWidth: 1,
+          },
+          {
+            label: "Merges",
+            data: rows.map(r => r.merges),
+            backgroundColor: rows.map(r => r.is_peak ? "rgba(46,160,67,0.6)" : "rgba(46,160,67,0.3)"),
+            borderColor: "rgba(46,160,67,0.8)",
+            borderWidth: 1,
+          },
+        ],
+      },
+      options: {
+        ...chartDefaults,
+        plugins: { legend: { display: true, position: "top", labels: { color: "#e6edf3", font: { size: 10 }, boxWidth: 10, padding: 8 } } },
+      },
+    });
+  }
+}
+
+function _renderSimCalibration(el, ctx) {
+  const { scenarioMeta, embeddedScenarioMetadata, perfDims, arrivalProfile } = ctx;
+  const sections = [];
+
+  const calibrationName = embeddedScenarioMetadata.name
+    || loadedRunMetadataByCategory?.comparisons?.custom_metadata?.calibration
+    || loadedRunMetadataByCategory?.calibration?.custom_metadata?.purpose
+    || "—";
+  const calibratedPolicy = embeddedScenarioMetadata.calibration_targets?.calibrated_policy
+    || loadedRunMetadataByCategory?.calibration?.context?.policy
+    || "old-burst";
+
+  // Determine which policy to use as primary for calibration comparison
+  const policyExtended = filesData.map(d => buildPolicyExtended(d, scenarioMeta, arrivalProfile));
+  const calibratedPolicyData = policyExtended.find(p => p.policy === calibratedPolicy) || policyExtended[0];
+
+  // Calibration overview
+  const calMeta = loadedRunMetadataByCategory?.calibration || {};
+  const calCtx = calMeta.context || {};
+  const calCm = calMeta.custom_metadata || {};
+  sections.push(`<div class="sim-section">
+    <div class="sim-section-title calibration">Calibration Overview</div>
+    <div class="sim-card full">
+      <div class="sim-kv">
+        <span class="k">Calibration name</span><span class="v">${mqEscapeHtml(calibrationName)}</span>
+        <span class="k">Calibrated policy</span><span class="v">${mqEscapeHtml(calibratedPolicy)}</span>
+        ${calCtx.target_anchor ? `<span class="k">Target anchor</span><span class="v">${mqEscapeHtml(calCtx.target_anchor)}</span>` : ""}
+        ${calCtx.dimension_profile ? `<span class="k">Dimension profile</span><span class="v">${mqEscapeHtml(calCtx.dimension_profile)}</span>` : ""}
+        ${calCtx.rank_score ? `<span class="k">Scoring method</span><span class="v">${mqEscapeHtml(calCtx.rank_score)}</span>` : ""}
+        ${calCm.ci_model ? `<span class="k">CI model</span><span class="v">${mqEscapeHtml(calCm.ci_model)}</span>` : ""}
+        ${calCtx.cycle_scaling ? `<span class="k">Cycle scaling</span><span class="v">${mqEscapeHtml(calCtx.cycle_scaling)}</span>` : ""}
+        ${calCtx.tune_cycles ? `<span class="k">Tune cycles</span><span class="v">${calCtx.tune_cycles}</span>` : ""}
+        ${calCtx.validate_cycles ? `<span class="k">Validate cycles</span><span class="v">${calCtx.validate_cycles}</span>` : ""}
+      </div>
+    </div>
+  </div>`);
+
+  // Target vs Measured
+  if (Object.keys(perfDims).length && calibratedPolicyData) {
+    const targetRows = [
+      ["merge_per_hour_24h", calibratedPolicyData.throughput_24h_mph],
+      ["merge_per_hour_active_hours", calibratedPolicyData.throughput_active_mph],
+      ["merge_per_hour_peak8", calibratedPolicyData.throughput_peak8_mph],
+      ["merge_per_hour_peak8_p90", calibratedPolicyData.throughput_peak8_p90_mph],
+      ["rebase_per_merge_global", calibratedPolicyData.rebase_per_merge],
+      ["merge_interval_seconds_p50", calibratedPolicyData.merge_interval_p50_seconds],
+      ["merge_interval_seconds_p95", calibratedPolicyData.merge_interval_p95_seconds],
+      ["merge_peak_offpeak_ratio", calibratedPolicyData.throughput_peak_window_mph && calibratedPolicyData.throughput_offpeak_window_mph
+        ? calibratedPolicyData.throughput_peak_window_mph / calibratedPolicyData.throughput_offpeak_window_mph : null],
+    ].filter(([k, v]) => Number.isFinite(Number(perfDims[k])) && v != null)
+     .map(([key, measured]) => {
+      const target = Number(perfDims[key]);
+      return `<tr><td class="metric-name">${mqEscapeHtml(key)}</td><td>${fmtSim(target, 4)}</td><td>${fmtSim(measured, 4)}</td><td>${formatDeltaCell(measured, target, 1)}</td></tr>`;
+    }).join("");
+    if (targetRows) {
+      sections.push(`<div class="sim-section">
+        <div class="sim-section-title calibration">Target vs Measured</div>
+        <div class="sim-card full">
+          <div class="sim-subtle">Calibrated policy: <strong>${mqEscapeHtml(calibratedPolicy)}</strong> — comparing runtime measurements against calibration targets</div>
+          <div class="sim-table-wrap"><table class="sim-table dense">
+            <thead><tr><th>Dimension</th><th>Target</th><th>Measured</th><th>Delta</th></tr></thead>
+            <tbody>${targetRows}</tbody>
+          </table></div>
+        </div>
+      </div>`);
+    }
+  }
+
+  // Per-Policy Runtime Metrics
+  if (policyExtended.length) {
+    const peakTarget = Number(perfDims.merge_per_hour_peak8);
+    const offPeakTarget = Number(perfDims.merge_per_hour_24h);
+    const runtimeRows = policyExtended.map(p => `<tr>
+      <td class="sticky-col">${mqEscapeHtml(p.policy)}</td>
+      <td>${mqEscapeHtml(fmtHoursLabel(p.modeled_hours))}</td>
+      <td>${fmtSim(p.throughput_24h_mph, 3)}</td>
+      <td>${fmtSim(p.throughput_active_mph, 3)}</td>
+      <td>${fmtSim(p.throughput_peak8_mph, 3)}</td>
+      <td>${fmtSim(p.throughput_peak_window_mph, 3)} ${Number.isFinite(peakTarget) ? `<span class="sim-badge peak">${formatDeltaCell(p.throughput_peak_window_mph, peakTarget, 1)}</span>` : ""}</td>
+      <td>${fmtSim(p.throughput_offpeak_window_mph, 3)} ${Number.isFinite(offPeakTarget) ? `<span class="sim-badge offpeak">${formatDeltaCell(p.throughput_offpeak_window_mph, offPeakTarget, 1)}</span>` : ""}</td>
+      <td>${fmtSim(p.rebases, 0)}</td>
+      <td>${fmtSim(p.rebase_per_merge, 3)}</td>
+      <td>${fmtSim(p.merge_interval_p95_seconds, 1)}</td>
+      <td>${fmtSim(p.merged, 0)}</td>
+      <td>${fmtSim(p.total_arrivals, 0)}</td>
+    </tr>`).join("");
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title runtime">Per-Policy Runtime</div>
+      <div class="sim-card full"><div class="sim-table-wrap"><table class="sim-table dense">
+        <thead><tr>
+          <th class="sticky-col">Policy</th><th>Window</th><th>24h mph</th><th>Active mph</th><th>Peak8 mph</th>
+          <th>Peak avg</th><th>Off-peak avg</th><th>Rebases</th><th>Rebase/Merge</th><th>Merge p95 (s)</th><th>Merged</th><th>Arrivals</th>
+        </tr></thead>
+        <tbody>${runtimeRows}</tbody>
+      </table></div></div>
+    </div>`);
+  }
+
+  // Dimension weights (if available from calibration metadata)
+  const dimWeights = calCtx.standard_dimension_weights;
+  if (dimWeights && typeof dimWeights === "object") {
+    const weightRows = Object.entries(dimWeights)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .map(([k, v]) => `<tr><td class="metric-name">${mqEscapeHtml(k)}</td><td>${(Number(v) * 100).toFixed(0)}%</td></tr>`)
+      .join("");
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title calibration">Dimension Weights</div>
+      <div class="sim-card full"><div class="sim-table-wrap"><table class="sim-table dense">
+        <thead><tr><th>Dimension</th><th>Weight</th></tr></thead>
+        <tbody>${weightRows}</tbody>
+      </table></div></div>
+    </div>`);
+  }
+
+  // Decision gates (if available)
+  const gates = calCtx.decision_gates || calMeta.decision?.gates;
+  const thresholds = calCtx.decision_thresholds;
+  if (gates || thresholds) {
+    let gateHtml = `<div class="sim-kv">`;
+    if (gates) {
+      Object.entries(gates).forEach(([k, v]) => {
+        const passed = v === "true" || v === true;
+        gateHtml += `<span class="k">${mqEscapeHtml(k)}</span><span class="v" style="color:${passed ? "var(--green)" : "var(--red)"}">${passed ? "✓ pass" : "✗ fail"}</span>`;
+      });
+    }
+    if (thresholds) {
+      Object.entries(thresholds).forEach(([k, v]) => {
+        gateHtml += `<span class="k">${mqEscapeHtml(k)}</span><span class="v">${mqEscapeHtml(String(v))}</span>`;
+      });
+    }
+    gateHtml += `</div>`;
+    sections.push(`<div class="sim-section">
+      <div class="sim-section-title calibration">Decision Gates</div>
+      <div class="sim-card full">${gateHtml}</div>
+    </div>`);
+  }
+
+  if (!sections.length) {
+    el.innerHTML = `<div class="sim-card full sim-empty">No calibration data available. Load a calibration run or scenario with embedded calibration targets.</div>`;
+    return;
+  }
+  el.innerHTML = sections.join("");
+}
+
+function _renderSimMetadata(el, ctx) {
+  const categories = Object.keys(loadedRunMetadataByCategory);
+  if (!categories.length) {
+    el.innerHTML = `<div class="sim-card full sim-empty">No run metadata loaded. Load a run from the browser to see metadata.</div>`;
+    return;
+  }
+
+  let html = "";
+  categories.sort().forEach(cat => {
+    const meta = loadedRunMetadataByCategory[cat] || {};
+    const flat = flattenMetadata(meta);
+    const entries = Object.entries(flat).sort((a, b) => a[0].localeCompare(b[0]));
+
+    html += `<div class="sim-section">
+      <div class="sim-section-title">${mqEscapeHtml(cat)}</div>
+      <div class="sim-card full">
+        <div class="sim-table-wrap no-max"><table class="sim-table dense">
+          <thead><tr><th style="width:40%">Key</th><th>Value</th></tr></thead>
+          <tbody>${entries.map(([k, v]) => `<tr class="sim-meta-row" data-key="${mqEscapeHtml(k)}" data-value="${mqEscapeHtml(String(v))}">
+            <td class="metric-name">${mqEscapeHtml(k)}</td>
+            <td>${mqEscapeHtml(String(v))}</td>
+          </tr>`).join("")}</tbody>
+        </table></div>
+      </div>
+    </div>`;
+  });
+
+  el.innerHTML = html;
+
+  el.querySelectorAll(".sim-meta-row").forEach(row => {
+    row.addEventListener("click", () => {
+      const key = row.dataset.key;
+      const value = row.dataset.value;
+      const searchBox = document.getElementById("runSearchBox");
+      if (searchBox) {
+        searchBox.value = `${key}=${value}`;
+        searchBox.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    });
+  });
+}
+
+// Sim subtab click handler
+(function initSimSubtabs() {
+  const bar = document.getElementById("simSubtabBar");
+  if (!bar) return;
+  bar.addEventListener("click", e => {
+    const btn = e.target.closest(".stats-subtab");
+    if (!btn || !btn.dataset.simtab) return;
+    simSubtab = btn.dataset.simtab;
+    renderSimulationTab();
+  });
+})();
+
+
 function renderStats() {
-  if (!filesData.length) return;
-  renderScenarioInfoCard();
-  renderMetricPicker();
-  const metrics = filesData.map(d => d.metrics);
-  renderHeroCards(metrics);
-  renderStatsExtended(metrics);
-  renderCmpTable();
+  if (!filesData.length && !perLabelData) return;
+  if (!filesData.length && perLabelData) statsSubtab = "perlabel";
+
+  const subtabBar = document.getElementById("statsSubtabBar");
+  if (subtabBar) {
+    subtabBar.style.display = perLabelData ? "flex" : "none";
+    subtabBar.querySelectorAll(".stats-subtab").forEach(b => b.classList.toggle("active", b.dataset.subtab === statsSubtab));
+  }
+
+  const metricsView = document.getElementById("statsMetricsView");
+  const perLabelView = document.getElementById("statsPerLabelView");
+  if (metricsView) metricsView.style.display = statsSubtab === "metrics" ? "" : "none";
+  if (perLabelView) perLabelView.style.display = statsSubtab === "perlabel" ? "" : "none";
+
+  if (statsSubtab === "metrics" && filesData.length) {
+    renderScenarioInfoCard();
+    renderMetricPicker();
+    const metrics = filesData.map(d => d.metrics);
+    renderHeroCards(metrics);
+    renderStatsExtended(metrics);
+    renderCmpTable();
+  } else if (statsSubtab === "perlabel") {
+    if (filesData.length) renderScenarioInfoCard();
+    renderPerLabelView();
+  }
+}
+
+(function initStatsSubtabs() {
+  const bar = document.getElementById("statsSubtabBar");
+  if (!bar) return;
+  bar.addEventListener("click", e => {
+    const btn = e.target.closest(".stats-subtab");
+    if (!btn) return;
+    statsSubtab = btn.dataset.subtab;
+    renderStats();
+  });
+})();
+
+function renderPerLabelView() {
+  if (!perLabelData) return;
+
+  const selectedNames = _getVisiblePerLabelPolicies();
+  const policies = Object.keys(perLabelData).filter(p => selectedNames.has(p));
+  if (!policies.length) {
+    const table = document.getElementById("perLabelTable");
+    if (table) table.innerHTML = "<tr><td style='color:var(--muted);padding:1rem'>No policies selected</td></tr>";
+    return;
+  }
+
+  const LABEL_ORDER = ["critical", "high", "medium", "low", "none", "lgtm"];
+  const allLabels = new Set();
+  policies.forEach(p => Object.keys(perLabelData[p]).forEach(l => allLabels.add(l)));
+  const labels = LABEL_ORDER.filter(l => allLabels.has(l));
+
+  const COLORS = { "active-cap": "#58a6ff", "cap+phase1": "#a371f7", "top-k": "#d29922", "old-burst": "#f85149" };
+  const fallbackColors = ["#2ea043", "#8b949e", "#da3633", "#79c0ff"];
+
+  const ctx0 = getTimeContext(0);
+  const tickSec = ctx0.tickSeconds || 30;
+  const isTicks = timeDisplayMode === "ticks";
+  const yLabel = isTicks ? "Ticks" : "Minutes";
+  const yFmt = v => isTicks ? Math.round(v / tickSec) + "" : (v / 60).toFixed(0) + "m";
+  const tipFmt = v => isTicks ? Math.round(v / tickSec) + " ticks" : (v / 60).toFixed(1) + "m";
+
+  const chartOpts = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: "top", labels: { color: "#e6edf3", font: { size: 11 }, boxWidth: 12, padding: 10 } },
+      tooltip: { callbacks: { label: tip => `${tip.dataset.label}: ${tipFmt(tip.raw)}` } },
+    },
+    scales: {
+      x: { ticks: { color: "#8b949e" }, grid: { color: "#21262d" } },
+      y: { ticks: { color: "#8b949e", callback: yFmt }, grid: { color: "#21262d" }, title: { display: true, text: yLabel, color: "#8b949e" } },
+    },
+  };
+
+  const medianSets = policies.map((p, pi) => ({
+    label: p,
+    data: labels.map(l => (perLabelData[p][l] || {}).median_seconds || 0),
+    backgroundColor: COLORS[p] || fallbackColors[pi % fallbackColors.length],
+    borderColor: COLORS[p] || fallbackColors[pi % fallbackColors.length],
+    borderWidth: 1,
+  }));
+
+  mqDestroyChartIfPresent(perLabelChart);
+  const ctx = document.getElementById("perLabelCanvas");
+  if (ctx) {
+    perLabelChart = new Chart(ctx, {
+      type: "bar",
+      data: { labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)), datasets: medianSets },
+      options: chartOpts,
+    });
+  }
+
+  const p95Sets = policies.map((p, pi) => ({
+    label: p,
+    data: labels.map(l => (perLabelData[p][l] || {}).p95_seconds || 0),
+    backgroundColor: COLORS[p] || fallbackColors[pi % fallbackColors.length],
+    borderColor: COLORS[p] || fallbackColors[pi % fallbackColors.length],
+    borderWidth: 1,
+  }));
+
+  mqDestroyChartIfPresent(perLabelP95Chart);
+  const p95Ctx = document.getElementById("perLabelP95Canvas");
+  if (p95Ctx) {
+    perLabelP95Chart = new Chart(p95Ctx, {
+      type: "bar",
+      data: { labels: labels.map(l => l.charAt(0).toUpperCase() + l.slice(1)), datasets: p95Sets },
+      options: chartOpts,
+    });
+  }
+
+  const ciMedianSeconds = _getSimCiMedianSeconds();
+  const ciLabel = isTicks ? Math.round(ciMedianSeconds / tickSec) + " ticks" : (ciMedianSeconds / 60).toFixed(0) + "m";
+  const fmtMin = v => v == null ? "—" : isTicks ? Math.round(v / tickSec) + " ticks" : (v / 60).toFixed(1) + "m";
+
+  const table = document.getElementById("perLabelTable");
+  if (!table) return;
+
+  let html = `<thead><tr><th>Priority</th><th>Count</th>`;
+  policies.forEach(p => { html += `<th>${mqEscapeHtml(p)}</th>`; });
+  html += `<th>Δ spread</th><th>Δ / CI median (${ciLabel})</th></tr></thead><tbody>`;
+
+  labels.forEach(label => {
+    const medians = policies.map(p => (perLabelData[p][label] || {}).median_seconds ?? null);
+    const p95s = policies.map(p => (perLabelData[p][label] || {}).p95_seconds ?? null);
+    const validMedians = medians.filter(v => v != null);
+    const validP95 = p95s.filter(v => v != null);
+    const minMedian = validMedians.length ? Math.min(...validMedians) : 0;
+    const maxMedian = validMedians.length ? Math.max(...validMedians) : 0;
+    const minP95 = validP95.length ? Math.min(...validP95) : 0;
+    const spread = maxMedian - minMedian;
+    const ciPct = ciMedianSeconds > 0 ? spread / ciMedianSeconds : 0;
+    const count = Math.round(policies.reduce((n, p) => n + ((perLabelData[p][label] || {}).count || 0), 0) / policies.length);
+
+    html += `<tr>`;
+    html += `<td class="metric-name">${label} <span style="color:var(--muted);font-weight:400;font-size:0.78rem">median</span></td>`;
+    html += `<td>${count}</td>`;
+    medians.forEach(v => {
+      if (v == null) { html += `<td>—</td>`; return; }
+      const cls = (v === minMedian && validMedians.length > 1) ? " best" : "";
+      html += `<td class="${cls}">${fmtMin(v)}</td>`;
+    });
+    html += `<td>${spread === 0 ? "—" : fmtMin(spread)}</td>`;
+    html += `<td${ciPct >= 1 ? ' class="best"' : ""}>${spread === 0 ? "—" : (ciPct * 100).toFixed(0) + "%"}</td>`;
+    html += `</tr>`;
+
+    html += `<tr>`;
+    html += `<td class="metric-name" style="color:var(--muted);font-weight:400"><span style="padding-left:0.6rem">p95</span></td>`;
+    html += `<td></td>`;
+    p95s.forEach(v => {
+      if (v == null) { html += `<td>—</td>`; return; }
+      const cls = (v === minP95 && validP95.length > 1) ? " best" : "";
+      html += `<td class="${cls}" style="color:var(--muted)">${fmtMin(v)}</td>`;
+    });
+    const p95Spread = validP95.length ? Math.max(...validP95) - minP95 : 0;
+    const p95CiPct = ciMedianSeconds > 0 ? p95Spread / ciMedianSeconds : 0;
+    html += `<td style="color:var(--muted)">${p95Spread === 0 ? "—" : fmtMin(p95Spread)}</td>`;
+    html += `<td style="color:var(--muted)">${p95Spread === 0 ? "—" : (p95CiPct * 100).toFixed(0) + "%"}</td>`;
+    html += `</tr>`;
+  });
+
+  html += `</tbody>`;
+  table.innerHTML = html;
+}
+
+function _getVisiblePerLabelPolicies() {
+  if (!filesData.length) return new Set(Object.keys(perLabelData || {}));
+  const sel = getSelectedIndices();
+  const names = new Set(sel.map(i => filesData[i]?.name).filter(Boolean));
+  if (!names.size) return new Set(Object.keys(perLabelData || {}));
+  return names;
+}
+
+function _getSimCiMedianSeconds() {
+  if (!filesData.length) return 480;
+  const allCiTicks = [];
+  const sel = getSelectedIndices();
+  let tickSec = 30;
+  for (const i of sel) {
+    const d = filesData[i];
+    if (!d || !d.packed || !d.packed.segs) continue;
+    const m = d.metrics;
+    if (m && m.tick_seconds) tickSec = Number(m.tick_seconds) || 30;
+    d.packed.segs.forEach(s => { if (s.kind === "running") allCiTicks.push(s.end - s.start); });
+  }
+  if (allCiTicks.length) {
+    allCiTicks.sort((a, b) => a - b);
+    const mid = Math.floor(allCiTicks.length / 2);
+    const medianTicks = allCiTicks.length % 2 ? allCiTicks[mid] : (allCiTicks[mid - 1] + allCiTicks[mid]) / 2;
+    return medianTicks * tickSec;
+  }
+  const meta = filesData.map(d => (d.events || []).find(e => e.event === "scenario_meta")).filter(Boolean)[0];
+  if (meta) {
+    const ts = Number(meta.tick_seconds) || 30;
+    const pd = meta.pipeline_duration;
+    if (pd && pd.min != null && pd.max != null) return ((pd.min + pd.max) / 2) * ts;
+  }
+  return 480;
 }
 function renderStatsExtended(metrics) {
   const el = document.getElementById("statsExtended");
@@ -2936,6 +3417,7 @@ function renderSnapshot() {
   storyEl.title = story.join("; ");
 }
 function renderTraces() {
+  _closeKanbanTip();
   const container = document.getElementById("tracesContainer");
   container.innerHTML = "";
   if (!kanbanVisibleIdxs.size) {
@@ -2964,6 +3446,7 @@ function renderTraces() {
     body.appendChild(colHdr);
 
     const rebasedRecent = new Set(), mergedRecent = new Set(), forceMergedRecent = new Set(), ciFailedRecent = new Set();
+    const justReadyRecent = new Set(), justStaleRecent = new Set();
     const visitedFirstTick = new Map();
     const markVisited = (mr, at) => {
       if (mr == null || at == null || at > t) return;
@@ -2987,12 +3470,24 @@ function renderTraces() {
       }
       if (e.event === "tick" && e.tick === tt) {
         (e.transitions || []).forEach(tr => {
-          if ((tr.to || "").toLowerCase() === "failed" && tr.mr_iid != null) {
+          const to = (tr.to || "").toLowerCase();
+          if (to === "failed" && tr.mr_iid != null) {
             ciFailedRecent.add(String(tr.mr_iid));
+          }
+          if (to === "success" && tr.mr_iid != null) {
+            justReadyRecent.add(String(tr.mr_iid));
           }
         });
       }
     }); }
+    // Detect recently-staled MRs from packed segments
+    if (d.packed && d.packed.segs) {
+      for (const s of d.packed.segs) {
+        if (s.kind === "stale" && s.start <= t && s.start > (t - HIGHLIGHT_TICKS)) {
+          justStaleRecent.add(String(s.mr));
+        }
+      }
+    }
 
     const cards = document.createElement("div");
     cards.className = "trace-cards";
@@ -3037,6 +3532,8 @@ function renderTraces() {
           if (forceMergedRecent.has(m)) cls += " force-merged";
           else if (mergedRecent.has(m)) cls += " just-merged";
           else if (ciFailedRecent.has(m)) cls += " ci-failed";
+          else if (justStaleRecent.has(m) && ci === 4) cls += " just-stale";
+          else if (justReadyRecent.has(m) && (ci === 3 || ci === 4)) cls += " just-ready";
           else if (rebasedRecent.has(m)) cls += " just-rebased";
           c.className = cls; c.textContent = "!" + m; col.appendChild(c);
         });
@@ -3047,7 +3544,105 @@ function renderTraces() {
     trace.appendChild(body);
     container.appendChild(trace);
   });
+  container.addEventListener("click", _handleKanbanCardClick);
 }
+
+let _kanbanTipMr = null;
+let _kanbanTipIdx = null;
+function _handleKanbanCardClick(event) {
+  const card = event.target.closest(".kcard");
+  if (!card) return;
+  const mrText = card.textContent.replace(/^!/, "");
+  const mrId = parseInt(mrText, 10);
+  if (isNaN(mrId)) return;
+  const trace = card.closest(".trace");
+  if (!trace) return;
+  const traceIdx = Array.from(document.getElementById("tracesContainer").children).indexOf(trace);
+  const dataIdx = _kanbanTraceDataIndex(traceIdx);
+  if (dataIdx < 0) return;
+  if (_kanbanTipMr === mrId && _kanbanTipIdx === dataIdx) {
+    _closeKanbanTip();
+    return;
+  }
+  _kanbanTipMr = mrId;
+  _kanbanTipIdx = dataIdx;
+  _showKanbanTip(mrId, dataIdx, card);
+}
+function _kanbanTraceDataIndex(traceIdx) {
+  let count = 0;
+  for (let i = 0; i < filesData.length; i++) {
+    if (!kanbanVisibleIdxs.has(i)) continue;
+    if (!filesData[i].packed) continue;
+    if (count === traceIdx) return i;
+    count++;
+  }
+  return -1;
+}
+function _closeKanbanTip() {
+  _kanbanTipMr = null;
+  _kanbanTipIdx = null;
+  const tip = document.getElementById("kanbanTip");
+  if (tip) tip.style.display = "none";
+}
+function _showKanbanTip(mr, dataIdx, cardEl) {
+  const tip = document.getElementById("kanbanTip");
+  if (!tip) return;
+  const d = filesData[dataIdx];
+  if (!d || !d.packed) return;
+  const evs = normalizeEventsForAnalysis(d.events || []);
+  const t = playhead;
+  const seg = segmentAtTick(d.packed, mr, t);
+  const hist = buildMrHistory(evs, mr, t);
+  const labels = getMrScenarioLabels(evs, mr, d.name || "");
+  const ctx = getTimeContext(dataIdx);
+  const KANBAN_COL_LABELS = { queue: "Queue", rebase: "Rebasing", running: "CI", success: "Ready", stale: "Stale", merged: "Merged", force_merge: "Merged (force)" };
+  const stateLabel = seg ? (KANBAN_COL_LABELS[seg.kind] || seg.kind) : "Unknown";
+  const segRange = seg ? (timeDisplayMode === "ticks" ? `${seg.start}→${seg.end}` : fmtTickRange(seg.start, seg.end, ctx)) : "n/a";
+  const tickLabel = timeDisplayMode === "ticks" ? `t${t}` : fmtTickAsTime(t, ctx);
+
+  let html = `<button class="kt-close" onclick="_closeKanbanTip()">&times;</button>`;
+  html += `<div class="kt-head"><span class="kt-mr">MR !${mr}</span><span class="kt-state">${mqEscapeHtml(stateLabel)} @ ${mqEscapeHtml(tickLabel)}</span></div>`;
+  html += `<div class="kt-grid">`;
+  html += `<div class="k">Policy</div><div class="v">${mqEscapeHtml(d.name || "—")}</div>`;
+  html += `<div class="k">Segment</div><div class="v">${mqEscapeHtml(segRange)}</div>`;
+  html += `<div class="k">Priority</div><div class="v">${mqEscapeHtml(labels.priorityLabel)}</div>`;
+  html += `<div class="k">Service</div><div class="v">${mqEscapeHtml(labels.serviceLabels)}</div>`;
+  html += `<div class="k">Rebases</div><div class="v">${hist.rebases}</div>`;
+  html += `<div class="k">Merges</div><div class="v">${hist.merges}</div>`;
+  html += `<div class="k">CI passed</div><div class="v">${hist.transOk}</div>`;
+  html += `<div class="k">CI failed</div><div class="v">${hist.transFail}</div>`;
+  html += `</div>`;
+  if (hist.recent.length) {
+    const fmtTick = h => timeDisplayMode === "ticks" ? `t${h.tick}` : fmtTickAsTime(h.tick, ctx);
+    html += `<div class="kt-history"><ul>`;
+    html += hist.recent.map(h => `<li><strong>${fmtTick(h)}</strong> ${mqEscapeHtml(h.msg)}</li>`).join("");
+    html += `</ul></div>`;
+  }
+  tip.innerHTML = html;
+  tip.style.display = "block";
+
+  const rect = cardEl.getBoundingClientRect();
+  const tipW = 440, tipH = tip.offsetHeight || 300;
+  let left = rect.right + 8;
+  let top = rect.top;
+  if (left + tipW > window.innerWidth - 12) left = rect.left - tipW - 8;
+  if (left < 8) left = 8;
+  if (top + tipH > window.innerHeight - 12) top = window.innerHeight - tipH - 12;
+  if (top < 8) top = 8;
+  tip.style.left = left + "px";
+  tip.style.top = top + "px";
+}
+(function initKanbanTipDismiss() {
+  const panel = document.getElementById("panelKanban");
+  if (!panel) return;
+  panel.addEventListener("click", function(e) {
+    if (_kanbanTipMr == null) return;
+    const tip = document.getElementById("kanbanTip");
+    if (tip && tip.contains(e.target)) return;
+    if (e.target.closest(".kcard")) return;
+    _closeKanbanTip();
+  });
+})();
 
 // --- Composition Tab ---
 let chartIdxL = 0, chartIdxR = 1, chartInstL = null, chartInstR = null;
@@ -4412,13 +5007,19 @@ function lockPlayLabelWidth() {
   const el = document.getElementById("playLabel");
   if (!el) return;
   const mx = globalMaxTick();
+  if (!mx) return;
   const ctx = getTimeContext(activeIndex);
   const widest = timeDisplayMode === "ticks"
     ? "Step " + mx + " / " + mx
     : fmtTickAsTime(mx, ctx) + " / " + fmtTickAsTime(mx, ctx);
+  const prev = el.textContent;
   el.style.minWidth = "";
   el.textContent = widest;
-  _playLabelLockedWidth = el.offsetWidth + 2;
+  const measured = el.offsetWidth;
+  el.textContent = prev;
+  if (measured > 0 && measured + 2 > _playLabelLockedWidth) {
+    _playLabelLockedWidth = measured + 2;
+  }
   el.style.minWidth = _playLabelLockedWidth + "px";
 }
 function updatePlayLabel() {
@@ -4470,10 +5071,18 @@ document.addEventListener("keydown", e => {
   if (isTypingTarget(e.target)) return;
   let tabName = null;
   const active = document.querySelector(".tab-panel.active");
-  if (active?.id === "panelComposition") tabName = "composition";
+  if (active?.id === "panelKanban") tabName = "kanban";
+  else if (active?.id === "panelComposition") tabName = "composition";
   else if (active?.id === "panelBars") tabName = "compositionCharts";
   else if (active?.id === "panelSwimlane") tabName = "swimlane";
   if (!tabName) return;
+  if (tabName === "kanban") {
+    if (e.key === "Escape" && _kanbanTipMr != null) {
+      _closeKanbanTip();
+      e.preventDefault();
+    }
+    return;
+  }
   const lock = getActiveSwimLockForTab(tabName);
   if (!lock) return;
   if (e.key === "Escape") {
@@ -4526,6 +5135,8 @@ function refreshAllTimeViews() {
     dSwim(pS, "swimAreaSingle", { forceFullRange: true });
   }
   if (typeof renderLockedSwimTip === "function") renderLockedSwimTip();
+  if (typeof renderSimulationTab === "function") renderSimulationTab();
+  if (typeof renderPerLabelView === "function" && perLabelData) renderPerLabelView();
 }
 
 // =========================================================================

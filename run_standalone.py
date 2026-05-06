@@ -28,9 +28,11 @@ import socket
 import subprocess
 import sys
 import time
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from functools import partial
+from statistics import mean, median, quantiles
 from typing import Any
 
 import requests
@@ -1405,6 +1407,80 @@ def resolve_policies(args: argparse.Namespace) -> list[str]:
     return policies
 
 
+def _compute_per_label_merge_times(reports_dir: str, policies: list[str]) -> dict:
+    """Extract per-priority-label time-to-merge breakdown from NDJSON files."""
+    from pathlib import Path
+
+    result: dict[str, dict[str, dict]] = {}
+    reports_path = Path(reports_dir)
+
+    for policy in policies:
+        ndjson_path = reports_path / f"{policy}-metrics.ndjson"
+        if not ndjson_path.exists():
+            continue
+
+        meta = None
+        merges = []
+        with open(ndjson_path) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                obj = json.loads(line)
+                if obj.get("event") == "scenario_meta":
+                    meta = obj
+                elif obj.get("event") == "merge":
+                    merges.append(obj)
+
+        if not meta:
+            continue
+
+        tick_seconds = meta.get("tick_seconds", 30)
+        mr_catalog = meta.get("mr_catalog", {})
+        arrivals_list = meta.get("arrivals", [])
+        arrival_ticks = {a["iid"]: a["tick"] for a in arrivals_list}
+        for iid_str in mr_catalog:
+            iid = int(iid_str)
+            if iid not in arrival_ticks:
+                arrival_ticks[iid] = 0
+
+        label_merges: dict[str, list[float]] = defaultdict(list)
+        for m in merges:
+            iid = m["mr_iid"]
+            merge_tick = m["tick"]
+            arrival_tick = arrival_ticks.get(iid, 0)
+            ttm_seconds = (merge_tick - arrival_tick) * tick_seconds
+
+            iid_str = str(iid)
+            priority_label = mr_catalog.get(iid_str, {}).get(
+                "priority_label", "unknown"
+            )
+            tier = priority_label.replace("bot/approved: ", "").replace(
+                "bot/approved", "none"
+            )
+            label_merges[tier].append(ttm_seconds)
+
+        policy_stats = {}
+        for label, times_s in sorted(label_merges.items()):
+            stats: dict[str, Any] = {
+                "count": len(times_s),
+                "mean_seconds": round(mean(times_s), 1),
+                "median_seconds": round(median(times_s), 1),
+                "min_seconds": round(min(times_s), 1),
+                "max_seconds": round(max(times_s), 1),
+            }
+            if len(times_s) >= 4:
+                q = quantiles(times_s, n=20)
+                stats["p95_seconds"] = round(q[18], 1)
+            else:
+                stats["p95_seconds"] = round(max(times_s), 1)
+            policy_stats[label] = stats
+
+        result[policy] = policy_stats
+
+    return result
+
+
 def run_comparison(args: argparse.Namespace) -> None:
     """Run all policies against the same scenario and print comparison."""
     if not args.scenario:
@@ -1728,6 +1804,14 @@ def run_comparison(args: argparse.Namespace) -> None:
             sort_keys=True,
         )
     log.info(f"Extended comparison metrics: {extended_summary_file}")
+
+    per_label_data = _compute_per_label_merge_times(reports_dir, policies)
+    if per_label_data:
+        per_label_file = os.path.join(reports_dir, "per-label-merge-times.json")
+        with open(per_label_file, "w") as f:
+            json.dump(per_label_data, f, indent=2, sort_keys=True)
+        log.info(f"Per-label time-to-merge breakdown: {per_label_file}")
+
     log.info(f"Per-policy NDJSON files saved to {reports_dir}/")
     _write_run_metadata(
         reports_dir=reports_dir,
@@ -1742,6 +1826,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             "ticks_per_cycle": args.ticks_per_cycle,
             "comparison_file": os.path.basename(comparison_file),
             "extended_metrics_file": os.path.basename(extended_summary_file),
+            "per_label_file": "per-label-merge-times.json",
             "policy_metrics_files": [
                 f"{policy}-metrics.ndjson" for policy in policies if policy in results
             ],

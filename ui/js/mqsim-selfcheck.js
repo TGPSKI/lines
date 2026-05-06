@@ -235,7 +235,9 @@
     [
       "dropZone",
       "runChipList",
-      "simulationContent",
+      "simScenarioView",
+      "simCalibrationView",
+      "simMetadataView",
       "cmpTable",
       "expContent",
       "mcContent",
