@@ -67,7 +67,8 @@ QR_ROOT := $(shell cd ../.. && pwd)
         compare compare-advanced compare-prod-calibrated compare-quick \
         calibrate-prod-scenario tune-prod-calibration discrimination-pass \
         monte-carlo-small monte-carlo-medium monte-carlo-large \
-        tick ticks metrics state reset report full-cycle clean ui help
+        tick ticks metrics state reset report full-cycle clean ui help \
+        analyze-compare analyze-measure analyze-plan
 
 ui: ## Open the queue visualization (load NDJSON in the browser; requires network for CDN)
 	@python3 -c "import pathlib, webbrowser; p=pathlib.Path('$(CURDIR)/ui/index.html').resolve(); print(p); webbrowser.open(p.as_uri())"
@@ -322,9 +323,26 @@ full-cycle: ## Automated: serve + run (3 cycles with ticks) + report
 	@echo "=== Cycle complete ==="
 
 # ---------------------------------------------------------------------------
+# Log Analysis (production CloudWatch logs)
+# ---------------------------------------------------------------------------
+
+LOG_FILE ?= $(error Set LOG_FILE=path/to/logs-insights-results.json)
+LOG_OUTPUT ?= reports/log-analysis
+LOG_ALGORITHM ?= active-cap
+
+analyze-compare: ## Compare algorithms from production logs (auto-detect windows)
+	$(PYTHON) scripts/analyze_logs.py compare --input "$(LOG_FILE)" --output $(LOG_OUTPUT)
+
+analyze-measure: ## Single-algorithm performance report from production logs
+	$(PYTHON) scripts/analyze_logs.py measure --input "$(LOG_FILE)" --algorithm $(LOG_ALGORITHM) --output $(LOG_OUTPUT)
+
+analyze-plan: ## Phase 1 multi-merge planning from production logs (requires GITLAB_TOKEN)
+	$(PYTHON) scripts/analyze_logs.py plan --input "$(LOG_FILE)" --algorithm $(LOG_ALGORITHM) --output $(LOG_OUTPUT)
+
+# ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
 
 clean: ## Remove generated reports and caches
-	rm -rf reports/comparisons reports/monte-carlo
+	rm -rf reports/comparisons reports/monte-carlo reports/log-analysis
 	rm -rf __pycache__ .pytest_cache
