@@ -81,6 +81,10 @@
       color: #d7ecff;
       background: rgba(56,139,253,0.15);
     }
+    .tab-toggle-chip:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
     .tab-control-row .chart-view-toggle,
     .tab-control-row .tab-inline-controls,
     .tab-control-row .chart-pickers,
@@ -826,6 +830,46 @@
     #sweepDataTable th { background: var(--bg); position: sticky; top: 0; }
     #sweepDataTable tr:hover td { background: rgba(255,255,255,0.03); }
     #sweepDataTable td.best { color: #3fb950; font-weight: 600; }
+
+    /* Multi-Merge tab */
+    #panelMultiMerge { gap: 1rem; }
+    .mm-section { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1rem; }
+    .mm-section + .mm-section { margin-top: 1.25rem; }
+    .mm-section h3 { font-size: 0.88rem; margin: 0 0 0.75rem; color: var(--text); }
+    .mm-stats-tbl { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+    .mm-stats-tbl tr + tr td { border-top: 1px solid var(--border); }
+    .mm-stats-tbl td { padding: 0.35rem 0.5rem; }
+    .mm-stats-key { color: var(--muted); white-space: nowrap; width: 1%; }
+    .mm-stats-val { color: var(--text); font-variant-numeric: tabular-nums; }
+    .mm-charts-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .mm-chart-panel { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 0.8rem; }
+    .mm-chart-title { font-size: 0.8rem; margin: 0 0 0.5rem; color: var(--muted); }
+    .mm-chart-wrap { height: 240px; }
+    .mm-timeline-wrap { width: 100%; overflow-x: auto; min-height: 120px; }
+    .mm-timeline-wrap svg { display: block; }
+    .mm-block { cursor: pointer; }
+    .mm-block:hover rect { stroke-width: 2; stroke: var(--accent); }
+    .mm-overlap-bridge { opacity: 0.7; }
+    .mm-batch-bracket { fill: none; stroke: var(--green); stroke-width: 1.5; stroke-dasharray: 4 2; opacity: 0.6; }
+    .mm-controls { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .mm-controls label { font-size: 0.76rem; color: var(--muted); }
+    .mm-controls input[type="range"] { width: 200px; }
+    .mm-controls .mm-limit-val { font-size: 0.88rem; font-weight: 600; color: var(--accent); min-width: 1.5em; }
+    #mmViewExplorer { display: flex; flex-direction: column; height: calc(100vh - 140px); }
+    #mmViewExplorer[style*="display:none"] { height: auto; }
+    .mm-table-wrap { flex: 1 1 0; min-height: 0; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+    .mm-table { border-collapse: collapse; font-size: 0.76rem; width: 100%; }
+    .mm-table th, .mm-table td { border: 1px solid var(--border); padding: 0.3rem 0.5rem; text-align: left; }
+    .mm-table th { background: var(--panel); position: sticky; top: 0; font-weight: 600; cursor: pointer; }
+    .mm-table th:hover { color: var(--accent); }
+    .mm-table tr:hover td { background: rgba(255,255,255,0.03); }
+    .mm-table tr.overlap td { background: rgba(248,81,73,0.06); }
+    .mm-table tr.highlighted td { background: rgba(88,166,255,0.12); outline: 1px solid var(--accent); }
+    .mm-iid-link { color: var(--accent); cursor: pointer; text-decoration: underline; text-decoration-style: dotted; }
+    .mm-iid-link:hover { color: #79c0ff; text-decoration-style: solid; }
+    .mm-density-bar { margin-bottom: 0.6rem; flex: 0 0 auto; padding: 0.4rem 0.65rem; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); }
+    .mm-detail-drawer { flex: 0 0 auto; margin-top: 0.75rem; padding: 0.75rem; border: 1px solid var(--border); border-radius: 8px; background: rgba(22,27,34,0.8); min-height: 280px; max-height: 45vh; overflow: auto; }
+    .mm-detail-drawer .mm-detail-hint { color: var(--muted); font-size: 0.76rem; }
   </style>
 </head>
 <body>
@@ -842,6 +886,7 @@
       <button class="nav-tab disabled" data-tab="experiments">Experiments</button>
       <button class="nav-tab disabled" data-tab="monteCarlo">Monte Carlo</button>
       <button class="nav-tab disabled" data-tab="sweep">Sweep</button>
+      <button class="nav-tab disabled" data-tab="multiMerge">Multi-Merge</button>
     </nav>
     <div class="top-actions">
       <button class="top-btn" id="btnRedrawUi" title="Re-render active view using loaded data" disabled>Refresh UI</button>
@@ -1215,11 +1260,167 @@
     </div>
   </div>
 
+  <!-- Tab: Multi-Merge -->
+  <div class="tab-panel" id="panelMultiMerge">
+    <div class="tab-control-row" id="mmOverlapControlRow">
+      <div class="tab-control-group">
+        <span class="tab-control-title">Overlap Mode</span>
+        <button class="tab-toggle-chip active" data-overlap="service">Service</button>
+        <button class="tab-toggle-chip" data-overlap="file">File</button>
+        <button class="tab-toggle-chip" data-overlap="ast" disabled title="Planned: $ref / GraphQL / schema dependency overlap">AST / $ref</button>
+      </div>
+      <div class="tab-control-group" id="mmExplorerFilters" style="display:none">
+        <span class="tab-control-title">Show</span>
+        <select id="mmFilterOverlap" style="font-size:0.74rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.2rem 0.4rem">
+          <option value="all">All pairs</option>
+          <option value="overlap" selected>Overlapping only</option>
+          <option value="independent">Independent only</option>
+        </select>
+        <span class="tab-control-title">Gap</span>
+        <select id="mmFilterGap" style="font-size:0.74rem;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:0.2rem 0.4rem"></select>
+      </div>
+    </div>
+    <div class="stats-subtab-bar" id="mmSubtabBar">
+      <button class="stats-subtab active" data-mmtab="statistics">Statistics</button>
+      <button class="stats-subtab" data-mmtab="simulator">Batch Simulator</button>
+      <button class="stats-subtab" data-mmtab="explorer">Merge Explorer</button>
+    </div>
+
+    <!-- Sub-tab: Explorer -->
+    <div id="mmViewExplorer" style="display:none">
+      <div class="mm-density-bar" id="mmDensityBar"></div>
+      <div class="mm-table-wrap" id="mmTableWrap">
+        <table class="mm-table" id="mmOverlapTable">
+          <thead id="mmOverlapHead"><tr>
+            <th data-col="idx">#</th>
+            <th data-col="iidA">MR A</th>
+            <th data-col="iidB">MR B</th>
+            <th data-col="overlap">Overlap</th>
+            <th data-col="details">Overlapping Items</th>
+            <th data-col="gap">Time Gap</th>
+          </tr></thead>
+          <tbody id="mmOverlapBody"></tbody>
+        </table>
+      </div>
+      <div class="mm-detail-drawer open" id="mmMRDetail"></div>
+    </div>
+
+    <!-- Sub-tab: Statistics -->
+    <div id="mmViewStatistics">
+      <div id="mmExecSummary" class="mm-section" style="border-color:rgba(88,166,255,0.3);background:rgba(88,166,255,0.03);margin-bottom:1rem"></div>
+
+      <div class="hero-cards" id="mmHeroCards"></div>
+
+      <div class="mm-section">
+        <h3>Summary Table</h3>
+        <div id="mmStatsTable"></div>
+      </div>
+
+      <div class="mm-section">
+        <h3>Independence Profile</h3>
+        <div class="mm-charts-row">
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Inter-Merge Gap Distribution</div>
+            <div class="mm-chart-wrap"><canvas id="mmGapDistCanvas"></canvas></div>
+          </div>
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Non-Overlapping Run Lengths</div>
+            <div class="mm-chart-wrap"><canvas id="mmRunLengthCanvas"></canvas></div>
+          </div>
+        </div>
+        <div class="mm-charts-row">
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Author Type (bot vs human)</div>
+            <div class="mm-chart-wrap"><canvas id="mmBotHumanCanvas"></canvas></div>
+          </div>
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Serialization Bottlenecks (file overlap by service)</div>
+            <div class="mm-chart-wrap"><canvas id="mmConflictCanvas"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mm-section">
+        <h3>Merge Composition</h3>
+        <div class="mm-charts-row">
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Tenant Volume (top 15)</div>
+            <div class="mm-chart-wrap"><canvas id="mmTenantCanvas"></canvas></div>
+          </div>
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Priority Distribution</div>
+            <div class="mm-chart-wrap"><canvas id="mmPriorityCanvas"></canvas></div>
+          </div>
+        </div>
+        <div class="mm-charts-row">
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Top Service Overlaps</div>
+            <div class="mm-chart-wrap"><canvas id="mmServiceOverlapCanvas"></canvas></div>
+          </div>
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Merge Rate by Day</div>
+            <div class="mm-chart-wrap"><canvas id="mmDailyRateCanvas"></canvas></div>
+          </div>
+        </div>
+        <div class="mm-charts-row">
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Hourly Activity Pattern</div>
+            <div class="mm-chart-wrap"><canvas id="mmHourlyCanvas"></canvas></div>
+          </div>
+          <div class="mm-chart-panel">
+            <div class="mm-chart-title">Files Changed per MR</div>
+            <div class="mm-chart-wrap"><canvas id="mmFileCountCanvas"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sub-tab: Batch Simulator -->
+    <div id="mmViewSimulator" style="display:none">
+      <div class="tab-control-row" id="mmSimControlRow">
+        <div class="tab-control-group">
+          <span class="tab-control-title">Merge Limit</span>
+          <input type="range" id="mmLimitSlider" min="1" max="10" value="5" style="width:160px">
+          <span class="mm-limit-val" id="mmLimitVal">5</span>
+        </div>
+        <div class="tab-control-group">
+          <span class="tab-control-title">Max Gap</span>
+          <select id="mmBatchGapSelect">
+            <option value="">No limit</option>
+            <option value="120">≤ 2m</option>
+            <option value="300">≤ 5m</option>
+            <option value="600" selected>≤ 10m</option>
+            <option value="1800">≤ 30m</option>
+            <option value="3600">≤ 1h</option>
+          </select>
+        </div>
+        <div class="tab-control-group tab-control-group-grow">
+          <span id="mmBatchSummary" style="font-size:0.78rem;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div class="mm-charts-row">
+        <div class="mm-chart-panel">
+          <div class="mm-chart-title">Throughput vs Merge Limit</div>
+          <div class="mm-chart-wrap"><canvas id="mmThroughputCanvas"></canvas></div>
+        </div>
+        <div class="mm-chart-panel">
+          <div class="mm-chart-title">Cumulative MRs Batchable</div>
+          <div class="mm-chart-wrap"><canvas id="mmBatchDistCanvas"></canvas></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="mmTimelineWrap" style="display:none"></div>
+    <input type="range" id="mmScrub" style="display:none" min="0" max="0" value="0">
+    <span id="mmPlayLabel" style="display:none"></span>
+  </div>
+
   <script src="./js/mqsim-common.js"></script>
   <script src="./js/mqsim-core.js"></script>
   <script src="./js/mqsim-experiments.js"></script>
   <script src="./js/mqsim-monte-carlo.js"></script>
   <script src="./js/mqsim-sweep.js"></script>
+  <script src="./js/mqsim-multi-merge.js"></script>
   <script src="./js/mqsim-selfcheck.js"></script>
 </body>
 </html>

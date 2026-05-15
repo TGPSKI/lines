@@ -132,6 +132,8 @@ let mcVisiblePolicies = new Set();
 // Sweep shared state
 let sweepLoaded = false;
 let sweepData = null;
+let multiMergeLoaded = false;
+let multiMergeFileName = "";
 let sweepLineChart = null;
 let sweepBarChart = null;
 let sweepConvergeChart = null;
@@ -852,7 +854,7 @@ let activeRunKey = null;
 let runSortBy = "timestamp";
 let runSortDir = "desc";
 const RUN_SORTABLE_COLUMNS = new Set(["category", "timestamp", "name"]);
-const DATA_TABS = ["stats", "simulation", "kanban", "composition", "bars", "swimlane", "experiments", "monteCarlo"];
+const DATA_TABS = ["stats", "simulation", "kanban", "composition", "bars", "swimlane", "experiments", "monteCarlo", "sweep", "multiMerge"];
 
 function readFileText(file) {
   return new Promise((resolve, reject) => {
@@ -1760,6 +1762,9 @@ function unloadAllData() {
   perLabelData = null;
   mqDestroyChartIfPresent(perLabelChart); perLabelChart = null;
   mqDestroyChartIfPresent(perLabelP95Chart); perLabelP95Chart = null;
+  if (typeof unloadMultiMergeData === "function") unloadMultiMergeData();
+  multiMergeLoaded = false;
+  multiMergeFileName = "";
   statsSubtab = "metrics";
   simSubtab = "scenario";
 
@@ -1823,11 +1828,18 @@ function loadFiles(fl, opts = {}) {
       const perLabelFiles = [];
       const metricsFiles = [];
       A.forEach(x => {
+        if (/^\./.test(x.fileName)) return;
         if (/\.json$/i.test(x.fileName)) {
           try {
             const parsed = JSON.parse(x.t);
             if (parsed && Array.isArray(parsed.limits) && parsed.data) { sweepFiles.push(parsed); return; }
             if (parsed && _isPerLabelData(parsed)) { perLabelFiles.push(parsed); return; }
+            if (Array.isArray(parsed) && parsed.length && parsed[0].iid && parsed[0].changed_files) {
+              if (typeof loadMultiMergeData === "function") loadMultiMergeData(parsed);
+              multiMergeLoaded = true;
+              multiMergeFileName = x.fileName || "plan-raw";
+              return;
+            }
           } catch {}
         }
         metricsFiles.push(x);
@@ -1929,6 +1941,7 @@ function loadFiles(fl, opts = {}) {
       if (filesData.length) switchTab("simulation");
       else switchTab("simulation");
     }
+    else if (multiMergeLoaded) switchTab("multiMerge");
     else if (sweepJsonLoaded) switchTab("sweep");
     else if (csvExpLoaded) switchTab("experiments");
     else if (csvMonteLoaded) switchTab("monteCarlo");
@@ -1936,7 +1949,7 @@ function loadFiles(fl, opts = {}) {
 }
 function updateLoadedCount() {
   if (!loadedFileCount) return;
-  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (sweepLoaded ? 1 : 0) + (perLabelData ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0);
+  const count = filesData.length + loadedScenarioDocs.length + (mcData ? 1 : 0) + (sweepLoaded ? 1 : 0) + (perLabelData ? 1 : 0) + (expData.discrimination ? 1 : 0) + (expData.calibrationGrid.length ? 1 : 0) + (multiMergeLoaded ? 1 : 0);
   loadedFileCount.textContent = count ? `${count} file${count !== 1 ? "s" : ""}` : "0 files";
 }
 function renderFileList() {
@@ -1964,6 +1977,10 @@ function renderFileList() {
   if (perLabelData) {
     const pCount = Object.keys(perLabelData).length;
     chips.push(`<span class="file-chip fc-csv" data-unload="perlabel" title="Click to unload">per-label (${pCount} policies)<span class="fc-x">\u00d7</span></span>`);
+  }
+  if (multiMergeLoaded) {
+    const mrCount = (typeof mmRawData !== "undefined" && mmRawData) ? mmRawData.length : "?";
+    chips.push(`<span class="file-chip fc-ndjson" data-unload="multimerge" title="Click to unload">multi-merge (${mrCount} MRs)<span class="fc-x">\u00d7</span></span>`);
   }
   el.innerHTML = chips.join("");
 }
