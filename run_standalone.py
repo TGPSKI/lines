@@ -272,6 +272,14 @@ def parse_args() -> argparse.Namespace:
         "--limit", type=int, default=5, help="Rebase/merge limit per cycle"
     )
     parser.add_argument(
+        "--omm-group-size", type=int, default=None,
+        help="Max pending MRs per OMM group (defaults to --limit)",
+    )
+    parser.add_argument(
+        "--omm-max-interval", type=int, default=5,
+        help="OMM group window in minutes after lead merges (default: 5)",
+    )
+    parser.add_argument(
         "--cycles", type=int, default=5, help="Number of reconcile cycles"
     )
     parser.add_argument(
@@ -1192,9 +1200,12 @@ def _omm_stats_reset() -> None:
         "groups_failed_lead": 0,
         "groups_diverged": 0,
         "groups_adaptive_closed": 0,
+        "groups_window_expired": 0,
         "pending_ejected": 0,
         "skip_ci_rebases": 0,
         "group_sizes": [],
+        "lead_merged_tick": None,
+        "max_interval_ticks": None,
     })
 
 
@@ -1206,6 +1217,7 @@ def _omm_stats_snapshot() -> dict:
         _omm_stats.get("groups_failed_lead", 0)
         + _omm_stats.get("groups_diverged", 0)
         + _omm_stats.get("groups_adaptive_closed", 0)
+        + _omm_stats.get("groups_window_expired", 0)
     )
     return {
         "omm_groups_formed": formed,
@@ -1220,6 +1232,7 @@ def _omm_stats_snapshot() -> dict:
             sum(sizes) / len(sizes), 2
         ) if sizes else 0.0,
         "omm_max_group_size": max(sizes) if sizes else 0,
+        "omm_groups_window_expired": _omm_stats.get("groups_window_expired", 0),
         "omm_pending_ejected": _omm_stats.get("pending_ejected", 0),
         "omm_skip_ci_rebases": _omm_stats.get("skip_ci_rebases", 0),
     }
@@ -1340,10 +1353,31 @@ def run_cycle_omm(
                     )
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
                     _omm_stats["groups_failed_lead"] += 1
+                    _omm_stats["lead_merged_tick"] = None
                     lead = None
                     pending = []
             elif not lead_rebased:
                 log.info(f"  OMM LEAD !{lead['iid']} needs rebase, waiting")
+
+        if lead is not None and lead_merged:
+            current_tick = state.get("tick_count", 0)
+            max_iv = _omm_stats.get("max_interval_ticks")
+
+            if _omm_stats.get("lead_merged_tick") is None:
+                _omm_stats["lead_merged_tick"] = current_tick
+
+            if max_iv is not None:
+                elapsed = current_tick - (_omm_stats["lead_merged_tick"] or 0)
+                if elapsed >= max_iv:
+                    log.info(
+                        f"  OMM window expired ({elapsed} >= {max_iv} ticks), "
+                        "clearing group"
+                    )
+                    _omm_clear_group(sim_url, project_id, lead, pending, log)
+                    _omm_stats["groups_window_expired"] += 1
+                    _omm_stats["lead_merged_tick"] = None
+                    lead = None
+                    pending = []
 
         if lead is not None and lead_merged:
             merge_sha = lead.get("merge_commit_sha") or ""
@@ -1358,6 +1392,7 @@ def run_cycle_omm(
                     )
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
                     _omm_stats["groups_diverged"] += 1
+                    _omm_stats["lead_merged_tick"] = None
                     lead = None
                     pending = []
 
@@ -1365,6 +1400,7 @@ def run_cycle_omm(
             log.info("  OMM group exhausted (no pending left), closing")
             _omm_clear_group(sim_url, project_id, lead, [], log)
             _omm_stats["groups_completed"] += 1
+            _omm_stats["lead_merged_tick"] = None
             lead = None
 
         if lead is not None and lead_merged and pending:
@@ -1429,6 +1465,7 @@ def run_cycle_omm(
                 log.info("  OMM adaptive-close: no active pending MRs")
                 _omm_clear_group(sim_url, project_id, lead, remaining, log)
                 _omm_stats["groups_adaptive_closed"] += 1
+                _omm_stats["lead_merged_tick"] = None
                 lead = None
 
     elif lead is None:
@@ -1471,6 +1508,7 @@ def run_cycle_omm(
 
             _omm_stats["groups_formed"] += 1
             _omm_stats["group_sizes"].append(1 + group_size)
+            _omm_stats["lead_merged_tick"] = state.get("tick_count", 0)
             break
 
     # Active-cap rebase phase for non-group MRs
@@ -1569,11 +1607,17 @@ def run_policy(
     ticks_per_cycle: int,
     log: logging.Logger,
     metrics_path: str | None = None,
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """Run a complete simulation with one policy. Returns enriched metrics."""
     project_id = 1001
     runner = POLICY_RUNNERS[policy]
     _omm_stats_reset()
+
+    omm_group_size = kwargs.get("omm_group_size")
+    omm_max_interval = kwargs.get("omm_max_interval", 5)
+    if omm_group_size is not None:
+        _omm_stats["group_size_limit"] = omm_group_size
 
     log.info(
         f"Policy: {policy}, limit={limit},"
@@ -1587,6 +1631,14 @@ def run_policy(
     initial_state = get_state(sim_url)
     total_mrs = initial_state.get("total_mrs", initial_state["open_mrs"])
     tick_seconds = max(1, int(initial_state.get("tick_seconds", 60)))
+
+    if policy.startswith("omm"):
+        max_interval_ticks = (omm_max_interval * 60) // tick_seconds
+        _omm_stats["max_interval_ticks"] = max_interval_ticks
+        log.info(
+            f"OMM max-interval: {omm_max_interval}m "
+            f"= {max_interval_ticks} ticks ({tick_seconds}s/tick)"
+        )
 
     # Track merges-per-cycle for Phase 1 multi-merge metric
     # "target advance" in Phase 1 context = one reconcile cycle that produced merges
@@ -1976,6 +2028,8 @@ def run_comparison(args: argparse.Namespace) -> None:
                 args.ticks_per_cycle,
                 log,
                 metrics_path=metrics_out,
+                omm_group_size=getattr(args, "omm_group_size", None),
+                omm_max_interval=getattr(args, "omm_max_interval", 5),
             )
         finally:
             server_proc.terminate()
@@ -2058,6 +2112,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         ("omm_groups_destroyed_pct", "OMM Groups Destroyed %"),
         ("omm_avg_group_size", "OMM Avg Group Size"),
         ("omm_max_group_size", "OMM Max Group Size"),
+        ("omm_groups_window_expired", "OMM Window Expired"),
         ("omm_skip_ci_rebases", "OMM Skip-CI Rebases"),
         ("omm_pending_ejected", "OMM Pending Ejected"),
         # --- Priority Starvation ---
@@ -2401,6 +2456,8 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 args.ticks_per_cycle,
                 policy_log,
                 metrics_path=metrics_out_by_policy.get(policy),
+                omm_group_size=getattr(args, "omm_group_size", None),
+                omm_max_interval=getattr(args, "omm_max_interval", 5),
             )
             return policy, result
 
@@ -2621,6 +2678,8 @@ def main() -> None:
         args.cycles,
         args.ticks_per_cycle,
         log,
+        omm_group_size=getattr(args, "omm_group_size", None),
+        omm_max_interval=getattr(args, "omm_max_interval", 5),
     )
 
 
