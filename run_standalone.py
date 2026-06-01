@@ -396,6 +396,22 @@ def _write_run_metadata(
 # API helpers
 # ---------------------------------------------------------------------------
 
+_session: requests.Session | None = None
+
+
+def _get_session() -> requests.Session:
+    global _session
+    if _session is None:
+        _session = requests.Session()
+    return _session
+
+
+def _reset_session() -> None:
+    global _session
+    if _session is not None:
+        _session.close()
+        _session = None
+
 
 def _mr_sort_key(mr: dict) -> tuple[int, str]:
     return (label_priority(mr.get("labels", [])), mr.get("approved_at", ""))
@@ -406,7 +422,7 @@ def get_all_open_mrs(sim_url: str, project_id: int) -> list[dict]:
     all_mrs: list[dict] = []
     page = 1
     while True:
-        resp = requests.get(
+        resp = _get_session().get(
             f"{sim_url}/api/v4/projects/{project_id}/merge_requests",
             params={"state": "opened", "page": page, "per_page": 100},
         )
@@ -447,7 +463,7 @@ def preprocess_mrs(sim_url: str, project_id: int, mrs: list[dict]) -> list[dict]
             continue
 
         # mr.commits() — production checks len(mr.commits()) == 0
-        resp = requests.get(
+        resp = _get_session().get(
             f"{sim_url}/api/v4/projects/{project_id}"
             f"/merge_requests/{mr['iid']}/commits",
             params={"per_page": 1, "page": 1},
@@ -465,7 +481,7 @@ def preprocess_mrs(sim_url: str, project_id: int, mrs: list[dict]) -> list[dict]
             continue
 
         # gl.get_merge_request_label_events(mr) — find valid approval
-        resp = requests.get(
+        resp = _get_session().get(
             f"{sim_url}/api/v4/projects/{project_id}"
             f"/merge_requests/{mr['iid']}/resource_label_events",
             params={"per_page": 100, "page": 1},
@@ -507,7 +523,7 @@ def get_preprocessed_open_mrs(
 
 
 def needs_rebase(sim_url: str, project_id: int, mr_sha: str, target_head: str) -> bool:
-    resp = requests.get(
+    resp = _get_session().get(
         f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
         params={"from": mr_sha, "to": target_head},
     )
@@ -516,7 +532,7 @@ def needs_rebase(sim_url: str, project_id: int, mr_sha: str, target_head: str) -
 
 
 def get_mr_pipelines(sim_url: str, project_id: int, mr_iid: int) -> list[dict]:
-    resp = requests.get(
+    resp = _get_session().get(
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/pipelines"
     )
     resp.raise_for_status()
@@ -573,12 +589,12 @@ def rebase_mr(
 ) -> None:
     url = f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/rebase"
     params = {"skip_ci": "true"} if skip_ci else {}
-    resp = requests.put(url, params=params)
+    resp = _get_session().put(url, params=params)
     resp.raise_for_status()
 
 
 def merge_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
-    resp = requests.put(
+    resp = _get_session().put(
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/merge",
         headers={"Content-Type": "application/json"},
         json={},
@@ -589,7 +605,7 @@ def merge_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
 def set_mr_labels(
     sim_url: str, project_id: int, mr_iid: int, labels: list[str]
 ) -> None:
-    resp = requests.put(
+    resp = _get_session().put(
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}",
         headers={"Content-Type": "application/json"},
         json={"labels": labels},
@@ -618,25 +634,25 @@ def remove_mr_label(
 
 
 def sim_tick(sim_url: str) -> dict:
-    resp = requests.post(f"{sim_url}/__sim/tick")
+    resp = _get_session().post(f"{sim_url}/__sim/tick")
     resp.raise_for_status()
     return resp.json()
 
 
 def get_state(sim_url: str) -> dict:
-    resp = requests.get(f"{sim_url}/__sim/state")
+    resp = _get_session().get(f"{sim_url}/__sim/state")
     resp.raise_for_status()
     return resp.json()
 
 
 def get_metrics(sim_url: str) -> dict:
-    resp = requests.get(f"{sim_url}/__sim/metrics")
+    resp = _get_session().get(f"{sim_url}/__sim/metrics")
     resp.raise_for_status()
     return resp.json()
 
 
 def reset_sim(sim_url: str) -> None:
-    resp = requests.post(f"{sim_url}/__sim/reset")
+    resp = _get_session().post(f"{sim_url}/__sim/reset")
     resp.raise_for_status()
 
 
@@ -1165,6 +1181,49 @@ def run_cycle_active_cap_phase1(
 OMM_GROUP_LEAD = "omm-group-lead"
 OMM_PENDING = "omm-pending"
 
+_omm_stats: dict[str, int | list[int]] = {}
+
+
+def _omm_stats_reset() -> None:
+    _omm_stats.clear()
+    _omm_stats.update({
+        "groups_formed": 0,
+        "groups_completed": 0,
+        "groups_failed_lead": 0,
+        "groups_diverged": 0,
+        "groups_adaptive_closed": 0,
+        "pending_ejected": 0,
+        "skip_ci_rebases": 0,
+        "group_sizes": [],
+    })
+
+
+def _omm_stats_snapshot() -> dict:
+    sizes = _omm_stats.get("group_sizes", [])
+    formed = _omm_stats.get("groups_formed", 0)
+    completed = _omm_stats.get("groups_completed", 0)
+    failed = (
+        _omm_stats.get("groups_failed_lead", 0)
+        + _omm_stats.get("groups_diverged", 0)
+        + _omm_stats.get("groups_adaptive_closed", 0)
+    )
+    return {
+        "omm_groups_formed": formed,
+        "omm_groups_completed": completed,
+        "omm_groups_failed_lead": _omm_stats.get("groups_failed_lead", 0),
+        "omm_groups_diverged": _omm_stats.get("groups_diverged", 0),
+        "omm_groups_adaptive_closed": _omm_stats.get("groups_adaptive_closed", 0),
+        "omm_groups_destroyed_pct": round(
+            failed / formed * 100, 1
+        ) if formed > 0 else 0.0,
+        "omm_avg_group_size": round(
+            sum(sizes) / len(sizes), 2
+        ) if sizes else 0.0,
+        "omm_max_group_size": max(sizes) if sizes else 0,
+        "omm_pending_ejected": _omm_stats.get("pending_ejected", 0),
+        "omm_skip_ci_rebases": _omm_stats.get("skip_ci_rebases", 0),
+    }
+
 
 def _omm_find_group(
     sim_url: str,
@@ -1179,7 +1238,7 @@ def _omm_find_group(
     lead = None
     pending = []
 
-    resp = requests.get(
+    resp = _get_session().get(
         f"{sim_url}/api/v4/projects/{project_id}/merge_requests",
         params={"labels": OMM_GROUP_LEAD, "per_page": 100},
     )
@@ -1280,6 +1339,7 @@ def run_cycle_omm(
                         "clearing group"
                     )
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
+                    _omm_stats["groups_failed_lead"] += 1
                     lead = None
                     pending = []
             elif not lead_rebased:
@@ -1288,7 +1348,7 @@ def run_cycle_omm(
         if lead is not None and lead_merged:
             merge_sha = lead.get("merge_commit_sha") or ""
             if merge_sha and merge_sha != target_head:
-                compare = requests.get(
+                compare = _get_session().get(
                     f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
                     params={"from": target_head, "to": merge_sha},
                 ).json()
@@ -1297,12 +1357,14 @@ def run_cycle_omm(
                         "  OMM head-moved (diverged), invalidating group"
                     )
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
+                    _omm_stats["groups_diverged"] += 1
                     lead = None
                     pending = []
 
         if lead is not None and lead_merged and not pending:
             log.info("  OMM group exhausted (no pending left), closing")
             _omm_clear_group(sim_url, project_id, lead, [], log)
+            _omm_stats["groups_completed"] += 1
             lead = None
 
         if lead is not None and lead_merged and pending:
@@ -1317,6 +1379,7 @@ def run_cycle_omm(
                 if latest_status == "failed":
                     log.info(f"  OMM EJECT !{mr['iid']} (pipeline failed)")
                     remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+                    _omm_stats["pending_ejected"] += 1
                     continue
 
                 mr_rebased = not needs_rebase(
@@ -1344,6 +1407,7 @@ def run_cycle_omm(
                             sim_url, project_id, mr["iid"], skip_ci=True
                         )
                         rebase_count += 1
+                        _omm_stats["skip_ci_rebases"] += 1
                     except requests.HTTPError as e:
                         log.warning(
                             f"  OMM SKIP-CI REBASE FAILED !{mr['iid']}: {e}"
@@ -1364,6 +1428,7 @@ def run_cycle_omm(
                 ]
                 log.info("  OMM adaptive-close: no active pending MRs")
                 _omm_clear_group(sim_url, project_id, lead, remaining, log)
+                _omm_stats["groups_adaptive_closed"] += 1
                 lead = None
 
     elif lead is None:
@@ -1403,6 +1468,9 @@ def run_cycle_omm(
                 add_mr_label(sim_url, project_id, candidate, OMM_PENDING)
                 log.info(f"  OMM ADD-PENDING !{candidate['iid']}")
                 group_size += 1
+
+            _omm_stats["groups_formed"] += 1
+            _omm_stats["group_sizes"].append(1 + group_size)
             break
 
     # Active-cap rebase phase for non-group MRs
@@ -1505,6 +1573,7 @@ def run_policy(
     """Run a complete simulation with one policy. Returns enriched metrics."""
     project_id = 1001
     runner = POLICY_RUNNERS[policy]
+    _omm_stats_reset()
 
     log.info(
         f"Policy: {policy}, limit={limit},"
@@ -1657,7 +1726,7 @@ def run_policy(
     )
 
     # Starvation tracking: fetch per-MR wait times
-    resp = requests.get(f"{sim_url}/__sim/merged_mrs")
+    resp = _get_session().get(f"{sim_url}/__sim/merged_mrs")
     resp.raise_for_status()
     merged_mrs = resp.json()
 
@@ -1711,6 +1780,23 @@ def run_policy(
         f" p95={metrics['wait_p95']} max={metrics['wait_max']}"
     )
     log.info(f"  starved MRs (>100 ticks): {metrics['starved_mrs']}")
+
+    if policy.startswith("omm"):
+        omm = _omm_stats_snapshot()
+        metrics.update(omm)
+        log.info(
+            f"  OMM groups: {omm['omm_groups_formed']} formed,"
+            f" {omm['omm_groups_completed']} completed,"
+            f" {omm['omm_groups_destroyed_pct']}% destroyed"
+        )
+        log.info(
+            f"  OMM group size: avg={omm['omm_avg_group_size']},"
+            f" max={omm['omm_max_group_size']}"
+        )
+        log.info(
+            f"  OMM skip_ci rebases: {omm['omm_skip_ci_rebases']},"
+            f" ejected: {omm['omm_pending_ejected']}"
+        )
 
     return metrics
 
@@ -1873,8 +1959,9 @@ def run_comparison(args: argparse.Namespace) -> None:
         time.sleep(2)
 
         # Verify server
+        _reset_session()
         try:
-            requests.get(f"{sim_url}/api/v4/user").raise_for_status()
+            _get_session().get(f"{sim_url}/api/v4/user").raise_for_status()
         except Exception:
             log.error(f"Server failed to start for policy {policy}")
             server_proc.kill()
@@ -1964,6 +2051,15 @@ def run_comparison(args: argparse.Namespace) -> None:
         (None, "── Phase 1 Multi-Merge ──"),
         ("merge_cycles", "Merge Cycles"),
         ("avg_mrs_per_merge_cycle", "Avg MRs / Merge Cycle"),
+        # --- OMM Group Stats ---
+        (None, "── OMM Group Stats ──"),
+        ("omm_groups_formed", "OMM Groups Formed"),
+        ("omm_groups_completed", "OMM Groups Completed"),
+        ("omm_groups_destroyed_pct", "OMM Groups Destroyed %"),
+        ("omm_avg_group_size", "OMM Avg Group Size"),
+        ("omm_max_group_size", "OMM Max Group Size"),
+        ("omm_skip_ci_rebases", "OMM Skip-CI Rebases"),
+        ("omm_pending_ejected", "OMM Pending Ejected"),
         # --- Priority Starvation ---
         (None, "── Priority Starvation ──"),
         ("wait_p50", "Wait Time p50 (ticks)"),
@@ -2203,7 +2299,7 @@ def _wait_for_server(url: str, retries: int = 10, delay: float = 0.5) -> bool:
     """Poll until server responds or retries exhausted."""
     for _ in range(retries):
         try:
-            requests.get(f"{url}/api/v4/user", timeout=2).raise_for_status()
+            _get_session().get(f"{url}/api/v4/user", timeout=2).raise_for_status()
             return True
         except Exception:
             time.sleep(delay)
@@ -2510,7 +2606,7 @@ def main() -> None:
 
     # Verify server is running
     try:
-        requests.get(f"{sim_url}/api/v4/user").raise_for_status()
+        _get_session().get(f"{sim_url}/api/v4/user").raise_for_status()
     except Exception as e:
         log.error(f"Cannot reach sim server at {sim_url}: {e}")
         log.error(
