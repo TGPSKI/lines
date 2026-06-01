@@ -50,7 +50,7 @@ from gitlab_hk_sim.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
 # ---------------------------------------------------------------------------
 POLICY_SETS: dict[str, list[str]] = {
     "phase0": ["old-burst", "top-k", "active-cap"],
-    "phase1": ["old-burst", "top-k", "active-cap", "cap+phase1"],
+    "phase1": ["old-burst", "top-k", "active-cap", "cap+phase1", "omm"],
     "all": [
         "top-k",
         "top-k-wait",
@@ -568,10 +568,12 @@ def _should_skip_rebase_for_wait_mode(pipelines: list[dict]) -> bool:
     return _has_running_pipeline(pipelines)
 
 
-def rebase_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
-    resp = requests.put(
-        f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/rebase"
-    )
+def rebase_mr(
+    sim_url: str, project_id: int, mr_iid: int, *, skip_ci: bool = False
+) -> None:
+    url = f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}/rebase"
+    params = {"skip_ci": "true"} if skip_ci else {}
+    resp = requests.put(url, params=params)
     resp.raise_for_status()
 
 
@@ -582,6 +584,37 @@ def merge_mr(sim_url: str, project_id: int, mr_iid: int) -> None:
         json={},
     )
     resp.raise_for_status()
+
+
+def set_mr_labels(
+    sim_url: str, project_id: int, mr_iid: int, labels: list[str]
+) -> None:
+    resp = requests.put(
+        f"{sim_url}/api/v4/projects/{project_id}/merge_requests/{mr_iid}",
+        headers={"Content-Type": "application/json"},
+        json={"labels": labels},
+    )
+    resp.raise_for_status()
+
+
+def add_mr_label(
+    sim_url: str, project_id: int, mr: dict, label: str
+) -> None:
+    current = list(mr.get("labels", []))
+    if label not in current:
+        current.append(label)
+        set_mr_labels(sim_url, project_id, mr["iid"], current)
+        mr["labels"] = current
+
+
+def remove_mr_label(
+    sim_url: str, project_id: int, mr: dict, label: str
+) -> None:
+    current = list(mr.get("labels", []))
+    if label in current:
+        current.remove(label)
+        set_mr_labels(sim_url, project_id, mr["iid"], current)
+        mr["labels"] = current
 
 
 def sim_tick(sim_url: str) -> dict:
@@ -1126,6 +1159,295 @@ def run_cycle_active_cap_phase1(
 
 
 # ---------------------------------------------------------------------------
+# OMM (Optimistic Multi-Merge) policy
+# ---------------------------------------------------------------------------
+
+OMM_GROUP_LEAD = "omm-group-lead"
+OMM_PENDING = "omm-pending"
+
+
+def _omm_find_group(
+    sim_url: str,
+    project_id: int,
+    preprocessed: list[dict],
+) -> tuple[dict | None, list[dict]]:
+    """Find an existing OMM group (lead + pending MRs) from labels.
+
+    The lead may be merged (no longer in preprocessed open MRs), so we query
+    by label to find it across all states.
+    """
+    lead = None
+    pending = []
+
+    resp = requests.get(
+        f"{sim_url}/api/v4/projects/{project_id}/merge_requests",
+        params={"labels": OMM_GROUP_LEAD, "per_page": 100},
+    )
+    resp.raise_for_status()
+    leads = resp.json()
+    if leads:
+        lead = leads[0]
+
+    for mr in preprocessed:
+        if mr["state"] != "opened":
+            continue
+        labels = mr.get("labels", [])
+        if OMM_PENDING in labels:
+            pending.append(mr)
+
+    return lead, pending
+
+
+def _omm_clear_group(
+    sim_url: str,
+    project_id: int,
+    lead: dict | None,
+    pending: list[dict],
+    log: logging.Logger,
+) -> None:
+    """Remove OMM labels from all group members."""
+    if lead is not None:
+        remove_mr_label(sim_url, project_id, lead, OMM_GROUP_LEAD)
+        log.info(f"  OMM CLEAR-LEAD !{lead['iid']}")
+    for mr in pending:
+        remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+        log.info(f"  OMM CLEAR-PENDING !{mr['iid']}")
+
+
+def run_cycle_omm(
+    sim_url: str,
+    project_id: int,
+    limit: int,
+    log: logging.Logger,
+    *,
+    insist: bool = False,
+    wait_for_pipeline: bool = False,
+) -> None:
+    """OMM (Optimistic Multi-Merge) with skip_ci rebase.
+
+    1. If an OMM group exists (lead + pending via labels), process it:
+       - If lead is merged, process pending MRs:
+         a. FAILED pipeline -> eject from group
+         b. Already rebased -> merge immediately (pipeline gate bypass)
+         c. SUCCESS pipeline + not rebased -> skip_ci rebase
+         d. RUNNING/PENDING -> wait
+       - If lead is not merged, check head-moved (group invalidation)
+    2. If no group exists, form one:
+       - Merge the first eligible MR (becomes lead)
+       - Label remaining eligible MRs as pending
+    3. Active-cap rebase phase for non-group MRs
+    """
+    state = get_state(sim_url)
+    target_head = state["target_head"]
+    all_mrs, preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+
+    log.info(f"  Open MRs: {len(all_mrs)}, preprocessed: {len(preprocessed)}")
+
+    merge_count = 0
+    rebase_count = 0
+
+    lead, pending = _omm_find_group(sim_url, project_id, preprocessed)
+
+    if lead is not None:
+        lead_merged = lead.get("state") == "merged"
+
+        if not lead_merged:
+            lead_pipelines = get_mr_pipelines(sim_url, project_id, lead["iid"])
+            lead_rebased = not needs_rebase(
+                sim_url, project_id, lead["sha"], target_head
+            )
+            if lead_rebased and lead_pipelines:
+                latest = lead_pipelines[0]["status"]
+                if latest == "success":
+                    log.info(f"  OMM MERGE LEAD !{lead['iid']}")
+                    try:
+                        merge_mr(sim_url, project_id, lead["iid"])
+                        merge_count += 1
+                        lead_merged = True
+                        state = get_state(sim_url)
+                        target_head = state["target_head"]
+                    except requests.HTTPError as e:
+                        log.warning(
+                            f"  OMM MERGE LEAD FAILED !{lead['iid']}: {e}"
+                        )
+                elif latest in ("running", "pending"):
+                    log.info(
+                        f"  OMM LEAD !{lead['iid']} pipeline {latest}, waiting"
+                    )
+                elif latest == "failed":
+                    log.warning(
+                        f"  OMM LEAD !{lead['iid']} pipeline failed, "
+                        "clearing group"
+                    )
+                    _omm_clear_group(sim_url, project_id, lead, pending, log)
+                    lead = None
+                    pending = []
+            elif not lead_rebased:
+                log.info(f"  OMM LEAD !{lead['iid']} needs rebase, waiting")
+
+        if lead is not None and lead_merged:
+            merge_sha = lead.get("merge_commit_sha") or ""
+            if merge_sha and merge_sha != target_head:
+                compare = requests.get(
+                    f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
+                    params={"from": target_head, "to": merge_sha},
+                ).json()
+                if compare.get("commits"):
+                    log.warning(
+                        "  OMM head-moved (diverged), invalidating group"
+                    )
+                    _omm_clear_group(sim_url, project_id, lead, pending, log)
+                    lead = None
+                    pending = []
+
+        if lead is not None and lead_merged and not pending:
+            log.info("  OMM group exhausted (no pending left), closing")
+            _omm_clear_group(sim_url, project_id, lead, [], log)
+            lead = None
+
+        if lead is not None and lead_merged and pending:
+            any_active = False
+            for mr in pending:
+                pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+                if not pipelines:
+                    continue
+
+                latest_status = pipelines[0]["status"]
+
+                if latest_status == "failed":
+                    log.info(f"  OMM EJECT !{mr['iid']} (pipeline failed)")
+                    remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+                    continue
+
+                mr_rebased = not needs_rebase(
+                    sim_url, project_id, mr["sha"], target_head
+                )
+                if mr_rebased:
+                    log.info(f"  OMM MERGE !{mr['iid']}")
+                    try:
+                        merge_mr(sim_url, project_id, mr["iid"])
+                        merge_count += 1
+                        remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+                        state = get_state(sim_url)
+                        target_head = state["target_head"]
+                    except requests.HTTPError as e:
+                        log.warning(
+                            f"  OMM MERGE FAILED !{mr['iid']}: {e}"
+                        )
+                        remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+                    continue
+
+                if latest_status == "success":
+                    log.info(f"  OMM SKIP-CI REBASE !{mr['iid']}")
+                    try:
+                        rebase_mr(
+                            sim_url, project_id, mr["iid"], skip_ci=True
+                        )
+                        rebase_count += 1
+                    except requests.HTTPError as e:
+                        log.warning(
+                            f"  OMM SKIP-CI REBASE FAILED !{mr['iid']}: {e}"
+                        )
+                        remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
+                    any_active = True
+                    continue
+
+                if latest_status in ("running", "pending"):
+                    any_active = True
+                    continue
+
+            if not any_active:
+                remaining = [
+                    m for m in pending
+                    if m.get("state") == "opened"
+                    and OMM_PENDING in m.get("labels", [])
+                ]
+                log.info("  OMM adaptive-close: no active pending MRs")
+                _omm_clear_group(sim_url, project_id, lead, remaining, log)
+                lead = None
+
+    elif lead is None:
+        for mr in preprocessed:
+            if mr["state"] != "opened":
+                continue
+            if needs_rebase(sim_url, project_id, mr["sha"], target_head):
+                continue
+            pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
+            if not pipelines:
+                continue
+            latest_status = pipelines[0]["status"]
+            if latest_status != "success":
+                continue
+
+            log.info(f"  OMM FORM GROUP: merge lead !{mr['iid']}")
+            try:
+                merge_mr(sim_url, project_id, mr["iid"])
+                merge_count += 1
+                add_mr_label(sim_url, project_id, mr, OMM_GROUP_LEAD)
+            except requests.HTTPError as e:
+                log.warning(f"  OMM MERGE LEAD FAILED !{mr['iid']}: {e}")
+                break
+
+            state = get_state(sim_url)
+            target_head = state["target_head"]
+
+            _, refreshed = get_preprocessed_open_mrs(sim_url, project_id)
+            group_size = 0
+            for candidate in refreshed:
+                if candidate["iid"] == mr["iid"]:
+                    continue
+                if candidate["state"] != "opened":
+                    continue
+                if group_size >= limit:
+                    break
+                add_mr_label(sim_url, project_id, candidate, OMM_PENDING)
+                log.info(f"  OMM ADD-PENDING !{candidate['iid']}")
+                group_size += 1
+            break
+
+    # Active-cap rebase phase for non-group MRs
+    _, rebase_preprocessed = get_preprocessed_open_mrs(sim_url, project_id)
+    state = get_state(sim_url)
+    target_head = state["target_head"]
+
+    already_active = 0
+    needs_rebase_mrs: list[dict] = []
+
+    for mr in rebase_preprocessed:
+        if mr["state"] != "opened":
+            continue
+        labels = mr.get("labels", [])
+        if OMM_PENDING in labels or OMM_GROUP_LEAD in labels:
+            continue
+        p = get_mr_pipelines(sim_url, project_id, mr["iid"])
+        if is_consuming_slot(sim_url, project_id, mr, target_head, pipelines=p):
+            already_active += 1
+            continue
+        if not needs_rebase(sim_url, project_id, mr["sha"], target_head):
+            continue
+        needs_rebase_mrs.append(mr)
+
+    budget = max(0, limit - already_active)
+    rebased_in_phase = 0
+    for mr in needs_rebase_mrs:
+        if rebased_in_phase >= budget:
+            break
+        log.info(f"  REBASE MR !{mr['iid']}")
+        try:
+            rebase_mr(sim_url, project_id, mr["iid"])
+            rebase_count += 1
+            rebased_in_phase += 1
+        except requests.HTTPError as e:
+            log.warning(f"  REBASE FAILED MR !{mr['iid']}: {e}")
+
+    optimistic = max(0, merge_count - 1) if merge_count > 0 else 0
+    log.info(
+        f"  Cycle result: {merge_count} merges"
+        f" ({optimistic} optimistic), {rebase_count} rebases"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 
@@ -1166,6 +1488,8 @@ POLICY_RUNNERS = {
     "cap+phase1-wait-insist": partial(
         run_cycle_active_cap_phase1, wait_for_pipeline=True, insist=True
     ),
+    # OMM: optimistic multi-merge with skip_ci rebase
+    "omm": partial(run_cycle_omm, wait_for_pipeline=False, insist=False),
 }
 
 
