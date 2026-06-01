@@ -160,7 +160,9 @@ class MetricsCollector:
             "pipeline_cancels": len(cancel_events),
             "rebase_errors": len(rebase_error_events),
             "merge_errors": len(merge_error_events),
-            "pipelines_created": len(rebase_events),
+            "pipelines_created": sum(
+                1 for e in rebase_events if not e.get("skip_ci", False)
+            ),
             "peak_active_pipelines": peak_active,
             "same_root_success_pool_values": same_root_pool_values,
             "same_root_success_pool_p50": _percentile(same_root_pool_values, 50),

@@ -80,6 +80,29 @@ class TestRebase:
 
         assert mr.rebase_count == 2
 
+    def test_rebase_skip_ci_no_pipeline(self):
+        mr = _make_mr(iid=1)
+        state = _make_state(mrs=[mr])
+
+        event = rebase_mr(state, mr, skip_ci=True)
+
+        assert mr.rebase_count == 1
+        assert mr.rebased_target_sha == "target-001"
+        assert len(mr.pipelines) == 0
+        assert event["skip_ci"] is True
+        assert event["pipeline_id"] is None
+
+    def test_rebase_skip_ci_still_updates_sha(self):
+        pools = SHAPools(mr_rebases={"1": ["new-sha-skip"]})
+        mr = _make_mr(iid=1, sha="old-sha", rebased="target-000")
+        state = _make_state(target_head="target-001", mrs=[mr], sha_pools=pools)
+
+        rebase_mr(state, mr, skip_ci=True)
+
+        assert mr.sha == "new-sha-skip"
+        assert mr.rebased_target_sha == "target-001"
+        assert len(mr.commits) == 1
+
 
 class TestMerge:
     def test_merge_marks_merged(self):
@@ -105,6 +128,15 @@ class TestMerge:
 
         merge_mr(state, mr2)
         assert state.project.target_head == "target-003"
+
+    def test_merge_sets_merge_commit_sha(self):
+        pools = SHAPools(target_advances={"master": ["target-002"]})
+        mr = _make_mr(iid=1, rebased="target-001")
+        state = _make_state(target_head="target-001", mrs=[mr], sha_pools=pools)
+
+        merge_mr(state, mr)
+
+        assert mr.merge_commit_sha == "target-002"
 
 
 class TestTick:

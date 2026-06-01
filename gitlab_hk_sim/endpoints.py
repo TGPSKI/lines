@@ -123,6 +123,7 @@ def get_merge_requests(
     project_id: str,
     response: Response,
     state: str | None = Query(None),
+    labels: str | None = Query(None),
     page: int = Query(1),
     per_page: int = Query(20),
 ) -> list:
@@ -133,6 +134,9 @@ def get_merge_requests(
     mrs = sim_state.merge_requests
     if state:
         mrs = [mr for mr in mrs if mr.state.value == state]
+    if labels:
+        required = {lbl.strip() for lbl in labels.split(",") if lbl.strip()}
+        mrs = [mr for mr in mrs if required.issubset(set(mr.labels))]
 
     mr_dicts = shapes.mr_list_shape(mrs, sim_state.project, base_url)
     return _paginate(mr_dicts, page, per_page, response)
@@ -298,7 +302,12 @@ async def update_merge_request(request: Request, project_id: str, mr_iid: int) -
 
 
 @gitlab_router.put("/api/v4/projects/{project_id}/merge_requests/{mr_iid}/rebase")
-async def rebase_merge_request(request: Request, project_id: str, mr_iid: int) -> dict:
+async def rebase_merge_request(
+    request: Request,
+    project_id: str,
+    mr_iid: int,
+    skip_ci: str | None = Query(None),
+) -> dict:
     """Rebase an MR — creates a new pipeline and updates SHA."""
     _record_api_call(request, "PUT /projects/:id/merge_requests/:iid/rebase")
     sim_state = _get_state(request)
@@ -319,7 +328,8 @@ async def rebase_merge_request(request: Request, project_id: str, mr_iid: int) -
         )
         raise HTTPException(status_code=409, detail="simulated rebase failure")
 
-    event = rebase_mr(sim_state, mr)
+    should_skip_ci = skip_ci is not None and skip_ci.lower() in ("true", "1", "yes")
+    event = rebase_mr(sim_state, mr, skip_ci=should_skip_ci)
     metrics.record(event)
 
     return {"rebase_in_progress": True}

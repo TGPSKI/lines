@@ -73,10 +73,21 @@ class TestMetricsCollector:
         s = mc.summary()
         assert s["rebase_calls"] == 3
         assert s["merge_calls"] == 1
+        assert s["pipelines_created"] == 3
         assert s["peak_active_pipelines"] == 3
         assert s["duplicate_rebases_per_mr"] == {1: 2}
         assert s["duplicate_rebase_total"] == 1
         assert s["total_stale_successes_from_merges"] == 2
+
+    def test_summary_skip_ci_not_counted_as_pipeline(self):
+        mc = MetricsCollector()
+        mc.record({"event": "rebase", "mr_iid": 1, "skip_ci": False})
+        mc.record({"event": "rebase", "mr_iid": 2, "skip_ci": True})
+        mc.record({"event": "rebase", "mr_iid": 3})
+
+        s = mc.summary()
+        assert s["rebase_calls"] == 3
+        assert s["pipelines_created"] == 2
 
 
 class TestLoadMetrics:

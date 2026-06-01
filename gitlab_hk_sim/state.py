@@ -116,6 +116,7 @@ class MergeRequest:
     merge_failures_remaining: int = 0
     merge_failure_status_code: int = 405
     merge_failure_detail: str = "405 Method Not Allowed"
+    merge_commit_sha: str = ""
 
     @property
     def is_open(self) -> bool:

@@ -62,6 +62,7 @@ def mr_shape(mr: MergeRequest, project: Project, base_url: str) -> dict[str, Any
         "blocking_discussions_resolved": True,
         "author": {"id": 100, "username": "sim-author", "name": "Sim Author"},
         "approved_at": mr.approved_at,
+        "merge_commit_sha": mr.merge_commit_sha or None,
         "assignees": [],
         "reviewers": [],
         "pipeline": _pipeline_summary(mr.latest_pipeline())

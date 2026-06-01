@@ -15,13 +15,13 @@ from .state import (
 )
 
 
-def rebase_mr(state: SimState, mr: MergeRequest) -> dict:
+def rebase_mr(state: SimState, mr: MergeRequest, *, skip_ci: bool = False) -> dict:
     """Simulate a rebase of an MR.
 
     1. Assign new branch SHA from pool or synthetic.
     2. Set rebased_target_sha = current target_head.
     3. Append a new commit.
-    4. Create a pending pipeline.
+    4. Create a pending pipeline (unless skip_ci=True).
     5. Return metrics event.
     """
     new_sha = state.sha_pools.next_mr_sha(mr.iid)
@@ -38,23 +38,28 @@ def rebase_mr(state: SimState, mr: MergeRequest) -> dict:
     )
     mr.commits.append(commit)
 
-    pipeline_id = state.next_pipeline_id()
-    duration = (
-        mr.ci_duration
-        if mr.ci_duration is not None
-        else state.pipeline_duration_config.sample_duration()
-    )
-    outcome = state.pipeline_duration_config.sample_outcome()
-    pipeline = Pipeline(
-        id=pipeline_id,
-        status=PipelineStatus.PENDING,
-        sha=new_sha,
-        root_sha=state.project.target_head,
-        pending_ticks_remaining=1,
-        running_ticks_remaining=duration,
-        outcome=outcome,
-    )
-    mr.pipelines.append(pipeline)
+    pipeline_id: int | None = None
+    outcome_value: str | None = None
+
+    if not skip_ci:
+        pipeline_id = state.next_pipeline_id()
+        duration = (
+            mr.ci_duration
+            if mr.ci_duration is not None
+            else state.pipeline_duration_config.sample_duration()
+        )
+        outcome = state.pipeline_duration_config.sample_outcome()
+        pipeline = Pipeline(
+            id=pipeline_id,
+            status=PipelineStatus.PENDING,
+            sha=new_sha,
+            root_sha=state.project.target_head,
+            pending_ticks_remaining=1,
+            running_ticks_remaining=duration,
+            outcome=outcome,
+        )
+        mr.pipelines.append(pipeline)
+        outcome_value = outcome.value
 
     return {
         "event": "rebase",
@@ -64,8 +69,9 @@ def rebase_mr(state: SimState, mr: MergeRequest) -> dict:
         "new_sha": new_sha,
         "target_head": state.project.target_head,
         "pipeline_id": pipeline_id,
-        "pipeline_outcome": outcome.value,
+        "pipeline_outcome": outcome_value,
         "rebase_count": mr.rebase_count,
+        "skip_ci": skip_ci,
     }
 
 
@@ -89,6 +95,7 @@ def merge_mr(
     new_target = state.sha_pools.next_target_sha(mr.target_branch)
 
     mr.state = MRState.MERGED
+    mr.merge_commit_sha = new_target
     state.project.target_head = new_target
 
     return {

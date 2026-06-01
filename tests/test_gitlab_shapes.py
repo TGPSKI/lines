@@ -74,6 +74,36 @@ class TestMRShape:
         assert result["head_pipeline"]["id"] == 5001
         assert result["head_pipeline"]["status"] == "success"
 
+    def test_merge_commit_sha_none_when_open(self):
+        project = _make_project()
+        mr = MergeRequest(
+            id=2001,
+            iid=1,
+            title="Open MR",
+            sha="sha-001",
+            source_project_id=1001,
+            target_project_id=1001,
+        )
+        result = mr_shape(mr, project, "http://localhost:8080")
+        assert result["merge_commit_sha"] is None
+
+    def test_merge_commit_sha_present_when_merged(self):
+        project = _make_project()
+        from gitlab_hk_sim.state import MRState
+
+        mr = MergeRequest(
+            id=2001,
+            iid=1,
+            title="Merged MR",
+            sha="sha-001",
+            source_project_id=1001,
+            target_project_id=1001,
+            merge_commit_sha="target-002",
+        )
+        mr.state = MRState.MERGED
+        result = mr_shape(mr, project, "http://localhost:8080")
+        assert result["merge_commit_sha"] == "target-002"
+
 
 class TestPipelineShape:
     def test_basic(self):
