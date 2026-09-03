@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tune calibration knobs against production-derived multidimensional targets.
+"""Tune calibration knobs against user-supplied multidimensional targets.
 
 The tuner performs a grid search and then validates the best candidates.
 Cycle lengths can be fixed or adapt to input log scale for better
@@ -10,12 +10,8 @@ from __future__ import annotations
 
 import argparse
 import csv
-import getpass
 import json
-import os
-import platform
 import re
-import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -534,7 +530,7 @@ def parse_args() -> argparse.Namespace:
         required=True,
         help="Housekeeping log files",
     )
-    parser.add_argument("--project", default="app-interface", help="Project filter")
+    parser.add_argument("--project", required=True, help="Project filter")
     parser.add_argument(
         "--target-mph",
         type=float,
@@ -561,7 +557,7 @@ def parse_args() -> argparse.Namespace:
         default="",
         help=(
             "Path for winning calibrated scenario"
-            " (default: scenarios/app-interface-prod-calibrated-<policy>.yaml)"
+            " (default: <run-output>/calibrated-scenario-<policy>.yaml)"
         ),
     )
     parser.add_argument(
@@ -816,13 +812,7 @@ def _write_metadata_file(
         "generated_at_iso": now.isoformat(),
         "generated_at_epoch": int(now.timestamp()),
         "run_category": "calibration",
-        "hostname": socket.gethostname(),
-        "username": getpass.getuser(),
-        "cwd": os.getcwd(),
-        "script": str(Path(__file__).resolve()),
-        "argv": sys.argv,
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
+        "generator": Path(__file__).name,
         "custom_metadata": _parse_metadata_pairs(args.metadata),
         "context": {
             "project": args.project,
@@ -907,18 +897,18 @@ def _write_metadata_file(
             },
             "outputs": {
                 "selected_scenario_out": (
-                    str(selected_scenario_path) if selected_scenario_path else None
+                    selected_scenario_path.name if selected_scenario_path else None
                 ),
                 "selected_scenario_copy": (
-                    str(selected_scenario_copy_path)
+                    selected_scenario_copy_path.name
                     if selected_scenario_copy_path
                     else None
                 ),
                 "rejected_scenario_out": (
-                    str(rejected_scenario_path) if rejected_scenario_path else None
+                    rejected_scenario_path.name if rejected_scenario_path else None
                 ),
-                "grid_csv": str(grid_csv_path),
-                "validation_csv": str(validation_csv_path),
+                "grid_csv": grid_csv_path.name,
+                "validation_csv": validation_csv_path.name,
             },
         },
         "decision": {
@@ -1030,7 +1020,7 @@ def main() -> None:
     _status(f"run out dir={run_out_dir}")
     _status(
         f"grid: ticks={tick_candidates}, arrival_skew={arrival_candidates},"
-        f" queue_depth={depth_candidates} (CI: fixed real distribution)"
+        f" queue_depth={depth_candidates} (CI: fabricated default distribution)"
     )
     _status(
         f"candidates={total_candidates}, tune_cycles={tune_cycles},"
@@ -1075,7 +1065,6 @@ def main() -> None:
                     )
                     scenario_dict = build_scenario_dict(
                         stats=stats,
-                        project_name=args.project,
                         scenario_name=(
                             f"Calib candidate {idx} ({policy})"
                         ),
@@ -1364,7 +1353,7 @@ def main() -> None:
         final_path = (
             Path(args.scenario_out).resolve()
             if args.scenario_out
-            else (ROOT / "scenarios" / f"app-interface-prod-calibrated-{policy}.yaml")
+            else (run_out_dir / f"calibrated-scenario-{policy}.yaml")
         )
         final_path.parent.mkdir(parents=True, exist_ok=True)
 

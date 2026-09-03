@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import ipaddress
 from pathlib import Path
 
 import click
+
+
+def _is_loopback_host(host: str) -> bool:
+    """Return whether a bind host is limited to the local machine."""
+    if host.rstrip(".").lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @click.group()
@@ -22,6 +33,11 @@ def cli() -> None:
 @click.option("--host", default="127.0.0.1", help="Server host")
 @click.option("--port", default=8080, type=int, help="Server port")
 @click.option(
+    "--allow-non-loopback",
+    is_flag=True,
+    help="Allow binding to a non-loopback interface (unsafe)",
+)
+@click.option(
     "--metrics-out",
     default=None,
     type=click.Path(),
@@ -34,9 +50,20 @@ def cli() -> None:
     help="Random seed for deterministic pipeline failures/durations",
 )
 def serve(
-    scenario: str, host: str, port: int, metrics_out: str | None, seed: int | None
+    scenario: str,
+    host: str,
+    port: int,
+    allow_non_loopback: bool,
+    metrics_out: str | None,
+    seed: int | None,
 ) -> None:
     """Start the fake GitLab server loaded with a scenario."""
+    if not allow_non_loopback and not _is_loopback_host(host):
+        raise click.UsageError(
+            "--host must be localhost or a loopback IP;"
+            " pass --allow-non-loopback to override"
+        )
+
     import random
 
     import uvicorn
@@ -53,8 +80,8 @@ def serve(
     if metrics_out:
         click.echo(f"Metrics: {metrics_out}")
     click.echo("")
-    click.echo("GitLab API at: http://{host}:{port}/api/v4/")
-    click.echo("Sim control at: http://{host}:{port}/__sim/")
+    click.echo(f"GitLab API at: http://{host}:{port}/api/v4/")
+    click.echo(f"Sim control at: http://{host}:{port}/__sim/")
     uvicorn.run(app, host=host, port=port, log_level="info")
 
 

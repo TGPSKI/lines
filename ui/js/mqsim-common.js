@@ -11,6 +11,10 @@ const MQSIM_THEME = Object.freeze({
   legendText: "#8b949e",
 });
 
+// Expose constants inspected by the CSP-safe runtime self-check.
+globalThis.MQSIM_LEGEND_FONT_SIZE = MQSIM_LEGEND_FONT_SIZE;
+globalThis.MQSIM_POLICY_COLOR_PALETTE = MQSIM_POLICY_COLOR_PALETTE;
+
 function mqParseNumber(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;

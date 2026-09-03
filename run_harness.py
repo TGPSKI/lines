@@ -10,12 +10,12 @@ Requirements:
     are installed (e.g., after `uv sync` in the qontract-reconcile root).
 
 Usage:
-    # 1. Start the sim server first (from the sim directory):
+    # 1. Start the sim server from this repository root:
     #    PYTHONPATH=. python -m gitlab_hk_sim.cli serve \
     #        --scenario scenarios/mvp-active-cap.yaml
     #
-    # 2. Run this harness (from qontract-reconcile root with deps available):
-    #    python tools/gitlab_housekeeping_perf_sim/run_harness.py [options]
+    # 2. Run the harness with qontract-reconcile installed or its root supplied:
+    #    python run_harness.py --qontract-reconcile-root /path/to/qontract-reconcile
     #
     # 3. After the run, advance pipelines:
     #    curl -X POST http://127.0.0.1:8080/__sim/tick
@@ -23,23 +23,37 @@ Usage:
 
 Environment:
     SIM_URL: Override sim server URL (default: http://127.0.0.1:8080)
-    DRY_RUN: Set to "false" for non-dry-run (default: true)
+    QONTRACT_RECONCILE_ROOT: Optional path to a qontract-reconcile checkout
 """
 
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import os
 import sys
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
+from urllib.parse import urlparse
 
-# Ensure qontract-reconcile is importable
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-if REPO_ROOT not in sys.path:
-    sys.path.insert(0, REPO_ROOT)
+
+def _is_loopback_url(url: str) -> bool:
+    """Return whether an HTTP(S) URL targets the local machine."""
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = parsed.hostname
+    if not host:
+        return False
+    if host.rstrip(".").lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -50,6 +64,20 @@ def parse_args() -> argparse.Namespace:
         "--sim-url",
         default=os.environ.get("SIM_URL", "http://127.0.0.1:8080"),
         help="URL of the sim server (default: http://127.0.0.1:8080)",
+    )
+    parser.add_argument(
+        "--allow-non-loopback",
+        action="store_true",
+        help="Allow connecting to a non-loopback simulator URL (unsafe)",
+    )
+    parser.add_argument(
+        "--qontract-reconcile-root",
+        type=Path,
+        default=os.environ.get("QONTRACT_RECONCILE_ROOT"),
+        help=(
+            "Path to a qontract-reconcile checkout"
+            " (default: $QONTRACT_RECONCILE_ROOT or installed package)"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -93,7 +121,13 @@ def parse_args() -> argparse.Namespace:
         action="store_false",
         help="Disable rebase",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if not args.allow_non_loopback and not _is_loopback_url(args.sim_url):
+        parser.error(
+            "--sim-url must use localhost or a loopback IP;"
+            " pass --allow-non-loopback to override"
+        )
+    return args
 
 
 class FakeSecretReader:
@@ -167,15 +201,15 @@ def build_fake_instance(sim_url: str) -> dict[str, Any]:
             "format": None,
         },
         "sslVerify": False,
-        "managedGroups": ["app-sre"],
+        "managedGroups": ["example"],
         "projectRequests": None,
     }
 
 
 def build_fake_settings() -> dict[str, Any]:
-    """Minimal app-interface settings."""
+    """Return minimal synthetic integration settings."""
     return {
-        "repoUrl": "https://example.com/app-interface",
+        "repoUrl": "https://example.com/queue-lab",
         "vault": False,
         "kubeBinary": "oc",
         "mergeRequestGateway": "gitlab",
@@ -187,7 +221,7 @@ def build_fake_repos(sim_url: str, limit: int, rebase: bool) -> list[dict[str, A
     """Return a single fake repo pointing at the sim project."""
     return [
         {
-            "url": f"{sim_url}/app-sre/sim-repo",
+            "url": f"{sim_url}/example/queue-lab",
             "housekeeping": {
                 "enabled": True,
                 "days_interval": 15,
@@ -204,6 +238,15 @@ def build_fake_repos(sim_url: str, limit: int, rebase: bool) -> list[dict[str, A
 
 def run_harness(args: argparse.Namespace) -> None:
     """Patch dependencies and run the real integration."""
+    if args.qontract_reconcile_root:
+        reconcile_root = args.qontract_reconcile_root.resolve()
+        if not (reconcile_root / "reconcile").is_dir():
+            raise SystemExit(
+                "qontract-reconcile root must contain the reconcile package: "
+                f"{reconcile_root}"
+            )
+        sys.path.insert(0, str(reconcile_root))
+
     logging.basicConfig(
         level=getattr(logging, args.log_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",

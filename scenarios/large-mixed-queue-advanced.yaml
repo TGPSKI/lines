@@ -1,51 +1,30 @@
-# metadata:
-#   name: Large Mixed Queue (Advanced)
-#   description: >
-#     Simulates an 8-hour window of a busy monorepo merge queue with realistic
-#     production conditions including staggered arrivals, variable CI, failures,
-#     author pushes, and force-merges.
-#   duration_ticks: 480
-#   duration_real: 8 hours (1 tick ≈ 1 minute)
-#   merge_requests:
-#     total: 120
-#     initial_open: 20
-#     arrivals: staggered over 480 ticks (bursty)
-#   priority_distribution:
-#     critical: 23
-#     high: 37
-#     medium: 33
-#     low: 24
-#   tenant_domains: "23 distinct (top: cluster-mgmt=16, sre-infra=13, provisioning=13)""
-#   ci_durations:
-#     per_mr_override: true (each MR has fixed ci_duration)
-#     range: 5-25 ticks
-#     mean: 12.1 ticks
-#     distribution: right-skewed (most pipelines 5-9 ticks)
-#   pipeline_failures:
-#     rate: 10%
-#     distribution: weighted (same shape as duration distribution)
-#   disruptions:
-#     author_pushes: 8 (invalidates rebase + cancels active pipeline)
-#     force_merges: 2 (bypasses queue, advances target_head)
-#     mr_cancellations: 0
-#     external_target_advances: 0
+metadata:
+  name: Large Mixed Queue (Synthetic)
+  description: >
+    Fabricated high-volume queue with staggered arrivals, variable CI,
+    failures, author pushes, and force-merges.
+  provenance: Fully fabricated for this repository; not derived from operational logs.
+  scenario_kind: synthetic
+  duration_ticks: 480
+  merge_request_count: 120
+  domain_count: 23
 project:
   id: 1001
-  name: config-repo
-  path: config-repo
-  path_with_namespace: team/config-repo
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
   default_branch: master
   target_head: target-001
 merge_requests:
 - id: 3001
   iid: 1
-  title: cluster-mgmt/node-pool-config
+  title: domain-d/change-001
   state: opened
   sha: mr1-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: critical'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T08:00:00Z'
   pipelines:
   - id: 7001
@@ -58,13 +37,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3002
   iid: 2
-  title: registry/mirror-sync-config
+  title: domain-o/change-002
   state: opened
   sha: mr2-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: critical'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T08:05:00Z'
   pipelines:
   - id: 7002
@@ -77,13 +56,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3003
   iid: 3
-  title: provisioning/deployment-template
+  title: domain-m/change-003
   state: opened
   sha: mr3-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T08:10:00Z'
   pipelines:
   - id: 7003
@@ -96,14 +75,14 @@ merge_requests:
   arrival_tick: 0
 - id: 3004
   iid: 4
-  title: sre-infra/alertmanager-routing
+  title: domain-t/change-004
   state: opened
   sha: mr4-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-sre-infra
-  - tenant-monitoring
+  - tenant-domain-t
+  - tenant-domain-k
   approved_at: '2024-03-11T08:15:00Z'
   pipelines:
   - id: 7004
@@ -116,13 +95,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3005
   iid: 5
-  title: analytics/advisor-rule-update
+  title: domain-a/change-005
   state: opened
   sha: mr5-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: medium'
-  - tenant-analytics
+  - tenant-domain-a
   approved_at: '2024-03-11T08:20:00Z'
   pipelines:
   - id: 7005
@@ -136,13 +115,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3006
   iid: 6
-  title: telemetry/metric-rule-sync
+  title: domain-v/change-006
   state: opened
   sha: mr6-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: medium'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T08:25:00Z'
   pipelines:
   - id: 7006
@@ -155,13 +134,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3007
   iid: 7
-  title: auth-service/project-quota-bump
+  title: domain-b/change-007
   state: opened
   sha: mr7-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: low'
-  - tenant-auth-service
+  - tenant-domain-b
   approved_at: '2024-03-11T08:30:00Z'
   pipelines:
   - id: 7007
@@ -174,13 +153,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3008
   iid: 8
-  title: monitoring/grafana-datasource
+  title: domain-k/change-008
   state: opened
   sha: mr8-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: critical'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T08:35:00Z'
   pipelines:
   - id: 7008
@@ -193,13 +172,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3009
   iid: 9
-  title: gateway/rbac-policy-change
+  title: domain-f/change-009
   state: opened
   sha: mr9-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T08:40:00Z'
   pipelines:
   - id: 7009
@@ -212,13 +191,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3010
   iid: 10
-  title: identity/realm-config-v2
+  title: domain-h/change-010
   state: opened
   sha: mr10-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: medium'
-  - tenant-identity
+  - tenant-domain-h
   approved_at: '2024-03-11T08:45:00Z'
   pipelines:
   - id: 7010
@@ -231,13 +210,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3011
   iid: 11
-  title: installer/agent-config
+  title: domain-j/change-011
   state: opened
   sha: mr11-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-installer
+  - tenant-domain-j
   approved_at: '2024-03-11T09:00:00Z'
   pipelines:
   - id: 7011
@@ -251,13 +230,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3012
   iid: 12
-  title: fleet-mgr/upgrade-policy
+  title: domain-e/change-012
   state: opened
   sha: mr12-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: critical'
-  - tenant-fleet-mgr
+  - tenant-domain-e
   approved_at: '2024-03-11T09:05:00Z'
   pipelines:
   - id: 7012
@@ -271,13 +250,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3013
   iid: 13
-  title: toggles/feature-flag-cleanup
+  title: domain-w/change-013
   state: opened
   sha: mr13-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: low'
-  - tenant-toggles
+  - tenant-domain-w
   approved_at: '2024-03-11T09:10:00Z'
   pipelines:
   - id: 7013
@@ -291,13 +270,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3014
   iid: 14
-  title: platform/saas-deploy-config
+  title: domain-l/change-014
   state: opened
   sha: mr14-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: medium'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T09:15:00Z'
   pipelines:
   - id: 7014
@@ -311,13 +290,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3015
   iid: 15
-  title: cluster-mgmt/logging-forwarder
+  title: domain-d/change-015
   state: opened
   sha: mr15-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T09:20:00Z'
   pipelines:
   - id: 7015
@@ -332,13 +311,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3016
   iid: 16
-  title: release-eng/graph-data-update
+  title: domain-p/change-016
   state: opened
   sha: mr16-sha-001
   rebased_target_sha: target-001
   labels:
   - bot/approved
-  - tenant-release-eng
+  - tenant-domain-p
   approved_at: '2024-03-11T09:30:00Z'
   pipelines:
   - id: 7016
@@ -350,13 +329,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3017
   iid: 17
-  title: scanner/version-bump
+  title: domain-q/change-017
   state: opened
   sha: mr17-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: low'
-  - tenant-scanner
+  - tenant-domain-q
   approved_at: '2024-03-11T09:35:00Z'
   pipelines:
   - id: 7017
@@ -368,13 +347,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3018
   iid: 18
-  title: secrets-mgr/rotation-schedule
+  title: domain-r/change-018
   state: opened
   sha: mr18-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: high'
-  - tenant-secrets-mgr
+  - tenant-domain-r
   approved_at: '2024-03-11T09:40:00Z'
   pipelines:
   - id: 7018
@@ -386,13 +365,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3019
   iid: 19
-  title: ci-pipeline/template-v3
+  title: domain-c/change-019
   state: opened
   sha: mr19-sha-001
   rebased_target_sha: target-001
   labels:
   - 'bot/approved: medium'
-  - tenant-ci-pipeline
+  - tenant-domain-c
   approved_at: '2024-03-11T09:45:00Z'
   pipelines:
   - id: 7019
@@ -404,13 +383,13 @@ merge_requests:
   arrival_tick: 0
 - id: 3020
   iid: 20
-  title: status-page/component-status
+  title: domain-u/change-020
   state: opened
   sha: mr20-sha-001
   rebased_target_sha: target-001
   labels:
   - lgtm
-  - tenant-status-page
+  - tenant-domain-u
   approved_at: '2024-03-11T09:50:00Z'
   pipelines:
   - id: 7020
@@ -422,26 +401,26 @@ merge_requests:
   arrival_tick: 0
 - id: 3021
   iid: 21
-  title: platform/namespace-quota-prod
+  title: domain-l/change-021
   state: opened
   sha: mr21-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T10:00:00Z'
   pipelines: []
   ci_duration: 6
   arrival_tick: 3
 - id: 3022
   iid: 22
-  title: provisioning/syncset-update
+  title: domain-m/change-022
   state: opened
   sha: mr22-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T10:05:00Z'
   pipelines: []
   push_tick: 60
@@ -449,105 +428,105 @@ merge_requests:
   arrival_tick: 4
 - id: 3023
   iid: 23
-  title: registry/robot-account-cleanup
+  title: domain-o/change-023
   state: opened
   sha: mr23-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T10:10:00Z'
   pipelines: []
   ci_duration: 24
   arrival_tick: 12
 - id: 3024
   iid: 24
-  title: cluster-mgmt/addon-operator-params
+  title: domain-d/change-024
   state: opened
   sha: mr24-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-cluster-mgmt
-  - tenant-provisioning
+  - tenant-domain-d
+  - tenant-domain-m
   approved_at: '2024-03-11T10:15:00Z'
   pipelines: []
   ci_duration: 15
   arrival_tick: 19
 - id: 3025
   iid: 25
-  title: sre-infra/slo-document-update
+  title: domain-t/change-025
   state: opened
   sha: mr25-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T10:20:00Z'
   pipelines: []
   ci_duration: 9
   arrival_tick: 22
 - id: 3026
   iid: 26
-  title: hosting/fleet-mgr-scaling
+  title: domain-g/change-026
   state: opened
   sha: mr26-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-hosting
+  - tenant-domain-g
   approved_at: '2024-03-11T10:25:00Z'
   pipelines: []
   ci_duration: 6
   arrival_tick: 27
 - id: 3027
   iid: 27
-  title: analytics/ingress-controller-tune
+  title: domain-a/change-027
   state: opened
   sha: mr27-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-analytics
+  - tenant-domain-a
   approved_at: '2024-03-11T10:30:00Z'
   pipelines: []
   ci_duration: 10
   arrival_tick: 42
 - id: 3028
   iid: 28
-  title: signing/transparency-log
+  title: domain-s/change-028
   state: opened
   sha: mr28-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-signing
+  - tenant-domain-s
   approved_at: '2024-03-11T10:35:00Z'
   pipelines: []
   ci_duration: 10
   arrival_tick: 42
 - id: 3029
   iid: 29
-  title: platform/role-permission-fix
+  title: domain-l/change-029
   state: opened
   sha: mr29-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T10:40:00Z'
   pipelines: []
   ci_duration: 10
   arrival_tick: 43
 - id: 3030
   iid: 30
-  title: query-engine/config-update
+  title: domain-n/change-030
   state: opened
   sha: mr30-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-query-engine
+  - tenant-domain-n
   approved_at: '2024-03-11T10:45:00Z'
   pipelines: []
   force_merge_tick: 80
@@ -555,104 +534,104 @@ merge_requests:
   arrival_tick: 45
 - id: 3031
   iid: 31
-  title: telemetry/compact-retention
+  title: domain-v/change-031
   state: opened
   sha: mr31-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T10:50:00Z'
   pipelines: []
   ci_duration: 8
   arrival_tick: 45
 - id: 3032
   iid: 32
-  title: incident-mgr/template-v2
+  title: domain-i/change-032
   state: opened
   sha: mr32-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-incident-mgr
+  - tenant-domain-i
   approved_at: '2024-03-11T10:55:00Z'
   pipelines: []
   ci_duration: 6
   arrival_tick: 45
 - id: 3033
   iid: 33
-  title: monitoring/alertmanager-silence
+  title: domain-k/change-033
   state: opened
   sha: mr33-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T11:00:00Z'
   pipelines: []
   ci_duration: 13
   arrival_tick: 46
 - id: 3034
   iid: 34
-  title: registry/security-scanner-policy
+  title: domain-o/change-034
   state: opened
   sha: mr34-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T11:05:00Z'
   pipelines: []
   ci_duration: 24
   arrival_tick: 57
 - id: 3035
   iid: 35
-  title: gateway/proxy-timeout-tune
+  title: domain-f/change-035
   state: opened
   sha: mr35-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T11:10:00Z'
   pipelines: []
   ci_duration: 12
   arrival_tick: 67
 - id: 3036
   iid: 36
-  title: sre-infra/jenkins-job-migration
+  title: domain-t/change-036
   state: opened
   sha: mr36-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T11:15:00Z'
   pipelines: []
   ci_duration: 5
   arrival_tick: 69
 - id: 3037
   iid: 37
-  title: fleet-mgr/machine-pool-config
+  title: domain-e/change-037
   state: opened
   sha: mr37-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-fleet-mgr
+  - tenant-domain-e
   approved_at: '2024-03-11T11:20:00Z'
   pipelines: []
   ci_duration: 11
   arrival_tick: 70
 - id: 3038
   iid: 38
-  title: provisioning/pool-scaling
+  title: domain-m/change-038
   state: opened
   sha: mr38-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T11:25:00Z'
   pipelines: []
   push_tick: 120
@@ -660,20 +639,20 @@ merge_requests:
   arrival_tick: 74
 - id: 3039
   iid: 39
-  title: cluster-mgmt/subscription-sync
+  title: domain-d/change-039
   state: opened
   sha: mr39-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T11:30:00Z'
   pipelines: []
   ci_duration: 21
   arrival_tick: 78
 - id: 3040
   iid: 40
-  title: platform/global-ci-config
+  title: domain-l/change-040
   state: opened
   sha: mr40-sha-001
   rebased_target_sha: target-000
@@ -685,66 +664,66 @@ merge_requests:
   arrival_tick: 83
 - id: 3041
   iid: 41
-  title: identity/client-scope-migration
+  title: domain-h/change-041
   state: opened
   sha: mr41-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-identity
+  - tenant-domain-h
   approved_at: '2024-03-11T11:40:00Z'
   pipelines: []
   ci_duration: 7
   arrival_tick: 88
 - id: 3042
   iid: 42
-  title: auth-service/token-rotation
+  title: domain-b/change-042
   state: opened
   sha: mr42-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-auth-service
+  - tenant-domain-b
   approved_at: '2024-03-11T11:45:00Z'
   pipelines: []
   ci_duration: 11
   arrival_tick: 91
 - id: 3043
   iid: 43
-  title: installer/infra-env-v2
+  title: domain-j/change-043
   state: opened
   sha: mr43-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-installer
+  - tenant-domain-j
   approved_at: '2024-03-11T11:50:00Z'
   pipelines: []
   ci_duration: 18
   arrival_tick: 91
 - id: 3044
   iid: 44
-  title: cluster-mgmt/service-quota
+  title: domain-d/change-044
   state: opened
   sha: mr44-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T11:55:00Z'
   pipelines: []
   ci_duration: 20
   arrival_tick: 92
 - id: 3045
   iid: 45
-  title: sre-infra/ci-pipeline-config
+  title: domain-t/change-045
   state: opened
   sha: mr45-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-sre-infra
-  - tenant-platform
+  - tenant-domain-t
+  - tenant-domain-l
   approved_at: '2024-03-11T12:00:00Z'
   pipelines: []
   push_tick: 180
@@ -752,60 +731,60 @@ merge_requests:
   arrival_tick: 92
 - id: 3046
   iid: 46
-  title: registry/namespace-autoprune
+  title: domain-o/change-046
   state: opened
   sha: mr46-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T12:05:00Z'
   pipelines: []
   ci_duration: 16
   arrival_tick: 102
 - id: 3047
   iid: 47
-  title: provisioning/hibernate-schedule
+  title: domain-m/change-047
   state: opened
   sha: mr47-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T12:10:00Z'
   pipelines: []
   ci_duration: 13
   arrival_tick: 103
 - id: 3048
   iid: 48
-  title: hosting/must-gather-config
+  title: domain-g/change-048
   state: opened
   sha: mr48-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-hosting
+  - tenant-domain-g
   approved_at: '2024-03-11T12:15:00Z'
   pipelines: []
   ci_duration: 5
   arrival_tick: 103
 - id: 3049
   iid: 49
-  title: monitoring/log-retention-policy
+  title: domain-k/change-049
   state: opened
   sha: mr49-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-monitoring
-  - tenant-telemetry
+  - tenant-domain-k
+  - tenant-domain-v
   approved_at: '2024-03-11T12:20:00Z'
   pipelines: []
   ci_duration: 12
   arrival_tick: 103
 - id: 3050
   iid: 50
-  title: platform/dependency-audit-q1
+  title: domain-l/change-050
   state: opened
   sha: mr50-sha-001
   rebased_target_sha: target-000
@@ -818,66 +797,66 @@ merge_requests:
   arrival_tick: 105
 - id: 3051
   iid: 51
-  title: toggles/proxy-sidecar-config
+  title: domain-w/change-051
   state: opened
   sha: mr51-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-toggles
+  - tenant-domain-w
   approved_at: '2024-03-11T12:30:00Z'
   pipelines: []
   ci_duration: 9
   arrival_tick: 109
 - id: 3052
   iid: 52
-  title: sre-infra/secrets-policy-update
+  title: domain-t/change-052
   state: opened
   sha: mr52-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-sre-infra
-  - tenant-secrets-mgr
+  - tenant-domain-t
+  - tenant-domain-r
   approved_at: '2024-03-11T12:35:00Z'
   pipelines: []
   ci_duration: 7
   arrival_tick: 111
 - id: 3053
   iid: 53
-  title: cluster-mgmt/addon-lifecycle
+  title: domain-d/change-053
   state: opened
   sha: mr53-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T12:40:00Z'
   pipelines: []
   ci_duration: 15
   arrival_tick: 111
 - id: 3054
   iid: 54
-  title: registry/org-team-sync
+  title: domain-o/change-054
   state: opened
   sha: mr54-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T12:45:00Z'
   pipelines: []
   ci_duration: 22
   arrival_tick: 118
 - id: 3055
   iid: 55
-  title: provisioning/credentials-rotate
+  title: domain-m/change-055
   state: opened
   sha: mr55-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T12:50:00Z'
   pipelines: []
   push_tick: 250
@@ -885,200 +864,200 @@ merge_requests:
   arrival_tick: 128
 - id: 3056
   iid: 56
-  title: analytics/namespace-config
+  title: domain-a/change-056
   state: opened
   sha: mr56-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-analytics
+  - tenant-domain-a
   approved_at: '2024-03-11T12:55:00Z'
   pipelines: []
   ci_duration: 5
   arrival_tick: 129
 - id: 3057
   iid: 57
-  title: gateway/console-plugin-deploy
+  title: domain-f/change-057
   state: opened
   sha: mr57-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T13:00:00Z'
   pipelines: []
   ci_duration: 13
   arrival_tick: 138
 - id: 3058
   iid: 58
-  title: auth-service/dsn-rotation
+  title: domain-b/change-058
   state: opened
   sha: mr58-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-auth-service
+  - tenant-domain-b
   approved_at: '2024-03-11T13:05:00Z'
   pipelines: []
   ci_duration: 10
   arrival_tick: 159
 - id: 3059
   iid: 59
-  title: platform/merge-queue-slo
+  title: domain-l/change-059
   state: opened
   sha: mr59-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T13:10:00Z'
   pipelines: []
   ci_duration: 9
   arrival_tick: 162
 - id: 3060
   iid: 60
-  title: telemetry/rules-storage-config
+  title: domain-v/change-060
   state: opened
   sha: mr60-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T13:15:00Z'
   pipelines: []
   ci_duration: 7
   arrival_tick: 169
 - id: 3061
   iid: 61
-  title: fleet-mgr/proxy-env-config
+  title: domain-e/change-061
   state: opened
   sha: mr61-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-fleet-mgr
+  - tenant-domain-e
   approved_at: '2024-03-11T13:20:00Z'
   pipelines: []
   ci_duration: 15
   arrival_tick: 174
 - id: 3062
   iid: 62
-  title: cluster-mgmt/security-operator
+  title: domain-d/change-062
   state: opened
   sha: mr62-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-cluster-mgmt
-  - tenant-scanner
+  - tenant-domain-d
+  - tenant-domain-q
   approved_at: '2024-03-11T13:25:00Z'
   pipelines: []
   ci_duration: 24
   arrival_tick: 184
 - id: 3063
   iid: 63
-  title: identity/idp-mapper-config
+  title: domain-h/change-063
   state: opened
   sha: mr63-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-identity
+  - tenant-domain-h
   approved_at: '2024-03-11T13:30:00Z'
   pipelines: []
   ci_duration: 7
   arrival_tick: 186
 - id: 3064
   iid: 64
-  title: monitoring/pagerduty-service
+  title: domain-k/change-064
   state: opened
   sha: mr64-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T13:35:00Z'
   pipelines: []
   ci_duration: 14
   arrival_tick: 192
 - id: 3065
   iid: 65
-  title: sre-infra/github-repo-permission
+  title: domain-t/change-065
   state: opened
   sha: mr65-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T13:40:00Z'
   pipelines: []
   ci_duration: 6
   arrival_tick: 195
 - id: 3066
   iid: 66
-  title: registry/scanner-integration
+  title: domain-o/change-066
   state: opened
   sha: mr66-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-registry
-  - tenant-scanner
+  - tenant-domain-o
+  - tenant-domain-q
   approved_at: '2024-03-11T13:45:00Z'
   pipelines: []
   ci_duration: 16
   arrival_tick: 196
 - id: 3067
   iid: 67
-  title: provisioning/selector-migrate
+  title: domain-m/change-067
   state: opened
   sha: mr67-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T13:50:00Z'
   pipelines: []
   ci_duration: 10
   arrival_tick: 197
 - id: 3068
   iid: 68
-  title: installer/day2-worker-config
+  title: domain-j/change-068
   state: opened
   sha: mr68-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-installer
+  - tenant-domain-j
   approved_at: '2024-03-11T13:55:00Z'
   pipelines: []
   ci_duration: 25
   arrival_tick: 199
 - id: 3069
   iid: 69
-  title: platform/tooling-bump-v4.12
+  title: domain-l/change-069
   state: opened
   sha: mr69-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-platform
-  - tenant-sre-infra
-  - tenant-cluster-mgmt
-  - tenant-registry
+  - tenant-domain-l
+  - tenant-domain-t
+  - tenant-domain-d
+  - tenant-domain-o
   approved_at: '2024-03-11T14:00:00Z'
   pipelines: []
   ci_duration: 6
   arrival_tick: 207
 - id: 3070
   iid: 70
-  title: gateway/audit-log-retention
+  title: domain-f/change-070
   state: opened
   sha: mr70-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T14:05:00Z'
   pipelines: []
   push_tick: 320
@@ -1086,125 +1065,125 @@ merge_requests:
   arrival_tick: 207
 - id: 3071
   iid: 71
-  title: hosting/sre-access-policy
+  title: domain-g/change-071
   state: opened
   sha: mr71-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-hosting
+  - tenant-domain-g
   approved_at: '2024-03-11T14:10:00Z'
   pipelines: []
   ci_duration: 5
   arrival_tick: 208
 - id: 3072
   iid: 72
-  title: cluster-mgmt/autoscaler-profile
+  title: domain-d/change-072
   state: opened
   sha: mr72-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T14:15:00Z'
   pipelines: []
   ci_duration: 18
   arrival_tick: 215
 - id: 3073
   iid: 73
-  title: telemetry/config-update
+  title: domain-v/change-073
   state: opened
   sha: mr73-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T14:20:00Z'
   pipelines: []
   ci_duration: 5
   arrival_tick: 216
 - id: 3074
   iid: 74
-  title: sre-infra/dns-config
+  title: domain-t/change-074
   state: opened
   sha: mr74-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T14:25:00Z'
   pipelines: []
   ci_duration: 8
   arrival_tick: 218
 - id: 3075
   iid: 75
-  title: registry/notification-webhook
+  title: domain-o/change-075
   state: opened
   sha: mr75-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T14:30:00Z'
   pipelines: []
   ci_duration: 19
   arrival_tick: 218
 - id: 3076
   iid: 76
-  title: analytics/compliance-ns-config
+  title: domain-a/change-076
   state: opened
   sha: mr76-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-analytics
+  - tenant-domain-a
   approved_at: '2024-03-11T14:35:00Z'
   pipelines: []
   ci_duration: 8
   arrival_tick: 227
 - id: 3077
   iid: 77
-  title: provisioning/dns-zone-control
+  title: domain-m/change-077
   state: opened
   sha: mr77-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T14:40:00Z'
   pipelines: []
   ci_duration: 15
   arrival_tick: 237
 - id: 3078
   iid: 78
-  title: monitoring/deadman-switch-cfg
+  title: domain-k/change-078
   state: opened
   sha: mr78-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-monitoring
-  - tenant-sre-infra
+  - tenant-domain-k
+  - tenant-domain-t
   approved_at: '2024-03-11T14:45:00Z'
   pipelines: []
   ci_duration: 12
   arrival_tick: 237
 - id: 3079
   iid: 79
-  title: cluster-mgmt/control-plane-mgmt
+  title: domain-d/change-079
   state: opened
   sha: mr79-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T14:50:00Z'
   pipelines: []
   ci_duration: 17
   arrival_tick: 237
 - id: 3080
   iid: 80
-  title: platform/global-rbac-refactor
+  title: domain-l/change-080
   state: opened
   sha: mr80-sha-001
   rebased_target_sha: target-000
@@ -1216,65 +1195,65 @@ merge_requests:
   arrival_tick: 241
 - id: 3081
   iid: 81
-  title: auth-service/rate-limit-config
+  title: domain-b/change-081
   state: opened
   sha: mr81-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-auth-service
+  - tenant-domain-b
   approved_at: '2024-03-11T15:00:00Z'
   pipelines: []
   arrival_tick: 243
   ci_duration: 12
 - id: 3082
   iid: 82
-  title: fleet-mgr/node-drain-grace
+  title: domain-e/change-082
   state: opened
   sha: mr82-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-fleet-mgr
+  - tenant-domain-e
   approved_at: '2024-03-11T15:05:00Z'
   pipelines: []
   arrival_tick: 251
   ci_duration: 11
 - id: 3083
   iid: 83
-  title: cluster-mgmt/transfer-policy
+  title: domain-d/change-083
   state: opened
   sha: mr83-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T15:10:00Z'
   pipelines: []
   arrival_tick: 258
   ci_duration: 25
 - id: 3084
   iid: 84
-  title: platform/user-access-request
+  title: domain-l/change-084
   state: opened
   sha: mr84-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T15:15:00Z'
   pipelines: []
   arrival_tick: 266
   ci_duration: 7
 - id: 3085
   iid: 85
-  title: provisioning/install-override
+  title: domain-m/change-085
   state: opened
   sha: mr85-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T15:20:00Z'
   pipelines: []
   arrival_tick: 268
@@ -1282,456 +1261,456 @@ merge_requests:
   ci_duration: 15
 - id: 3086
   iid: 86
-  title: identity/session-timeout-tune
+  title: domain-h/change-086
   state: opened
   sha: mr86-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-identity
+  - tenant-domain-h
   approved_at: '2024-03-11T15:25:00Z'
   pipelines: []
   arrival_tick: 271
   ci_duration: 10
 - id: 3087
   iid: 87
-  title: registry/geo-repl-storage
+  title: domain-o/change-087
   state: opened
   sha: mr87-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T15:30:00Z'
   pipelines: []
   arrival_tick: 272
   ci_duration: 25
 - id: 3088
   iid: 88
-  title: sre-infra/deploy-trigger-fix
+  title: domain-t/change-088
   state: opened
   sha: mr88-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T15:35:00Z'
   pipelines: []
   arrival_tick: 274
   ci_duration: 5
 - id: 3089
   iid: 89
-  title: monitoring/alert-routing-v3
+  title: domain-k/change-089
   state: opened
   sha: mr89-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T15:40:00Z'
   pipelines: []
   arrival_tick: 276
   ci_duration: 14
 - id: 3090
   iid: 90
-  title: cluster-mgmt/machine-type-catalog
+  title: domain-d/change-090
   state: opened
   sha: mr90-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T15:45:00Z'
   pipelines: []
   arrival_tick: 286
   ci_duration: 25
 - id: 3091
   iid: 91
-  title: installer/image-override
+  title: domain-j/change-091
   state: opened
   sha: mr91-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-installer
+  - tenant-domain-j
   approved_at: '2024-03-11T15:50:00Z'
   pipelines: []
   arrival_tick: 291
   ci_duration: 17
 - id: 3092
   iid: 92
-  title: telemetry/ruler-remote-write
+  title: domain-v/change-092
   state: opened
   sha: mr92-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T15:55:00Z'
   pipelines: []
   arrival_tick: 302
   ci_duration: 9
 - id: 3093
   iid: 93
-  title: provisioning/relocate-config
+  title: domain-m/change-093
   state: opened
   sha: mr93-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T16:00:00Z'
   pipelines: []
   arrival_tick: 305
   ci_duration: 15
 - id: 3094
   iid: 94
-  title: gateway/vpn-endpoint-update
+  title: domain-f/change-094
   state: opened
   sha: mr94-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T16:05:00Z'
   pipelines: []
   arrival_tick: 307
   ci_duration: 11
 - id: 3095
   iid: 95
-  title: registry/tag-expiration-policy
+  title: domain-o/change-095
   state: opened
   sha: mr95-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T16:10:00Z'
   pipelines: []
   arrival_tick: 311
   ci_duration: 17
 - id: 3096
   iid: 96
-  title: platform/notification-config
+  title: domain-l/change-096
   state: opened
   sha: mr96-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T16:15:00Z'
   pipelines: []
   arrival_tick: 314
   ci_duration: 8
 - id: 3097
   iid: 97
-  title: toggles/strategy-constraint-v2
+  title: domain-w/change-097
   state: opened
   sha: mr97-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-toggles
+  - tenant-domain-w
   approved_at: '2024-03-11T16:20:00Z'
   pipelines: []
   arrival_tick: 317
   ci_duration: 8
 - id: 3098
   iid: 98
-  title: cluster-mgmt/network-verifier
+  title: domain-d/change-098
   state: opened
   sha: mr98-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T16:25:00Z'
   pipelines: []
   arrival_tick: 320
   ci_duration: 19
 - id: 3099
   iid: 99
-  title: hosting/upgrade-policy-sync
+  title: domain-g/change-099
   state: opened
   sha: mr99-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-hosting
+  - tenant-domain-g
   approved_at: '2024-03-11T16:30:00Z'
   pipelines: []
   arrival_tick: 324
   ci_duration: 10
 - id: 3100
   iid: 100
-  title: sre-infra/health-check-config
+  title: domain-t/change-100
   state: opened
   sha: mr100-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T16:35:00Z'
   pipelines: []
   arrival_tick: 339
   ci_duration: 10
 - id: 3101
   iid: 101
-  title: provisioning/claim-timeout
+  title: domain-m/change-101
   state: opened
   sha: mr101-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T16:40:00Z'
   pipelines: []
   arrival_tick: 339
   ci_duration: 14
 - id: 3102
   iid: 102
-  title: analytics/host-staleness-cfg
+  title: domain-a/change-102
   state: opened
   sha: mr102-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-analytics
+  - tenant-domain-a
   approved_at: '2024-03-11T16:45:00Z'
   pipelines: []
   arrival_tick: 347
   ci_duration: 6
 - id: 3103
   iid: 103
-  title: monitoring/log-agent-daemonset
+  title: domain-k/change-103
   state: opened
   sha: mr103-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T16:50:00Z'
   pipelines: []
   arrival_tick: 350
   ci_duration: 15
 - id: 3104
   iid: 104
-  title: fleet-mgr/oidc-provider-cfg
+  title: domain-e/change-104
   state: opened
   sha: mr104-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-fleet-mgr
+  - tenant-domain-e
   approved_at: '2024-03-11T16:55:00Z'
   pipelines: []
   arrival_tick: 351
   ci_duration: 12
 - id: 3105
   iid: 105
-  title: registry/build-trigger-config
+  title: domain-o/change-105
   state: opened
   sha: mr105-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T17:00:00Z'
   pipelines: []
   arrival_tick: 351
   ci_duration: 15
 - id: 3106
   iid: 106
-  title: platform/cluster-onboarding
+  title: domain-l/change-106
   state: opened
   sha: mr106-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-platform
-  - tenant-cluster-mgmt
+  - tenant-domain-l
+  - tenant-domain-d
   approved_at: '2024-03-11T17:05:00Z'
   pipelines: []
   arrival_tick: 359
   ci_duration: 6
 - id: 3107
   iid: 107
-  title: auth-service/project-rate-limit
+  title: domain-b/change-107
   state: opened
   sha: mr107-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-auth-service
+  - tenant-domain-b
   approved_at: '2024-03-11T17:10:00Z'
   pipelines: []
   arrival_tick: 367
   ci_duration: 10
 - id: 3108
   iid: 108
-  title: identity/theme-resource-update
+  title: domain-h/change-108
   state: opened
   sha: mr108-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-identity
+  - tenant-domain-h
   approved_at: '2024-03-11T17:15:00Z'
   pipelines: []
   arrival_tick: 367
   ci_duration: 7
 - id: 3109
   iid: 109
-  title: cluster-mgmt/placement-policy-v2
+  title: domain-d/change-109
   state: opened
   sha: mr109-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T17:20:00Z'
   pipelines: []
   arrival_tick: 370
   ci_duration: 21
 - id: 3110
   iid: 110
-  title: provisioning/autoscale-config
+  title: domain-m/change-110
   state: opened
   sha: mr110-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T17:25:00Z'
   pipelines: []
   arrival_tick: 374
   ci_duration: 12
 - id: 3111
   iid: 111
-  title: sre-infra/rds-parameter-group
+  title: domain-t/change-111
   state: opened
   sha: mr111-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T17:30:00Z'
   pipelines: []
   arrival_tick: 383
   ci_duration: 5
 - id: 3112
   iid: 112
-  title: telemetry/receive-router-cfg
+  title: domain-v/change-112
   state: opened
   sha: mr112-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-telemetry
+  - tenant-domain-v
   approved_at: '2024-03-11T17:35:00Z'
   pipelines: []
   arrival_tick: 390
   ci_duration: 6
 - id: 3113
   iid: 113
-  title: gateway/sar-proxy-config
+  title: domain-f/change-113
   state: opened
   sha: mr113-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-gateway
+  - tenant-domain-f
   approved_at: '2024-03-11T17:40:00Z'
   pipelines: []
   arrival_tick: 397
   ci_duration: 14
 - id: 3114
   iid: 114
-  title: registry/admin-panel-access
+  title: domain-o/change-114
   state: opened
   sha: mr114-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-registry
+  - tenant-domain-o
   approved_at: '2024-03-11T17:45:00Z'
   pipelines: []
   arrival_tick: 404
   ci_duration: 20
 - id: 3115
   iid: 115
-  title: monitoring/ruler-config
+  title: domain-k/change-115
   state: opened
   sha: mr115-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-monitoring
+  - tenant-domain-k
   approved_at: '2024-03-11T17:50:00Z'
   pipelines: []
   arrival_tick: 406
   ci_duration: 11
 - id: 3116
   iid: 116
-  title: cluster-mgmt/iam-role-binding
+  title: domain-d/change-116
   state: opened
   sha: mr116-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-cluster-mgmt
+  - tenant-domain-d
   approved_at: '2024-03-11T17:55:00Z'
   pipelines: []
   arrival_tick: 406
   ci_duration: 25
 - id: 3117
   iid: 117
-  title: platform/schema-migration-v5
+  title: domain-l/change-117
   state: opened
   sha: mr117-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: critical'
-  - tenant-platform
+  - tenant-domain-l
   approved_at: '2024-03-11T18:00:00Z'
   pipelines: []
   arrival_tick: 420
   ci_duration: 8
 - id: 3118
   iid: 118
-  title: toggles/admin-token-rotate
+  title: domain-w/change-118
   state: opened
   sha: mr118-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: medium'
-  - tenant-toggles
+  - tenant-domain-w
   approved_at: '2024-03-11T18:05:00Z'
   pipelines: []
   arrival_tick: 422
   ci_duration: 8
 - id: 3119
   iid: 119
-  title: provisioning/image-pin
+  title: domain-m/change-119
   state: opened
   sha: mr119-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: low'
-  - tenant-provisioning
+  - tenant-domain-m
   approved_at: '2024-03-11T18:10:00Z'
   pipelines: []
   arrival_tick: 436
   ci_duration: 15
 - id: 3120
   iid: 120
-  title: sre-infra/ci-config-final-tune
+  title: domain-t/change-120
   state: opened
   sha: mr120-sha-001
   rebased_target_sha: target-000
   labels:
   - 'bot/approved: high'
-  - tenant-sre-infra
+  - tenant-domain-t
   approved_at: '2024-03-11T18:15:00Z'
   pipelines: []
   arrival_tick: 442

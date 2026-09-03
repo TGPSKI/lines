@@ -15,9 +15,9 @@ from gitlab_hk_sim.state import (
 def _make_project(target_head: str = "target-001") -> Project:
     return Project(
         id=1001,
-        name="sim-repo",
-        path="sim-repo",
-        path_with_namespace="app-sre/sim-repo",
+        name="queue-lab",
+        path="queue-lab",
+        path_with_namespace="example/queue-lab",
         target_head=target_head,
     )
 

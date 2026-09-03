@@ -3617,7 +3617,7 @@ function _showKanbanTip(mr, dataIdx, cardEl) {
   const segRange = seg ? (timeDisplayMode === "ticks" ? `${seg.start}→${seg.end}` : fmtTickRange(seg.start, seg.end, ctx)) : "n/a";
   const tickLabel = timeDisplayMode === "ticks" ? `t${t}` : fmtTickAsTime(t, ctx);
 
-  let html = `<button class="kt-close" onclick="_closeKanbanTip()">&times;</button>`;
+  let html = `<button class="kt-close" type="button" aria-label="Close">&times;</button>`;
   html += `<div class="kt-head"><span class="kt-mr">MR !${mr}</span><span class="kt-state">${mqEscapeHtml(stateLabel)} @ ${mqEscapeHtml(tickLabel)}</span></div>`;
   html += `<div class="kt-grid">`;
   html += `<div class="k">Policy</div><div class="v">${mqEscapeHtml(d.name || "—")}</div>`;
@@ -3636,6 +3636,7 @@ function _showKanbanTip(mr, dataIdx, cardEl) {
     html += `</ul></div>`;
   }
   tip.innerHTML = html;
+  tip.querySelector(".kt-close")?.addEventListener("click", _closeKanbanTip);
   tip.style.display = "block";
 
   const rect = cardEl.getBoundingClientRect();
@@ -5234,4 +5235,3 @@ function plPeakBand(fileIdx) {
     document.body.style.userSelect = "";
   });
 })();
-

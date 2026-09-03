@@ -1,0 +1,175 @@
+metadata:
+  name: Synthetic calibration demo
+  provenance: Fully fabricated for this repository; not derived from operational logs.
+  scenario_kind: synthetic
+  seed: 42
+  calibration_targets:
+    queue_depth: 12
+    arrival_interval_ticks: 2
+    pipeline_duration_ticks: [2, 3, 5, 8]
+    pipeline_failure_rate: 0.08
+tick_seconds: 60
+project:
+  id: 1001
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
+  default_branch: main
+  target_head: target-001
+merge_requests:
+  - id: 2001
+    iid: 1
+    title: "Synthetic change 1"
+    state: opened
+    sha: mr1-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: high", "team-alpha"]
+    approved_at: "2026-01-01T00:00:00Z"
+    ci_duration: 2
+    pipelines:
+      - id: 5001
+        status: success
+        sha: mr1-sha-001
+        root_sha: target-001
+        outcome: success
+  - id: 2002
+    iid: 2
+    title: "Synthetic change 2"
+    state: opened
+    sha: mr2-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: medium", "team-beta"]
+    approved_at: "2026-01-01T00:02:00Z"
+    ci_duration: 3
+    pipelines:
+      - id: 5002
+        status: running
+        sha: mr2-sha-001
+        root_sha: target-001
+        running_ticks_remaining: 1
+        outcome: success
+  - id: 2003
+    iid: 3
+    title: "Synthetic change 3"
+    state: opened
+    sha: mr3-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: low", "team-gamma"]
+    approved_at: "2026-01-01T00:04:00Z"
+    ci_duration: 5
+    pipelines: []
+  - id: 2004
+    iid: 4
+    title: "Synthetic change 4"
+    state: opened
+    sha: mr4-sha-001
+    rebased_target_sha: target-000
+    labels: ["bot/approved: high", "team-alpha"]
+    approved_at: "2026-01-01T00:06:00Z"
+    ci_duration: 8
+    pipelines: []
+  - id: 2005
+    iid: 5
+    title: "Synthetic change 5"
+    state: opened
+    sha: mr5-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: medium", "team-delta"]
+    approved_at: "2026-01-01T00:08:00Z"
+    arrival_tick: 2
+    ci_duration: 3
+    pipelines: []
+  - id: 2006
+    iid: 6
+    title: "Synthetic change 6"
+    state: opened
+    sha: mr6-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: low", "team-beta"]
+    approved_at: "2026-01-01T00:10:00Z"
+    arrival_tick: 4
+    ci_duration: 5
+    pipelines: []
+  - id: 2007
+    iid: 7
+    title: "Synthetic change 7"
+    state: opened
+    sha: mr7-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: high", "team-gamma"]
+    approved_at: "2026-01-01T00:12:00Z"
+    arrival_tick: 6
+    ci_duration: 2
+    pipelines: []
+  - id: 2008
+    iid: 8
+    title: "Synthetic change 8"
+    state: opened
+    sha: mr8-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: medium", "team-delta"]
+    approved_at: "2026-01-01T00:14:00Z"
+    arrival_tick: 8
+    ci_duration: 8
+    pipelines: []
+  - id: 2009
+    iid: 9
+    title: "Synthetic change 9"
+    state: opened
+    sha: mr9-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: low", "team-alpha"]
+    approved_at: "2026-01-01T00:16:00Z"
+    arrival_tick: 10
+    ci_duration: 3
+    pipelines: []
+  - id: 2010
+    iid: 10
+    title: "Synthetic change 10"
+    state: opened
+    sha: mr10-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: high", "team-beta"]
+    approved_at: "2026-01-01T00:18:00Z"
+    arrival_tick: 12
+    ci_duration: 5
+    pipelines: []
+  - id: 2011
+    iid: 11
+    title: "Synthetic change 11"
+    state: opened
+    sha: mr11-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: medium", "team-gamma"]
+    approved_at: "2026-01-01T00:20:00Z"
+    arrival_tick: 14
+    ci_duration: 2
+    pipelines: []
+  - id: 2012
+    iid: 12
+    title: "Synthetic change 12"
+    state: opened
+    sha: mr12-sha-001
+    rebased_target_sha: target-001
+    labels: ["bot/approved: low", "team-delta"]
+    approved_at: "2026-01-01T00:22:00Z"
+    arrival_tick: 16
+    ci_duration: 8
+    pipelines: []
+pipeline_durations:
+  min_ticks: 2
+  max_ticks: 8
+  weights:
+    2: 35
+    3: 30
+    5: 25
+    8: 10
+  failure_rate: 0.08
+failure_path_realism:
+  merge_failure_rate: 0.03
+  rebase_failure_rate: 0.02
+sha_pools:
+  mr_rebases:
+    "4": [mr4-sha-rebased-001, mr4-sha-rebased-002]
+  target_advances:
+    main: [target-002, target-003, target-004]

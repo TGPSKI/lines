@@ -9,9 +9,9 @@ def _base_scenario_yaml(extra: str = "") -> str:
     return f"""
 project:
   id: 1001
-  name: sim-repo
-  path: sim-repo
-  path_with_namespace: app-sre/sim-repo
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
   target_head: target-001
 merge_requests: []
 {extra}
@@ -68,9 +68,9 @@ def test_mr_merge_failure_flat_fields(tmp_path: Path) -> None:
         """
 project:
   id: 1001
-  name: sim-repo
-  path: sim-repo
-  path_with_namespace: app-sre/sim-repo
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
   target_head: target-001
 merge_requests:
   - id: 2001
@@ -99,9 +99,9 @@ def test_mr_merge_failure_nested_always(tmp_path: Path) -> None:
         """
 project:
   id: 1001
-  name: sim-repo
-  path: sim-repo
-  path_with_namespace: app-sre/sim-repo
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
   target_head: target-001
 merge_requests:
   - id: 2001
@@ -141,3 +141,16 @@ tick_seconds: 82
     )
     override_state = load_scenario(override_path)
     assert override_state.tick_seconds == 82
+
+
+def test_shipped_scenarios_declare_synthetic_provenance() -> None:
+    scenario_paths = sorted(Path("scenarios").glob("*.yaml"))
+
+    assert scenario_paths
+    for scenario_path in scenario_paths:
+        state = load_scenario(scenario_path)
+        assert state.scenario_metadata["scenario_kind"] == "synthetic"
+        assert state.scenario_metadata["provenance"] == (
+            "Fully fabricated for this repository; "
+            "not derived from operational logs."
+        )

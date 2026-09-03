@@ -12,6 +12,8 @@ This UI is intentionally **client-side only**:
 - `mqsim-common.js`: cross-file primitives (formatting, CSV parsing, chart theme/options, safe chart destroy helpers).
 - `mqsim-experiments.js`: discrimination + calibration experiment parsing/rendering.
 - `mqsim-monte-carlo.js`: monte-carlo parsing/rendering/statistics.
+- `mqsim-sweep.js`: parameter-sweep parsing and rendering.
+- `mqsim-multi-merge.js`: multi-merge experiment parsing and rendering.
 - `mqsim-selfcheck.js`: runtime self-check + smoke tests for split-file integrity.
 
 ## Load order contract
@@ -22,7 +24,9 @@ This UI is intentionally **client-side only**:
 2. `mqsim-core.js`
 3. `mqsim-experiments.js`
 4. `mqsim-monte-carlo.js`
-5. `mqsim-selfcheck.js`
+5. `mqsim-sweep.js`
+6. `mqsim-multi-merge.js`
+7. `mqsim-selfcheck.js`
 
 Do not reorder unless you also update cross-file references.
 
@@ -45,12 +49,15 @@ Results are shown in the UI status line and browser console.
 
 ### 2) Static syntax check (no toolchain required)
 
-Run from `tools/gitlab_housekeeping_perf_sim`:
+Run from the repository root:
 
 ```bash
+node --check ui/js/mqsim-common.js
 node --check ui/js/mqsim-core.js
 node --check ui/js/mqsim-experiments.js
 node --check ui/js/mqsim-monte-carlo.js
+node --check ui/js/mqsim-sweep.js
+node --check ui/js/mqsim-multi-merge.js
 node --check ui/js/mqsim-selfcheck.js
 ```
 
@@ -61,4 +68,3 @@ Load one representative run folder and confirm:
 - Run Browser still loads/selects rows and metadata
 - Statistics + Simulation tabs render with no console errors
 - Experiments/Monte Carlo tabs render when corresponding CSV files are loaded
-

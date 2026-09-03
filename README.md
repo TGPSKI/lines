@@ -22,7 +22,7 @@ scenario YAML
     ↓
 stateful fake GitLab API server (FastAPI)
     ↓
-real unmodified gitlab-housekeeping integration
+gitlab-housekeeping run() with simulator-backed dependencies
     ↓
 state mutations: rebase / merge / pipeline / target head
     ↓
@@ -31,16 +31,17 @@ metrics NDJSON
 single-run + policy comparison reports
 ```
 
-No modification to `run()`. No monkeypatching. No reverse proxy.
+The compatibility harness invokes the upstream `run()` function unchanged and
+monkeypatches its GitLab queries and API client to use the simulator. It is a
+development harness, not a reverse proxy.
 
 The fake GitLab server is compatible with the real `python-gitlab` path used by `qontract-reconcile`.
 
 ## Quick Start
 
 ```bash
-# Install
-cd tools/gitlab_housekeeping_perf_sim
-python -m venv .venv
+# Install from the repository root (Python 3.12)
+python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 
@@ -54,9 +55,10 @@ python -m gitlab_hk_sim.cli serve \
   --port 8080 \
   --metrics-out reports/active-cap/metrics.ndjson
 
-# Point gitlab-housekeeping at the fake server:
-#   GITLAB_URL=http://127.0.0.1:8080
-#   GITLAB_TOKEN=sim-token
+# In another shell, run the optional qontract-reconcile compatibility harness:
+# QONTRACT_RECONCILE_ROOT=/path/to/qontract-reconcile \
+# SIM_URL=http://127.0.0.1:8080 \
+#   .venv/bin/python run_harness.py
 
 # Generate a report
 python -m gitlab_hk_sim.cli report \
@@ -70,6 +72,10 @@ python -m gitlab_hk_sim.cli compare \
   --run active-cap=reports/active-cap/metrics.ndjson \
   --out reports/comparison.md
 ```
+
+The server has no authentication. Keep it bound to loopback; non-loopback
+binding requires an explicit unsafe override. The harness likewise accepts
+only a loopback simulator URL.
 
 ## Simulator Control API
 
@@ -85,6 +91,9 @@ curl http://127.0.0.1:8080/__sim/metrics
 # Get current state
 curl http://127.0.0.1:8080/__sim/state
 
+# List merge requests merged during this run
+curl http://127.0.0.1:8080/__sim/merged_mrs
+
 # Reset to initial scenario
 curl -X POST http://127.0.0.1:8080/__sim/reset
 ```
@@ -98,7 +107,7 @@ curl -X POST http://127.0.0.1:8080/__sim/reset
 | **Active-Cap** | In-flight CI budget | Steady-state concurrency | No preemption for new high-prio |
 | **Phase 1** | Same-root batch merge | MRs per target advance | Requires non-overlapping domains |
 
-## Core Invariant (ADR-019)
+## Core Invariant ([qontract-reconcile ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
 
 ```
 limit controls steady-state CI concurrency, not per-run rebase bursts.
@@ -120,7 +129,7 @@ Equivalent framing:
 | `external-target-advance.yaml` | Target moves externally | Active-Cap limits blast |
 | `clean-nonoverlap-phase1.yaml` | Non-overlapping success pool | Phase 1 |
 | `overlap-conflict-phase1.yaml` | Shared tenant domains | Phase 1 limited |
-| `app-interface-prod-calibrated.yaml` | App-interface-only production baseline calibration | Old Burst parity target |
+| `synthetic-calibration-demo.yaml` | Fabricated calibration-shaped workload | Calibration workflow smoke test |
 
 ## Priority Model
 
@@ -292,11 +301,10 @@ A single-page UI is meant for **walkthroughs in meetings**:
 Durations in the main copy are **time steps** (simulator ticks), not raw log field names.
 
 ```bash
-cd tools/gitlab_housekeeping_perf_sim
 make ui
 ```
 
-In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js and D3 load from a CDN (first open needs network).
+In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js, D3, and js-yaml load from jsDelivr, so the first open needs network access. The UI sends selected files nowhere; all parsing and rendering happens in the browser.
 
 - **File**: [ui/index.html](ui/index.html) (no build step)
 
@@ -315,37 +323,39 @@ Examples:
 - `active-cap`, `active-cap-wait`, `active-cap-wait-insist`
 - `old-burst`, `old-burst-wait`, `old-burst-wait-insist`
 - `cap+phase1`, `cap+phase1-wait`, `cap+phase1-wait-insist`
+- `omm` (configure grouping with `--omm-group-size` and
+  `--omm-max-interval`)
 
 Policy presets for comparison/Monte Carlo:
 
 - `phase0`: regular mode only (`top-k`, `active-cap`, `old-burst`)
-- `phase1`: `phase0` + `cap+phase1` regular
-- `all`: regular + `-wait` + `-wait-insist` traces across all policies
+- `phase1`: `phase0` + `cap+phase1` + `omm` regular
+- `all`: every registered trace; OMM currently has regular mode only
 
 `Makefile` comparison targets pass `POLICY_SET` through to `run_standalone.py`
 for consistent behavior across quick/advanced/Monte Carlo runs.
 
-## Calibrating From Production Logs (app-interface only)
+## Calibrating From Your Own Logs
 
-Use the calibration script to derive app-interface baseline targets from real
-gitlab-housekeeping logs and generate a production-like scenario. Calibration
+The repository ships no operational logs or scenarios derived from them.
+`scenarios/synthetic-calibration-demo.yaml` is fully fabricated. Use the
+calibration script locally to derive targets from logs you are authorized to
+process and generate your own scenario. Calibration
 now emits a multidimensional target vector (24h throughput, active-hour
 throughput, peak-window throughput, rebase pressure, and merge interval
 percentiles) in `metadata.calibration_targets.performance_dimensions`:
 
 ```bash
-cd tools/gitlab_housekeeping_perf_sim
-
 .venv/bin/python scripts/calibrate_from_housekeeping_logs.py \
-  --project app-interface \
+  --project example-project \
   --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
-  --emit-scenario scenarios/app-interface-prod-calibrated.yaml
+  --emit-scenario scenarios/generated/local-calibrated.yaml
 
 # run old-burst baseline against the calibrated scenario
 .venv/bin/python run_standalone.py \
   --compare \
   --policies old-burst \
-  --scenario scenarios/app-interface-prod-calibrated.yaml \
+  --scenario scenarios/generated/local-calibrated.yaml \
   --limit 2 \
   --cycles 480 \
   --ticks-per-cycle 1
@@ -360,9 +370,9 @@ UI workflows:
 ```bash
 .venv/bin/python scripts/tune_prod_calibration.py \
   --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
-  --project app-interface \
+  --project example-project \
   --policy active-cap \
-  --scenario-out scenarios/app-interface-prod-calibrated-active-cap.yaml \
+  --scenario-out scenarios/generated/local-calibrated-active-cap.yaml \
   --grid-out reports/calibration/active-cap-grid.csv \
   --validation-out reports/calibration/active-cap-validation.csv
 ```
@@ -379,7 +389,7 @@ Cycle planning and scoring controls:
   (`--tolerance-pct`) and ranking-score tolerance (`--score-tolerance-pct`),
   plus per-dimension error breakdowns.
 - Acceptance now includes a max single-dimension guardrail
-  (`--max-dimension-error-pct`, default `60`).
+  (`--max-dimension-error-pct`, default `90`).
 - If any acceptance gate fails, calibration is marked **rejected**:
   - `selected-scenario.yaml` is not emitted,
   - `rejected-scenario.yaml` is written for diagnostics,
@@ -392,10 +402,8 @@ Run a repeatable stress-variant sweep on top of the tuned calibrated scenario to
 force policy separation where possible for any selected policy pair:
 
 ```bash
-cd tools/gitlab_housekeeping_perf_sim
-
 .venv/bin/python scripts/run_discrimination_pass.py \
-  --base-scenario scenarios/app-interface-prod-calibrated.yaml \
+  --base-scenario scenarios/synthetic-calibration-demo.yaml \
   --policies top-k,active-cap,old-burst \
   --lhs-policy top-k \
   --rhs-policy active-cap \
@@ -413,11 +421,13 @@ Outputs are written under `reports/discrimination/<timestamp>/` with:
 
 - `discrimination-summary.csv` (policy-agnostic machine-readable matrix)
 - `discrimination-summary.md` (human-readable summary)
-- `metadata.json` (timestamp + local context + optional custom metadata)
+- `metadata.json` (timestamp + simulator configuration + optional custom metadata)
 - `scenarios/*.yaml` (the generated stress variants)
 - `raw/*-compare.txt` (full compare output per variant)
 
-All major run writers now emit a sibling `metadata.json` in run output folders:
+All major run writers emit a sibling `metadata.json` in run output folders.
+Generated reports and locally calibrated scenarios are ignored by Git because
+they may contain sensitive input-derived values:
 
 - `reports/comparisons/<timestamp>/metadata.json`
 - `reports/monte-carlo/<timestamp>/metadata.json`
@@ -428,10 +438,18 @@ You can attach custom key/value metadata with repeatable `--metadata KEY=VALUE`
 on `run_standalone.py`, `scripts/run_discrimination_pass.py`, and
 `scripts/tune_prod_calibration.py`.
 
+### Optional live GitLab enrichment
+
+`scripts/analyze_logs.py plan` can enrich a caller-supplied log export from a
+GitLab API. It makes outbound reads only when `GITLAB_TOKEN`, an explicit
+`--gitlab-url`, and an explicit `--project-id` are all supplied. Its output
+directory then contains an `.mr-cache.json` and reports with merge-request
+titles, authors, labels, changed paths, and inferred services. Treat those
+files as sensitive; the default `reports/` location is ignored by Git. TLS
+verification is enabled by default.
+
 ## Running Tests
 
 ```bash
-cd tools/gitlab_housekeeping_perf_sim
 PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```
-

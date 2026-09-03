@@ -1,8 +1,11 @@
+metadata:
+  provenance: Fully fabricated for this repository; not derived from operational logs.
+  scenario_kind: synthetic
 project:
   id: 1001
-  name: sim-repo
-  path: sim-repo
-  path_with_namespace: app-sre/sim-repo
+  name: queue-lab
+  path: queue-lab
+  path_with_namespace: example/queue-lab
   default_branch: master
   target_head: target-001
 merge_requests:

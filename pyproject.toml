@@ -3,6 +3,7 @@ name = "gitlab-hk-sim"
 version = "0.1.0"
 description = "GitLab Housekeeping Policy Simulator – compare merge-queue policies under controlled GitLab-like conditions"
 requires-python = "==3.12.*"
+license = { file = "LICENSE" }
 dependencies = [
     "fastapi>=0.100",
     "uvicorn[standard]>=0.20",

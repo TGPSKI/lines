@@ -19,9 +19,9 @@ from gitlab_hk_sim.state import (
 def _make_project() -> Project:
     return Project(
         id=1001,
-        name="sim-repo",
-        path="sim-repo",
-        path_with_namespace="app-sre/sim-repo",
+        name="queue-lab",
+        path="queue-lab",
+        path_with_namespace="example/queue-lab",
         target_head="target-001",
     )
 
@@ -31,8 +31,8 @@ class TestProjectShape:
         p = _make_project()
         result = project_shape(p, "http://localhost:8080")
         assert result["id"] == 1001
-        assert result["name"] == "sim-repo"
-        assert result["path_with_namespace"] == "app-sre/sim-repo"
+        assert result["name"] == "queue-lab"
+        assert result["path_with_namespace"] == "example/queue-lab"
         assert "namespace" in result
 
 

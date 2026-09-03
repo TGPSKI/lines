@@ -13,12 +13,8 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
-import getpass
 import json
-import os
-import platform
 import re
-import socket
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -32,7 +28,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = ROOT / "run_standalone.py"
 
-DEFAULT_BASE_SCENARIO = ROOT / "scenarios" / "app-interface-prod-calibrated.yaml"
+DEFAULT_BASE_SCENARIO = ROOT / "scenarios" / "synthetic-calibration-demo.yaml"
 DEFAULT_POLICIES = "top-k,active-cap,old-burst"
 
 
@@ -93,16 +89,10 @@ def _write_metadata_file(
         "generated_at_iso": now.isoformat(),
         "generated_at_epoch": int(now.timestamp()),
         "run_category": "discrimination",
-        "hostname": socket.gethostname(),
-        "username": getpass.getuser(),
-        "cwd": os.getcwd(),
-        "script": str(Path(__file__).resolve()),
-        "argv": sys.argv,
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
+        "generator": Path(__file__).name,
         "custom_metadata": _parse_metadata_pairs(args.metadata),
         "context": {
-            "base_scenario": str(base_scenario),
+            "base_scenario": base_scenario.name,
             "policies": policies,
             "lhs_policy": lhs_policy,
             "rhs_policy": rhs_policy,
@@ -184,8 +174,8 @@ def _variant_baseline(base: dict[str, Any]) -> VariantSpec:
     sc.setdefault("metadata", {})["discrimination_variant"] = "baseline"
     return VariantSpec(
         slug="baseline",
-        title="Baseline Calibrated",
-        description="Unmodified tuned production-calibrated scenario.",
+        title="Synthetic Baseline",
+        description="Unmodified synthetic calibration demo scenario.",
         scenario=sc,
     )
 

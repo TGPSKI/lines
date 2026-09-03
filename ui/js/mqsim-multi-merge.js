@@ -4,7 +4,7 @@
  * renders interactive explorer and statistics sub-tabs.
  */
 
-/* global enableTabs, mqThemedScale, mqThemedLegend,
+/* global enableTabs, mqEscapeHtml, mqThemedScale, mqThemedLegend,
    mqDestroyChartIfPresent, MQSIM_POLICY_COLOR_PALETTE */
 
 // ---------------------------------------------------------------------------
@@ -289,7 +289,7 @@ function computeMultiMergeMetrics(data) {
   const maxRunLength = Math.max(...runLengths, 0);
 
   // Bot vs human classification
-  const BOT_AUTHORS = ["devtools-bot", "app-sre-bot", "openshift-bot", "cluster-update-bot"];
+  const BOT_AUTHORS = ["automation-bot", "queue-bot", "release-bot", "dependency-bot"];
   let botCount = 0;
   let humanCount = 0;
   data.forEach(mr => {
@@ -440,7 +440,7 @@ function renderStatsTable(data, metrics) {
   ];
 
   el.innerHTML = `<table class="mm-stats-tbl"><tbody>${rows.map(([k, v]) =>
-    `<tr><td class="mm-stats-key">${k}</td><td class="mm-stats-val">${v}</td></tr>`
+    `<tr><td class="mm-stats-key">${mqEscapeHtml(k)}</td><td class="mm-stats-val">${mqEscapeHtml(v)}</td></tr>`
   ).join("")}</tbody></table>`;
 }
 
@@ -749,12 +749,12 @@ function mmShowPairInDrawer(pairIdx, data, metrics) {
   if (pair.svcOverlap) {
     overlapParts.push(`<div style="grid-column:1/-1;padding:0.5rem;border:1px solid rgba(210,153,34,0.3);border-radius:6px;background:rgba(210,153,34,0.05)">
       <span style="color:#d29922;font-weight:600;font-size:0.74rem">Service overlap:</span>
-      <span style="font-size:0.72rem"> ${pair.overlappingServices.join(", ")}</span></div>`);
+      <span style="font-size:0.72rem"> ${pair.overlappingServices.map(mqEscapeHtml).join(", ")}</span></div>`);
   }
   if (pair.fileOverlap) {
     overlapParts.push(`<div style="grid-column:1/-1;padding:0.5rem;border:1px solid rgba(248,81,73,0.3);border-radius:6px;background:rgba(248,81,73,0.05)">
       <span style="color:#f85149;font-weight:600;font-size:0.74rem">File overlap:</span>
-      <span style="font-size:0.72rem"> ${pair.overlappingFiles.join(", ")}</span></div>`);
+      <span style="font-size:0.72rem"> ${pair.overlappingFiles.map(mqEscapeHtml).join(", ")}</span></div>`);
   }
   if (!overlapParts.length) {
     overlapParts.push(`<div style="grid-column:1/-1;padding:0.4rem;border:1px solid rgba(63,185,80,0.3);border-radius:6px;background:rgba(63,185,80,0.05)">
@@ -782,20 +782,16 @@ function mmRenderMRCard(mr, idx, total) {
   const timeStr = ts.toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
   const files = (mr.changed_files || []);
   return `<div style="padding:0.6rem;border:1px solid var(--border);border-radius:8px;background:var(--panel)">
-    <div style="font-weight:600;margin-bottom:0.3rem">!${mr.iid} <span style="color:var(--muted);font-weight:400;font-size:0.72rem">#${idx + 1}/${total}</span></div>
-    <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.4rem">${escHtml(mr.title || "")}</div>
+    <div style="font-weight:600;margin-bottom:0.3rem">!${mqEscapeHtml(mr.iid)} <span style="color:var(--muted);font-weight:400;font-size:0.72rem">#${idx + 1}/${total}</span></div>
+    <div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.4rem">${mqEscapeHtml(mr.title || "")}</div>
     <div style="display:grid;grid-template-columns:auto 1fr;gap:0.2rem 0.6rem;font-size:0.72rem">
-      <span style="color:var(--muted)">Merged</span><span>${timeStr}</span>
-      <span style="color:var(--muted)">Author</span><span>${escHtml(mr.author || "—")}</span>
-      <span style="color:var(--muted)">Services</span><span>${(mr.services || []).join(", ") || "—"}</span>
-      <span style="color:var(--muted)">Labels</span><span style="word-break:break-word">${(mr.labels || []).join(", ") || "—"}</span>
-      <span style="color:var(--muted)">Files (${files.length})</span><span style="word-break:break-all">${files.join("<br>") || "—"}</span>
+      <span style="color:var(--muted)">Merged</span><span>${mqEscapeHtml(timeStr)}</span>
+      <span style="color:var(--muted)">Author</span><span>${mqEscapeHtml(mr.author || "—")}</span>
+      <span style="color:var(--muted)">Services</span><span>${(mr.services || []).map(mqEscapeHtml).join(", ") || "—"}</span>
+      <span style="color:var(--muted)">Labels</span><span style="word-break:break-word">${(mr.labels || []).map(mqEscapeHtml).join(", ") || "—"}</span>
+      <span style="color:var(--muted)">Files (${files.length})</span><span style="word-break:break-all">${files.map(mqEscapeHtml).join("<br>") || "—"}</span>
     </div>
   </div>`;
-}
-
-function escHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 // ---------------------------------------------------------------------------
@@ -836,23 +832,23 @@ function renderOverlapTable(data, metrics) {
     if (p.fileOverlap || p.svcOverlap) {
       const parts = [];
       if (mmOverlapMode === "service") {
-        if (p.svcOverlap) parts.push(p.overlappingServices.join(", "));
+        if (p.svcOverlap) parts.push(p.overlappingServices.map(mqEscapeHtml).join(", "));
         if (p.fileOverlap) {
-          const fileStr = p.overlappingFiles.map(f => f.split("/").pop()).join(", ");
+          const fileStr = p.overlappingFiles.map(f => mqEscapeHtml(f.split("/").pop())).join(", ");
           parts.push(`<span style="color:var(--muted)">· ${fileStr}</span>`);
         }
       } else {
-        if (p.fileOverlap) parts.push(p.overlappingFiles.map(f => f.split("/").pop()).join(", "));
+        if (p.fileOverlap) parts.push(p.overlappingFiles.map(f => mqEscapeHtml(f.split("/").pop())).join(", "));
         if (p.svcOverlap) {
-          parts.push(`<span style="color:var(--muted)">· ${p.overlappingServices.join(", ")}</span>`);
+          parts.push(`<span style="color:var(--muted)">· ${p.overlappingServices.map(mqEscapeHtml).join(", ")}</span>`);
         }
       }
       items = parts.join(" ");
     }
     return `<tr class="${cls}${hl}" data-idx="${p.idx}">
       <td>${p.idx + 1}</td>
-      <td><a class="mm-iid-link" data-mr="${p.idx}">!${p.iidA}</a></td>
-      <td><a class="mm-iid-link" data-mr="${p.idx + 1}">!${p.iidB}</a></td>
+      <td><a class="mm-iid-link" data-mr="${p.idx}">!${mqEscapeHtml(p.iidA)}</a></td>
+      <td><a class="mm-iid-link" data-mr="${p.idx + 1}">!${mqEscapeHtml(p.iidB)}</a></td>
       <td>${overlapCell}</td>
       <td>${items}</td>
       <td>${gap}</td>

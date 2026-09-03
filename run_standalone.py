@@ -18,19 +18,16 @@ from __future__ import annotations
 
 import argparse
 import csv
-import getpass
 import json
 import logging
 import math
 import os
-import platform
-import socket
 import subprocess
 import sys
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from statistics import mean, median, quantiles
 from typing import Any
@@ -64,6 +61,7 @@ POLICY_SETS: dict[str, list[str]] = {
         "cap+phase1",
         "cap+phase1-wait",
         "cap+phase1-wait-insist",
+        "omm",
     ],
 }
 
@@ -301,6 +299,7 @@ def parse_args() -> argparse.Namespace:
             "cap+phase1",
             "cap+phase1-wait",
             "cap+phase1-wait-insist",
+            "omm",
         ],
         default="old-burst",
         help="Which rebase policy to simulate",
@@ -380,18 +379,12 @@ def _write_run_metadata(
     args: argparse.Namespace,
     extra: dict[str, Any],
 ) -> None:
-    now = datetime.now().astimezone()
+    now = datetime.now(UTC)
     metadata = {
         "generated_at_iso": now.isoformat(),
         "generated_at_epoch": int(now.timestamp()),
         "run_category": run_category,
-        "hostname": socket.gethostname(),
-        "username": getpass.getuser(),
-        "cwd": os.getcwd(),
-        "script": os.path.abspath(__file__),
-        "argv": sys.argv,
-        "python_version": platform.python_version(),
-        "platform": platform.platform(),
+        "python_version": sys.version.split()[0],
         "custom_metadata": _parse_metadata_pairs(args.metadata),
         "context": extra,
     }
@@ -2293,7 +2286,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         run_category="comparisons",
         args=args,
         extra={
-            "scenario": os.path.abspath(args.scenario),
+            "scenario": args.scenario,
             "policies": policies,
             "policy_set": args.policy_set if not args.policies else None,
             "limit": args.limit,
@@ -2445,7 +2438,12 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 log.error(f"  Server for {policy} on port {port} failed to start")
                 _kill_server(proc)
 
-        def _run_one(policy: str, port: int, _trial: int = trial) -> tuple[str, dict]:
+        def _run_one(
+            policy: str,
+            port: int,
+            _trial: int = trial,
+            _metrics_out_by_policy: dict[str, str] = metrics_out_by_policy,
+        ) -> tuple[str, dict]:
             url = f"http://127.0.0.1:{port}"
             policy_log = logging.getLogger(f"mc.t{_trial}.{policy}")
             result = run_policy(
@@ -2455,7 +2453,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 args.cycles,
                 args.ticks_per_cycle,
                 policy_log,
-                metrics_path=metrics_out_by_policy.get(policy),
+                metrics_path=_metrics_out_by_policy.get(policy),
                 omm_group_size=getattr(args, "omm_group_size", None),
                 omm_max_interval=getattr(args, "omm_max_interval", 5),
             )
@@ -2490,7 +2488,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
         run_category="monte-carlo",
         args=args,
         extra={
-            "scenario": os.path.abspath(args.scenario),
+            "scenario": args.scenario,
             "policies": policies,
             "policy_set": args.policy_set if not args.policies else None,
             "limit": args.limit,

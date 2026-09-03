@@ -3,6 +3,10 @@
  * Client-side only: plain browser JavaScript, no build step.
  */
 
+/* global mqEscapeHtml, mqParseCsvRecords, mqPaletteColor,
+   mqDestroyChartIfPresent, mqChartOptions, mqThemedScale, mqThemedLegend,
+   MQSIM_POLICY_COLOR_PALETTE, Chart */
+
 // =========================================================================
 // Monte Carlo Tab
 // =========================================================================
@@ -73,13 +77,13 @@ function mcStatsByPolicy(metric, policies) {
 function initMcControls() {
   const sel = document.getElementById("mcMetricSelect");
   sel.innerHTML = mcData.metrics.map(m =>
-    `<option value="${m}">${MC_METRIC_LABELS[m] || m}</option>`
+    `<option value="${mqEscapeHtml(m)}">${mqEscapeHtml(MC_METRIC_LABELS[m] || m)}</option>`
   ).join("");
   sel.addEventListener("change", renderMonteCarlo);
 
   const toggles = document.getElementById("mcPolicyToggles");
   toggles.innerHTML = mcData.policies.map((p, i) =>
-    `<button class="mc-toggle active" data-policy="${p}" style="border-left:3px solid ${mqPaletteColor(i, MC_COLORS)}">${p}</button>`
+    `<button class="mc-toggle active" data-policy="${mqEscapeHtml(p)}" style="border-left:3px solid ${mqPaletteColor(i, MC_COLORS)}">${mqEscapeHtml(p)}</button>`
   ).join("");
   toggles.addEventListener("click", e => {
     const btn = e.target.closest(".mc-toggle");
@@ -91,7 +95,7 @@ function initMcControls() {
 
   const compA = document.getElementById("mcCompareA");
   const compB = document.getElementById("mcCompareB");
-  const opts = mcData.policies.map(p => `<option value="${p}">${p}</option>`).join("");
+  const opts = mcData.policies.map(p => `<option value="${mqEscapeHtml(p)}">${mqEscapeHtml(p)}</option>`).join("");
   compA.innerHTML = opts;
   compB.innerHTML = opts;
   if (mcData.policies.length > 1) compB.selectedIndex = 1;
@@ -261,13 +265,13 @@ function renderMcStatsTable() {
   const policies = mcVisiblePolicyList();
   const table = document.getElementById("mcStatsTable");
   let html = "<thead><tr><th>Metric</th>";
-  policies.forEach(p => { html += `<th>${p}</th>`; });
+  policies.forEach(p => { html += `<th>${mqEscapeHtml(p)}</th>`; });
   html += "</tr></thead><tbody>";
 
   mcData.metrics.forEach(metric => {
     if (MC_SKIP_METRICS.has(metric)) return;
     const label = MC_METRIC_LABELS[metric] || metric;
-    html += `<tr><td class="metric-name">${label}</td>`;
+    html += `<tr><td class="metric-name">${mqEscapeHtml(label)}</td>`;
     const lowerBetter = MC_LOWER_BETTER.has(metric);
     const statsMap = mcStatsByPolicy(metric, policies);
     const statsArr = policies.map(p => statsMap[p]);
@@ -319,9 +323,9 @@ function renderMcPairwise() {
     }
 
     html += `<tr style="border-bottom:1px solid var(--border)">`;
-    html += `<td style="padding:0.25rem">${label}</td>`;
+    html += `<td style="padding:0.25rem">${mqEscapeHtml(label)}</td>`;
     html += `<td style="text-align:center;padding:0.25rem">${delta >= 0 ? "+" : ""}${delta.toFixed(2)}</td>`;
-    html += `<td style="text-align:center;padding:0.25rem" class="${sigClass}">${sigLabel}</td>`;
+    html += `<td style="text-align:center;padding:0.25rem" class="${sigClass}">${mqEscapeHtml(sigLabel)}</td>`;
     html += `</tr>`;
   });
   html += "</table>";
@@ -419,11 +423,11 @@ function renderMcHeatmap() {
 
   let html = "<table style='width:100%;font-size:0.72rem;border-collapse:collapse;text-align:center'>";
   html += "<tr><th style='padding:0.3rem;border:1px solid var(--border)'></th>";
-  policies.forEach(p => { html += `<th style="padding:0.3rem;border:1px solid var(--border);color:var(--text)">${p}</th>`; });
+  policies.forEach(p => { html += `<th style="padding:0.3rem;border:1px solid var(--border);color:var(--text)">${mqEscapeHtml(p)}</th>`; });
   html += "</tr>";
 
   policies.forEach(pA => {
-    html += `<tr><td style="padding:0.3rem;border:1px solid var(--border);color:var(--text);font-weight:600;text-align:left">${pA}</td>`;
+    html += `<tr><td style="padding:0.3rem;border:1px solid var(--border);color:var(--text);font-weight:600;text-align:left">${mqEscapeHtml(pA)}</td>`;
     policies.forEach(pB => {
       if (pA === pB) {
         html += `<td style="padding:0.3rem;border:1px solid var(--border);background:#161b22">—</td>`;
@@ -436,7 +440,8 @@ function renderMcHeatmap() {
       if (ratio > 0.6) { bg = `rgba(46,160,67,${0.15 + ratio * 0.3})`; color = "#3fb950"; }
       else if (ratio < 0.4) { bg = `rgba(248,81,73,${0.15 + (1 - ratio) * 0.2})`; color = "#f85149"; }
       else { bg = "rgba(210,153,34,0.1)"; color = "#d29922"; }
-      html += `<td style="padding:0.3rem;border:1px solid var(--border);background:${bg};color:${color};font-weight:600" title="${pA} vs ${pB}: ${r.wins}W/${r.ties}T/${r.losses}L">${r.wins}/${r.ties}/${r.losses}</td>`;
+      const title = `${pA} vs ${pB}: ${r.wins}W/${r.ties}T/${r.losses}L`;
+      html += `<td style="padding:0.3rem;border:1px solid var(--border);background:${bg};color:${color};font-weight:600" title="${mqEscapeHtml(title)}">${r.wins}/${r.ties}/${r.losses}</td>`;
     });
     html += "</tr>";
   });
@@ -444,4 +449,3 @@ function renderMcHeatmap() {
   html += `<div style="font-size:0.65rem;color:var(--muted);margin-top:0.3rem">Cells: Wins/Ties/Losses (row vs column). Green = row dominates.</div>`;
   container.innerHTML = html;
 }
-

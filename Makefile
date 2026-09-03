@@ -1,7 +1,7 @@
 # GitLab Housekeeping Policy Simulator - Makefile
 #
-# Uses the root qontract-reconcile venv via `uv run`.
-# Run `uv sync` at the repo root first.
+# Uses this repository's `.venv`.
+# Create it with Python 3.12 and install the project with `pip install -e ".[dev]"`.
 #
 # Usage:
 #   make test                   # run unit tests
@@ -10,14 +10,14 @@
 #   make run                    # run standalone driver
 #   make compare                # compare selected POLICY_SET (default scenario)
 #   make compare-advanced       # compare selected POLICY_SET (advanced scenario)
-#   make compare-prod-calibrated # compare against app-interface calibrated scenario
+#   make compare-calibrated      # compare against the synthetic calibration demo
 #   make discrimination-pass      # run policy-pair stress variants
 #   make compare-quick          # quick comparison (~2 min)
-#   make calibrate-prod-scenario LOGS="a.log b.log c.log"
-#   make tune-prod-calibration LOGS="a.log b.log c.log" CALIBRATION_POLICY=active-cap
-#   make monte-carlo-small      # Monte Carlo: 10 trials (~10 min)
-#   make monte-carlo-medium     # Monte Carlo: 20 trials (~20 min)
-#   make monte-carlo-large      # Monte Carlo: 30 trials (~30 min)
+#   make calibrate-scenario LOGS="a.log b.log c.log"
+#   make tune-calibration LOGS="a.log b.log c.log" CALIBRATION_POLICY=active-cap
+#   make monte-carlo-small      # Monte Carlo: 10 trials (~30 min)
+#   make monte-carlo-medium     # Monte Carlo: 20 trials (~60 min)
+#   make monte-carlo-large      # Monte Carlo: 30 trials (~90 min)
 #   make tick                   # advance sim by one tick
 #   make metrics                # fetch current metrics
 #   make state                  # fetch current state
@@ -31,15 +31,17 @@ SIM_HOST ?= 127.0.0.1
 SIM_URL := http://$(SIM_HOST):$(SIM_PORT)
 SCENARIO ?= scenarios/mvp-active-cap.yaml
 ADV_SCENARIO := scenarios/large-mixed-queue-advanced.yaml
-PROD_SCENARIO := scenarios/app-interface-prod-calibrated.yaml
+CALIBRATION_SCENARIO ?= scenarios/synthetic-calibration-demo.yaml
+GENERATED_CALIBRATION_SCENARIO ?= scenarios/generated/synthetic-calibration.yaml
+CALIBRATION_PROJECT ?= queue-lab
 # policy sets are defined in run_standalone.py:
 #   phase0: regular mode only (wait_for_pipeline=False, insist=False)
-#   phase1: phase0 + cap+phase1 regular
-#   all: regular + wait + wait-insist traces for all policies
+#   phase1: phase0 + cap+phase1 + omm regular
+#   all: every registered policy trace (OMM currently has regular mode only)
 POLICY_SET ?= phase0
-METRICS_DIR := reports/comparisons/latest
-METRICS_FILE := $(METRICS_DIR)/metrics.ndjson
-REPORT_FILE := $(METRICS_DIR)/summary.md
+METRICS_DIR ?= reports/single
+METRICS_FILE = $(METRICS_DIR)/$(POLICY)-metrics.ndjson
+REPORT_FILE = $(METRICS_DIR)/$(POLICY)-summary.md
 LIMIT ?= 8
 TICKS ?= 10
 CYCLES ?= 20
@@ -54,18 +56,20 @@ DISCRIMINATION_POLICIES ?= top-k,active-cap,old-burst
 DISCRIMINATION_LHS ?= top-k
 DISCRIMINATION_RHS ?= active-cap
 DISCRIMINATION_BASELINE ?= old-burst
+ALLOW_NON_LOOPBACK ?= false
+NETWORK_OVERRIDE := $(if $(filter true 1 yes,$(ALLOW_NON_LOOPBACK)),--allow-non-loopback,)
 
 # Use the venv python directly (avoids uv version mismatch)
 VENV_PYTHON := .venv/bin/python
 PYTHON := $(VENV_PYTHON)
 PYTEST := $(VENV_PYTHON) -m pytest
 
-# Path to qontract-reconcile root (two levels up from this tool)
-QR_ROOT := $(shell cd ../.. && pwd)
+# Required by the harness targets; set this to a qontract-reconcile checkout.
+QONTRACT_RECONCILE_ROOT ?=
 
-.PHONY: test validate serve serve-bg kill-server run run-harness run-harness-dry \
-        compare compare-advanced compare-prod-calibrated compare-quick \
-        calibrate-prod-scenario tune-prod-calibration discrimination-pass \
+.PHONY: test validate serve serve-bg kill-server run check-qontract-root \
+        run-harness run-harness-dry compare compare-advanced compare-calibrated \
+        compare-quick calibrate-scenario tune-calibration discrimination-pass \
         monte-carlo-small monte-carlo-medium monte-carlo-large \
         tick ticks metrics state reset report full-cycle clean ui help \
         analyze-compare analyze-measure analyze-plan
@@ -78,7 +82,7 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-24s\033[0m %s\n", $$1, $$2}'
 
 test: ## Run unit tests
-	$(PYTEST) tools/gitlab_housekeeping_perf_sim/tests/ -v
+	$(PYTEST) tests/ -v
 
 validate: ## Validate all scenario YAML files
 	@for f in scenarios/*.yaml; do \
@@ -92,20 +96,20 @@ validate: ## Validate all scenario YAML files
 # ---------------------------------------------------------------------------
 
 serve: ## Start the sim server (use SCENARIO= to pick scenario)
-	@mkdir -p reports/comparisons
+	@mkdir -p $(METRICS_DIR)
 	PYTHONPATH=. $(PYTHON) -m gitlab_hk_sim.cli serve \
 		--scenario $(SCENARIO) \
 		--host $(SIM_HOST) \
-		--port $(SIM_PORT) \
+		--port $(SIM_PORT) $(NETWORK_OVERRIDE) \
 		--metrics-out $(METRICS_FILE)
 
 serve-bg: ## Start sim server in background
-	@mkdir -p reports/comparisons
+	@mkdir -p reports/comparisons $(METRICS_DIR)
 	@echo "Starting sim server on $(SIM_URL) with scenario $(SCENARIO)..."
 	PYTHONPATH=. nohup $(PYTHON) -m gitlab_hk_sim.cli serve \
 		--scenario $(SCENARIO) \
 		--host $(SIM_HOST) \
-		--port $(SIM_PORT) \
+		--port $(SIM_PORT) $(NETWORK_OVERRIDE) \
 		--metrics-out $(METRICS_FILE) \
 		> reports/comparisons/server.log 2>&1 &
 	@echo $$! > reports/comparisons/server.pid
@@ -163,11 +167,11 @@ compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 		--ticks-per-cycle 1 \
 		--log-level WARNING
 
-compare-prod-calibrated: ## Compare all policies against app-interface calibrated scenario
+compare-calibrated: ## Compare all policies against the synthetic calibration demo
 	PYTHONPATH=. $(PYTHON) run_standalone.py \
 		--compare \
 		--policy-set $(POLICY_SET) \
-		--scenario $(PROD_SCENARIO) \
+		--scenario $(CALIBRATION_SCENARIO) \
 		--port $(SIM_PORT) \
 		--limit 2 \
 		--cycles 480 \
@@ -188,33 +192,33 @@ compare-quick: ## Quick comparison (~2 min) - fewer cycles
 # Monte Carlo (parallel trials with statistical analysis)
 # ---------------------------------------------------------------------------
 
-calibrate-prod-scenario: ## Build app-interface calibrated scenario from housekeeping logs
+calibrate-scenario: ## Build a scenario from caller-supplied housekeeping logs
 	@if [ -z "$(LOGS)" ]; then \
 		echo "Set LOGS to one or more log paths, e.g."; \
-		echo '  make calibrate-prod-scenario LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
+		echo '  make calibrate-scenario LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
 		exit 1; \
 	fi
 	PYTHONPATH=. $(PYTHON) scripts/calibrate_from_housekeeping_logs.py \
-		--project app-interface \
+		--project $(CALIBRATION_PROJECT) \
 		--logs $(LOGS) \
-		--emit-scenario $(PROD_SCENARIO)
+		--emit-scenario $(GENERATED_CALIBRATION_SCENARIO)
 
-tune-prod-calibration: ## Tune calibration knobs for selected CALIBRATION_POLICY
+tune-calibration: ## Tune calibration knobs for selected CALIBRATION_POLICY
 	@if [ -z "$(LOGS)" ]; then \
 		echo "Set LOGS to one or more log paths, e.g."; \
-		echo '  make tune-prod-calibration LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
+		echo '  make tune-calibration LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
 		exit 1; \
 	fi
 	PYTHONPATH=. $(PYTHON) scripts/tune_prod_calibration.py \
 		--logs $(LOGS) \
-		--project app-interface \
+		--project $(CALIBRATION_PROJECT) \
 		--policy $(CALIBRATION_POLICY) \
-		--scenario-out scenarios/app-interface-prod-calibrated-$(CALIBRATION_POLICY).yaml \
+		--scenario-out scenarios/generated/synthetic-calibration-$(CALIBRATION_POLICY).yaml \
 		--out-dir $(CALIBRATION_OUT_DIR)
 
 discrimination-pass: ## Run repeatable policy-pair discrimination variants
 	PYTHONPATH=. $(PYTHON) scripts/run_discrimination_pass.py \
-		--base-scenario $(PROD_SCENARIO) \
+		--base-scenario $(CALIBRATION_SCENARIO) \
 		--policies $(DISCRIMINATION_POLICIES) \
 		--lhs-policy $(DISCRIMINATION_LHS) \
 		--rhs-policy $(DISCRIMINATION_RHS) \
@@ -257,15 +261,27 @@ monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
 # Harness (real gitlab-housekeeping code)
 # ---------------------------------------------------------------------------
 
-run-harness: ## Run REAL gitlab-housekeeping (requires qontract-reconcile deps)
-	PYTHONPATH=.:$(QR_ROOT) $(PYTHON) run_harness.py \
-		--sim-url $(SIM_URL) \
+check-qontract-root:
+	@if [ -z "$(QONTRACT_RECONCILE_ROOT)" ]; then \
+		echo "Set QONTRACT_RECONCILE_ROOT=/path/to/qontract-reconcile"; \
+		exit 1; \
+	fi
+	@test -d "$(QONTRACT_RECONCILE_ROOT)/reconcile" || { \
+		echo "QONTRACT_RECONCILE_ROOT must contain the reconcile package"; \
+		exit 1; \
+	}
+
+run-harness: check-qontract-root ## Run REAL gitlab-housekeeping (requires qontract-reconcile deps)
+	PYTHONPATH=. $(PYTHON) run_harness.py \
+		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
+		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--no-dry-run \
 		--limit $(LIMIT)
 
-run-harness-dry: ## Run REAL gitlab-housekeeping in dry-run mode
-	PYTHONPATH=.:$(QR_ROOT) $(PYTHON) run_harness.py \
-		--sim-url $(SIM_URL) \
+run-harness-dry: check-qontract-root ## Run REAL gitlab-housekeeping in dry-run mode
+	PYTHONPATH=. $(PYTHON) run_harness.py \
+		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
+		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--dry-run \
 		--limit $(LIMIT)
 
@@ -296,7 +312,7 @@ reset: ## Reset sim to initial scenario state
 # Reporting
 # ---------------------------------------------------------------------------
 
-report: ## Generate report from latest comparison metrics
+report: ## Generate a report for POLICY from its single-run metrics
 	@if [ -f $(METRICS_FILE) ]; then \
 		PYTHONPATH=. $(PYTHON) -m gitlab_hk_sim.cli report \
 			--metrics $(METRICS_FILE) \
@@ -304,11 +320,11 @@ report: ## Generate report from latest comparison metrics
 			--out $(REPORT_FILE); \
 		echo "Report: $(REPORT_FILE)"; \
 	else \
-		echo "No metrics file at $(METRICS_FILE). Run a simulation first."; \
+		echo "No metrics file at $(METRICS_FILE). Run make serve/run or set POLICY/METRICS_FILE."; \
 		exit 1; \
 	fi
 
-full-cycle: ## Automated: serve + run (3 cycles with ticks) + report
+full-cycle: ## Automated: serve + run with ticks + report
 	@echo "=== Full Cycle: $(SCENARIO) ==="
 	@echo ""
 	$(MAKE) serve-bg
@@ -323,20 +339,20 @@ full-cycle: ## Automated: serve + run (3 cycles with ticks) + report
 	@echo "=== Cycle complete ==="
 
 # ---------------------------------------------------------------------------
-# Log Analysis (production CloudWatch logs)
+# Log analysis (caller-supplied JSON logs)
 # ---------------------------------------------------------------------------
 
 LOG_FILE ?= $(error Set LOG_FILE=path/to/logs-insights-results.json)
 LOG_OUTPUT ?= reports/log-analysis
 LOG_ALGORITHM ?= active-cap
 
-analyze-compare: ## Compare algorithms from production logs (auto-detect windows)
+analyze-compare: ## Compare algorithms from caller-supplied logs
 	$(PYTHON) scripts/analyze_logs.py compare --input "$(LOG_FILE)" --output $(LOG_OUTPUT)
 
-analyze-measure: ## Single-algorithm performance report from production logs
+analyze-measure: ## Single-algorithm report from caller-supplied logs
 	$(PYTHON) scripts/analyze_logs.py measure --input "$(LOG_FILE)" --algorithm $(LOG_ALGORITHM) --output $(LOG_OUTPUT)
 
-analyze-plan: ## Phase 1 multi-merge planning from production logs (requires GITLAB_TOKEN)
+analyze-plan: ## Phase 1 planning; API enrichment needs explicit GitLab settings
 	$(PYTHON) scripts/analyze_logs.py plan --input "$(LOG_FILE)" --algorithm $(LOG_ALGORITHM) --output $(LOG_OUTPUT)
 
 # ---------------------------------------------------------------------------
@@ -344,5 +360,5 @@ analyze-plan: ## Phase 1 multi-merge planning from production logs (requires GIT
 # ---------------------------------------------------------------------------
 
 clean: ## Remove generated reports and caches
-	rm -rf reports/comparisons reports/monte-carlo reports/log-analysis
+	rm -rf reports/comparisons reports/monte-carlo reports/log-analysis reports/single
 	rm -rf __pycache__ .pytest_cache

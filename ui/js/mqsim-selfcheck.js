@@ -3,7 +3,7 @@
  * No build tooling required.
  */
 (function () {
-  const SELF_CHECK_VERSION = "2.0";
+  const SELF_CHECK_VERSION = "2.1";
   const WAIT_STEP_MS = 50;
 
   function setStatus(msg, kind) {
@@ -25,12 +25,7 @@
 
   function resolveGlobalSymbol(name) {
     if (!name) return undefined;
-    if (name in globalThis) return globalThis[name];
-    try {
-      return Function(`return (typeof ${name} !== "undefined") ? ${name} : undefined;`)();
-    } catch {
-      return undefined;
-    }
+    return name in globalThis ? globalThis[name] : undefined;
   }
 
   function requireFn(name, results, suite) {
@@ -130,11 +125,40 @@
       "2,top-k,95,21,4.5,14",
       "1,active-cap,110,18,3.7,9",
       "2,active-cap,108,19,3.9,8",
+      "1,<b data-mqsim-injection=1>synthetic</b>,90,22,4.8,12",
     ].join("\n");
   }
 
   function runParserSmoke(results) {
     const suite = "parsers";
+    const escapeHtml = resolveGlobalSymbol("mqEscapeHtml");
+    if (typeof escapeHtml === "function") {
+      const escaped = escapeHtml(`&<>"'`);
+      addResult(
+        results,
+        suite,
+        "mqEscapeHtml.metacharacters",
+        escaped === "&amp;&lt;&gt;&quot;&#39;",
+        escaped === "&amp;&lt;&gt;&quot;&#39;" ? "ok" : `unexpected output: ${escaped}`
+      );
+    }
+
+    const renderMrCard = resolveGlobalSymbol("mmRenderMRCard");
+    if (typeof renderMrCard === "function") {
+      const marker = '<b data-mqsim-injection="1">synthetic</b>';
+      const rendered = renderMrCard({
+        iid: marker,
+        merged_at: "2026-01-01T00:00:00Z",
+        title: marker,
+        author: marker,
+        services: [marker],
+        labels: [marker],
+        changed_files: [marker],
+      }, 0, 1);
+      const ok = !rendered.includes(marker) && rendered.includes("&lt;b data-mqsim-injection=&quot;1&quot;&gt;synthetic&lt;/b&gt;");
+      addResult(results, suite, "mmRenderMRCard.escapes-imported-values", ok, ok ? "ok" : "raw HTML remained in rendered card");
+    }
+
     if (typeof window.mqParseCsvRecords === "function") {
       const parsed = window.mqParseCsvRecords("a,b\n1,2\n\"3,4\",5\n");
       const ok = parsed && parsed.rows && parsed.rows.length === 2 && parsed.rows[1].a === "3,4";
@@ -207,6 +231,10 @@
       window.switchTab("stats");
       const statsOk = !!document.querySelector("#metricPicker button");
       addResult(results, suite, "stats.controls.render", statsOk, statsOk ? "ok" : "stats metric chips missing");
+
+      const monteCarloEscaped = !document.querySelector("#mcContent [data-mqsim-injection]")
+        && document.getElementById("mcContent").textContent.includes("<b data-mqsim-injection=1>synthetic</b>");
+      addResult(results, suite, "monte-carlo.escapes-imported-values", monteCarloEscaped, monteCarloEscaped ? "ok" : "imported policy rendered as HTML");
     }
 
     window.unloadAllData();
