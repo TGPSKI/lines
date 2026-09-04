@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .metrics import compute_summary, load_metrics
+from glab_api.metrics import compute_summary, load_metrics
+
 from .phase1 import compute_phase1_metrics
 
 

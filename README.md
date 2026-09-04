@@ -1,6 +1,16 @@
-# GitLab Housekeeping Policy Simulator
+# lines
 
-A policy lab for comparing merge-queue strategies under controlled GitLab-like conditions.
+**A merge-queue policy lab — design a strategy, calibrate it against real logs,
+and watch it run.**
+
+Algorithm design · scenario creation · simulation · parameter discrimination ·
+Monte Carlo · replay
+
+`lines` holds two packages. **`mqsim`** is the policy simulator: it drives
+policies, records metrics, and renders them in a browser UI called **Merge
+Queue Sim**. **`glab_api`** is the fake GitLab API server it drives them
+against — a scenario-loaded FastAPI service that speaks the same shapes as the
+real thing. `mqsim` depends on `glab_api`; nothing goes the other way.
 
 ## Purpose
 
@@ -20,7 +30,7 @@ What does each policy optimize, and under which queue conditions does it fail?
 ```
 scenario YAML
     ↓
-stateful fake GitLab API server (FastAPI)
+glab_api: stateful fake GitLab API server (FastAPI)
     ↓
 gitlab-housekeeping run() with simulator-backed dependencies
     ↓
@@ -28,7 +38,7 @@ state mutations: rebase / merge / pipeline / target head
     ↓
 metrics NDJSON
     ↓
-single-run + policy comparison reports
+mqsim: single-run + policy comparison reports
 ```
 
 The compatibility harness invokes the upstream `run()` function unchanged and
@@ -46,10 +56,10 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 
 # Validate a scenario
-python -m gitlab_hk_sim.cli validate --scenario scenarios/mvp-active-cap.yaml
+python -m glab_api.cli validate --scenario scenarios/mvp-active-cap.yaml
 
 # Start the fake GitLab server
-python -m gitlab_hk_sim.cli serve \
+python -m glab_api.cli serve \
   --scenario scenarios/top-k-poisoned-window.yaml \
   --host 127.0.0.1 \
   --port 8080 \
@@ -61,12 +71,12 @@ python -m gitlab_hk_sim.cli serve \
 #   .venv/bin/python run_harness.py
 
 # Generate a report
-python -m gitlab_hk_sim.cli report \
+python -m mqsim.cli report \
   --metrics reports/active-cap/metrics.ndjson \
   --out reports/active-cap/summary.md
 
 # Compare multiple policy runs
-python -m gitlab_hk_sim.cli compare \
+python -m mqsim.cli compare \
   --run old=reports/old/metrics.ndjson \
   --run top-k=reports/top-k/metrics.ndjson \
   --run active-cap=reports/active-cap/metrics.ndjson \
@@ -149,8 +159,8 @@ lgtm                    (lowest)
 ```
 
 Ties broken by `approved_at` timestamp (earliest first). All constants live in
-`gitlab_hk_sim/state.py` as the single source of truth, imported by both the
-server-side Phase 1 module and the driver.
+`src/glab_api/state.py` as the single source of truth, imported by both the
+Phase 1 module and the driver.
 
 Hold labels (`do-not-merge/hold`, `needs-rebase`, `blocked/bot-access`, `bot/hold`)
 prevent merge regardless of priority.

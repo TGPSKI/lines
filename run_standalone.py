@@ -40,7 +40,7 @@ except ImportError:
     print("ERROR: python-gitlab not installed. Run: pip install python-gitlab")
     sys.exit(1)
 
-from gitlab_hk_sim.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
+from glab_api.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
 
 # ---------------------------------------------------------------------------
 # Policy set presets for Monte Carlo and comparison runs
@@ -263,7 +263,7 @@ def _extract_hourly_event_profile(
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Standalone policy driver for the GitLab HK sim"
+        description="mqsim — standalone merge-queue policy driver"
     )
     parser.add_argument("--sim-url", default="http://127.0.0.1:8080")
     parser.add_argument(
@@ -1985,7 +1985,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             [
                 venv_python,
                 "-m",
-                "gitlab_hk_sim.cli",
+                "glab_api.cli",
                 "serve",
                 "--scenario",
                 os.path.abspath(args.scenario),
@@ -1999,7 +1999,7 @@ def run_comparison(args: argparse.Namespace) -> None:
             stdout=server_log,
             stderr=server_log,
             cwd=sim_dir,
-            env={**os.environ, "PYTHONPATH": sim_dir},
+            env={**os.environ, "PYTHONPATH": os.path.join(sim_dir, "src")},
         )
         time.sleep(2)
 
@@ -2322,7 +2322,7 @@ def _start_server(
         [
             venv_python,
             "-m",
-            "gitlab_hk_sim.cli",
+            "glab_api.cli",
             "serve",
             "--scenario",
             scenario,
@@ -2338,7 +2338,7 @@ def _start_server(
         stdout=log_file,
         stderr=log_file,
         cwd=sim_dir,
-        env={**os.environ, "PYTHONPATH": sim_dir},
+        env={**os.environ, "PYTHONPATH": os.path.join(sim_dir, "src")},
     )
     return proc
 

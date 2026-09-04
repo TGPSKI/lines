@@ -9,8 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from .mutations import merge_mr
-from .state import MergeRequest, SimState, label_priority
+from glab_api.mutations import merge_mr
+from glab_api.state import MergeRequest, SimState, label_priority
 
 TENANT_LABEL_PREFIX = "tenant-"
 

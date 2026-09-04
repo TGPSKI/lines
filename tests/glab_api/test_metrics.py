@@ -4,7 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from gitlab_hk_sim.metrics import MetricsCollector, compute_summary, load_metrics
+from glab_api.metrics import MetricsCollector, compute_summary, load_metrics
 
 
 class TestMetricsCollector:

@@ -7,7 +7,7 @@ import sys
 import pytest
 from click.testing import CliRunner
 
-from gitlab_hk_sim.cli import _is_loopback_host, cli
+from glab_api.cli import _is_loopback_host, cli
 from run_harness import _is_loopback_url, parse_args
 
 

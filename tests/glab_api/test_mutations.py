@@ -1,7 +1,7 @@
 """Tests for state mutations."""
 
-from gitlab_hk_sim.mutations import cancel_pipeline, merge_mr, rebase_mr, tick
-from gitlab_hk_sim.state import (
+from glab_api.mutations import cancel_pipeline, merge_mr, rebase_mr, tick
+from glab_api.state import (
     MergeRequest,
     MRState,
     Pipeline,

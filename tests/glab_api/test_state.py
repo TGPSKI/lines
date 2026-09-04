@@ -1,6 +1,6 @@
 """Tests for the core state model."""
 
-from gitlab_hk_sim.state import (
+from glab_api.state import (
     MergeRequest,
     MRState,
     OperationFailureConfig,

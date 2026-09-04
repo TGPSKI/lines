@@ -1,12 +1,6 @@
 """Tests for Phase 1 multi-merge logic."""
 
-from gitlab_hk_sim.phase1 import (
-    Phase1Config,
-    compute_overlap_blocked,
-    execute_batch_merge,
-    select_merge_batch,
-)
-from gitlab_hk_sim.state import (
+from glab_api.state import (
     MergeRequest,
     MRState,
     Pipeline,
@@ -14,6 +8,12 @@ from gitlab_hk_sim.state import (
     Project,
     SHAPools,
     SimState,
+)
+from mqsim.phase1 import (
+    Phase1Config,
+    compute_overlap_blocked,
+    execute_batch_merge,
+    select_merge_batch,
 )
 
 

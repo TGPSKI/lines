@@ -11,7 +11,7 @@ Requirements:
 
 Usage:
     # 1. Start the sim server from this repository root:
-    #    PYTHONPATH=. python -m gitlab_hk_sim.cli serve \
+    #    PYTHONPATH=src python -m glab_api.cli serve \
     #        --scenario scenarios/mvp-active-cap.yaml
     #
     # 2. Run the harness with qontract-reconcile installed or its root supplied:

@@ -1,4 +1,4 @@
-# GitLab Housekeeping Policy Simulator - Makefile
+# lines — mqsim + glab_api Makefile
 #
 # Uses this repository's `.venv`.
 # Create it with Python 3.12 and install the project with `pip install -e ".[dev]"`.
@@ -99,7 +99,7 @@ vendor-verify: ## Check ui/vendor against ui/vendor/MANIFEST.txt (offline)
 validate: ## Validate all scenario YAML files
 	@for f in scenarios/*.yaml; do \
 		echo "--- $$f ---"; \
-		$(PYTHON) -c "import sys; sys.path.insert(0, '.'); from gitlab_hk_sim.cli import cli; cli()" validate --scenario "$$f"; \
+		$(PYTHON) -c "import sys; sys.path.insert(0, 'src'); from glab_api.cli import cli; cli()" validate --scenario "$$f"; \
 		echo ""; \
 	done
 
@@ -109,7 +109,7 @@ validate: ## Validate all scenario YAML files
 
 serve: ## Start the sim server (use SCENARIO= to pick scenario)
 	@mkdir -p $(METRICS_DIR)
-	PYTHONPATH=. $(PYTHON) -m gitlab_hk_sim.cli serve \
+	PYTHONPATH=src:. $(PYTHON) -m glab_api.cli serve \
 		--scenario $(SCENARIO) \
 		--host $(SIM_HOST) \
 		--port $(SIM_PORT) $(NETWORK_OVERRIDE) \
@@ -118,7 +118,7 @@ serve: ## Start the sim server (use SCENARIO= to pick scenario)
 serve-bg: ## Start sim server in background
 	@mkdir -p reports/comparisons $(METRICS_DIR)
 	@echo "Starting sim server on $(SIM_URL) with scenario $(SCENARIO)..."
-	PYTHONPATH=. nohup $(PYTHON) -m gitlab_hk_sim.cli serve \
+	PYTHONPATH=src:. nohup $(PYTHON) -m glab_api.cli serve \
 		--scenario $(SCENARIO) \
 		--host $(SIM_HOST) \
 		--port $(SIM_PORT) $(NETWORK_OVERRIDE) \
@@ -147,7 +147,7 @@ kill-server: ## Kill background sim server
 # ---------------------------------------------------------------------------
 
 run: ## Run standalone driver against sim
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--sim-url $(SIM_URL) \
 		--policy $(POLICY) \
 		--limit $(LIMIT) \
@@ -159,7 +159,7 @@ run: ## Run standalone driver against sim
 # ---------------------------------------------------------------------------
 
 compare: ## Compare all policies (default scenario)
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--compare \
 		--policy-set $(POLICY_SET) \
 		--scenario $(SCENARIO) \
@@ -169,7 +169,7 @@ compare: ## Compare all policies (default scenario)
 		--ticks-per-cycle $(TICKS_PER_CYCLE)
 
 compare-advanced: ## Compare all policies against advanced scenario (8h sim)
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--compare \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
@@ -180,7 +180,7 @@ compare-advanced: ## Compare all policies against advanced scenario (8h sim)
 		--log-level WARNING
 
 compare-calibrated: ## Compare all policies against the synthetic calibration demo
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--compare \
 		--policy-set $(POLICY_SET) \
 		--scenario $(CALIBRATION_SCENARIO) \
@@ -191,7 +191,7 @@ compare-calibrated: ## Compare all policies against the synthetic calibration de
 		--log-level WARNING
 
 compare-quick: ## Quick comparison (~2 min) - fewer cycles
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--compare \
 		--policy-set $(POLICY_SET) \
 		--scenario $(SCENARIO) \
@@ -210,7 +210,7 @@ calibrate-scenario: ## Build a scenario from caller-supplied housekeeping logs
 		echo '  make calibrate-scenario LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
 		exit 1; \
 	fi
-	PYTHONPATH=. $(PYTHON) scripts/calibrate_from_housekeeping_logs.py \
+	PYTHONPATH=src:. $(PYTHON) scripts/calibrate_from_housekeeping_logs.py \
 		--project $(CALIBRATION_PROJECT) \
 		--logs $(LOGS) \
 		--emit-scenario $(GENERATED_CALIBRATION_SCENARIO)
@@ -221,7 +221,7 @@ tune-calibration: ## Tune calibration knobs for selected CALIBRATION_POLICY
 		echo '  make tune-calibration LOGS="/tmp/a.log /tmp/b.log /tmp/c.log"'; \
 		exit 1; \
 	fi
-	PYTHONPATH=. $(PYTHON) scripts/tune_prod_calibration.py \
+	PYTHONPATH=src:. $(PYTHON) scripts/tune_prod_calibration.py \
 		--logs $(LOGS) \
 		--project $(CALIBRATION_PROJECT) \
 		--policy $(CALIBRATION_POLICY) \
@@ -229,7 +229,7 @@ tune-calibration: ## Tune calibration knobs for selected CALIBRATION_POLICY
 		--out-dir $(CALIBRATION_OUT_DIR)
 
 discrimination-pass: ## Run repeatable policy-pair discrimination variants
-	PYTHONPATH=. $(PYTHON) scripts/run_discrimination_pass.py \
+	PYTHONPATH=src:. $(PYTHON) scripts/run_discrimination_pass.py \
 		--base-scenario $(CALIBRATION_SCENARIO) \
 		--policies $(DISCRIMINATION_POLICIES) \
 		--lhs-policy $(DISCRIMINATION_LHS) \
@@ -240,7 +240,7 @@ discrimination-pass: ## Run repeatable policy-pair discrimination variants
 		--ticks-per-cycle 1
 
 monte-carlo-small: ## Monte Carlo: 10 trials (~30 min)
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--monte-carlo 10 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
@@ -250,7 +250,7 @@ monte-carlo-small: ## Monte Carlo: 10 trials (~30 min)
 		--log-level WARNING
 
 monte-carlo-medium: ## Monte Carlo: 20 trials (~60 min)
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--monte-carlo 20 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
@@ -260,7 +260,7 @@ monte-carlo-medium: ## Monte Carlo: 20 trials (~60 min)
 		--log-level WARNING
 
 monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
-	PYTHONPATH=. $(PYTHON) run_standalone.py \
+	PYTHONPATH=src:. $(PYTHON) run_standalone.py \
 		--monte-carlo 30 \
 		--policy-set $(POLICY_SET) \
 		--scenario $(ADV_SCENARIO) \
@@ -284,14 +284,14 @@ check-qontract-root:
 	}
 
 run-harness: check-qontract-root ## Run REAL gitlab-housekeeping (requires qontract-reconcile deps)
-	PYTHONPATH=. $(PYTHON) run_harness.py \
+	PYTHONPATH=src:. $(PYTHON) run_harness.py \
 		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
 		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--no-dry-run \
 		--limit $(LIMIT)
 
 run-harness-dry: check-qontract-root ## Run REAL gitlab-housekeeping in dry-run mode
-	PYTHONPATH=. $(PYTHON) run_harness.py \
+	PYTHONPATH=src:. $(PYTHON) run_harness.py \
 		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
 		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--dry-run \
@@ -326,7 +326,7 @@ reset: ## Reset sim to initial scenario state
 
 report: ## Generate a report for POLICY from its single-run metrics
 	@if [ -f $(METRICS_FILE) ]; then \
-		PYTHONPATH=. $(PYTHON) -m gitlab_hk_sim.cli report \
+		PYTHONPATH=src:. $(PYTHON) -m mqsim.cli report \
 			--metrics $(METRICS_FILE) \
 			--scenario-name "$$(basename $(SCENARIO) .yaml)" \
 			--out $(REPORT_FILE); \

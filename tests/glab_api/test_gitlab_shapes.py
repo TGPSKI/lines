@@ -1,6 +1,6 @@
 """Tests for GitLab API response shapes."""
 
-from gitlab_hk_sim.gitlab_shapes import (
+from glab_api.gitlab_shapes import (
     compare_shape,
     mr_shape,
     pipeline_list_shape,
@@ -8,7 +8,7 @@ from gitlab_hk_sim.gitlab_shapes import (
     project_shape,
     user_shape,
 )
-from gitlab_hk_sim.state import (
+from glab_api.state import (
     MergeRequest,
     Pipeline,
     PipelineStatus,
@@ -89,7 +89,7 @@ class TestMRShape:
 
     def test_merge_commit_sha_present_when_merged(self):
         project = _make_project()
-        from gitlab_hk_sim.state import MRState
+        from glab_api.state import MRState
 
         mr = MergeRequest(
             id=2001,

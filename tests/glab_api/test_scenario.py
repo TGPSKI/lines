@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from gitlab_hk_sim.scenario import load_scenario
+from glab_api.scenario import load_scenario
 
 
 def _base_scenario_yaml(extra: str = "") -> str:
