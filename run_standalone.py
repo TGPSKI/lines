@@ -2239,9 +2239,9 @@ def run_comparison(args: argparse.Namespace) -> None:
                     "throughput_peak8_p90_merges_per_hour": results.get(policy, {}).get(
                         "throughput_peak8_p90_merges_per_hour"
                     ),
-                    "throughput_peak_window_merges_per_hour": results.get(policy, {}).get(
-                        "throughput_peak_window_merges_per_hour"
-                    ),
+                    "throughput_peak_window_merges_per_hour": results.get(
+                        policy, {}
+                    ).get("throughput_peak_window_merges_per_hour"),
                     "throughput_offpeak_merges_per_hour": results.get(policy, {}).get(
                         "throughput_offpeak_merges_per_hour"
                     ),

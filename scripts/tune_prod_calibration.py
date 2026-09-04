@@ -277,7 +277,9 @@ def _score_metrics(
     return standard_score, max_dimension_error, dim_errors
 
 
-def _extended_score(*, standard_score: float, max_dimension_error: float, rel_error: float) -> float:
+def _extended_score(
+    *, standard_score: float, max_dimension_error: float, rel_error: float
+) -> float:
     return (
         standard_score * EXTENDED_SCORE_COMPONENT_WEIGHTS["standard_score"]
         + max_dimension_error * EXTENDED_SCORE_COMPONENT_WEIGHTS["max_dimension_error"]
@@ -436,7 +438,8 @@ def _hours_to_cycles(
     cycle_seconds = max(1, tick_seconds * ticks_per_cycle)
     raw_cycles = max(1, int(round((hours * 3600.0) / cycle_seconds)))
     bucket_cycles = max(1, int(round((resolution_minutes * 60.0) / cycle_seconds)))
-    return max(bucket_cycles, ((raw_cycles + bucket_cycles - 1) // bucket_cycles) * bucket_cycles)
+    rounded_cycles = ((raw_cycles + bucket_cycles - 1) // bucket_cycles) * bucket_cycles
+    return max(bucket_cycles, rounded_cycles)
 
 
 def _resolve_cycle_plan(
@@ -465,7 +468,10 @@ def _resolve_cycle_plan(
     )
     validate_hours = max(
         args.min_validate_hours,
-        min(args.max_validate_hours, weighted_window_hours * args.validate_window_fraction),
+        min(
+            args.max_validate_hours,
+            weighted_window_hours * args.validate_window_fraction,
+        ),
     )
     validate_hours = max(validate_hours, tune_hours * 1.5)
 
@@ -1237,7 +1243,8 @@ def main() -> None:
         top_n = max(1, args.validate_top_n)
         to_validate = sorted(attempts, key=lambda x: x.score)[:top_n]
         _phase(
-            f"Validation (top {len(to_validate)} candidates at {validate_cycles} cycles)"
+            f"Validation (top {len(to_validate)} candidates"
+            f" at {validate_cycles} cycles)"
         )
 
         validations: list[ValidationResult] = []
@@ -1606,11 +1613,13 @@ def main() -> None:
         else:
             rejected_scenario_path = run_out_dir / "rejected-scenario.yaml"
             rejected_scenario_path.write_text(scenario_content)
-            _status(f"run rejected; writing rejected scenario -> {rejected_scenario_path}")
+            _status(
+                f"run rejected; writing rejected scenario -> {rejected_scenario_path}"
+            )
             if args.scenario_out:
                 _status(
-                    "selected scenario output not written due to failed acceptance gates:"
-                    f" {final_path}"
+                    "selected scenario output not written due to failed"
+                    f" acceptance gates: {final_path}"
                 )
         _status(f"grid csv -> {grid_out_path}")
         _status(f"validation csv -> {validation_out_path}")
@@ -1631,7 +1640,8 @@ def main() -> None:
             f" | max_dim_error={best_validation.max_dimension_error*100:.2f}%"
             f" | rank_score={best_validation.score*100:.2f}% ({args.rank_score})"
         )
-        _status(f"dimension errors: {_format_dim_errors(best_validation.dimension_errors)}")
+        dim_errors = _format_dim_errors(best_validation.dimension_errors)
+        _status(f"dimension errors: {dim_errors}")
         _status(
             "PASS"
             if final_gate_results["accepted"]
@@ -1643,8 +1653,10 @@ def main() -> None:
             f" ({best_validation.rel_error*100:.2f}% <= {args.tolerance_pct:.2f}%)"
             f" | rank_score={'PASS' if final_gate_results['score_pass'] else 'MISS'}"
             f" ({best_validation.score*100:.2f}% <= {args.score_tolerance_pct:.2f}%)"
-            f" | max_dim={'PASS' if final_gate_results['max_dimension_pass'] else 'MISS'}"
-            f" ({best_validation.max_dimension_error*100:.2f}% <= {args.max_dimension_error_pct:.2f}%)"
+            " | max_dim="
+            f"{'PASS' if final_gate_results['max_dimension_pass'] else 'MISS'}"
+            f" ({best_validation.max_dimension_error*100:.2f}%"
+            f" <= {args.max_dimension_error_pct:.2f}%)"
         )
         _status(f"decision={decision_status} reasons={','.join(decision_reason_codes)}")
         _write_metadata_file(

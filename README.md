@@ -304,9 +304,12 @@ Durations in the main copy are **time steps** (simulator ticks), not raw log fie
 make ui
 ```
 
-In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js, D3, and js-yaml load from jsDelivr, so the first open needs network access. The UI sends selected files nowhere; all parsing and rendering happens in the browser.
+In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js, the nine d3 modules, and js-yaml are vendored in [ui/vendor/](ui/vendor/), so the UI runs offline and makes no third-party requests. The UI sends selected files nowhere; all parsing and rendering happens in the browser.
 
 - **File**: [ui/index.html](ui/index.html) (no build step)
+- **Vendored assets**: [ui/vendor/MANIFEST.txt](ui/vendor/MANIFEST.txt) pins every
+  third-party file to a version and SHA-384. `make vendor-verify` checks the tracked
+  copies offline; `make vendor` re-downloads them and rejects any hash mismatch.
 
 ## Standalone Trace Modes
 

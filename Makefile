@@ -5,6 +5,8 @@
 #
 # Usage:
 #   make test                   # run unit tests
+#   make lint                   # ruff check
+#   make vendor-verify          # check ui/vendor against its manifest
 #   make validate               # validate all scenarios
 #   make serve SCENARIO=...     # start sim server
 #   make run                    # run standalone driver
@@ -72,9 +74,10 @@ QONTRACT_RECONCILE_ROOT ?=
         compare-quick calibrate-scenario tune-calibration discrimination-pass \
         monte-carlo-small monte-carlo-medium monte-carlo-large \
         tick ticks metrics state reset report full-cycle clean ui help \
+        lint vendor vendor-verify \
         analyze-compare analyze-measure analyze-plan
 
-ui: ## Open the queue visualization (load NDJSON in the browser; requires network for CDN)
+ui: ## Open the queue visualization (load NDJSON in the browser; runs offline)
 	@python3 -c "import pathlib, webbrowser; p=pathlib.Path('$(CURDIR)/ui/index.html').resolve(); print(p); webbrowser.open(p.as_uri())"
 
 help: ## Show this help
@@ -83,6 +86,15 @@ help: ## Show this help
 
 test: ## Run unit tests
 	$(PYTEST) tests/ -v
+
+lint: ## Lint Python sources with ruff
+	$(PYTHON) -m ruff check .
+
+vendor: ## Re-download the pinned UI assets in ui/vendor (needs network)
+	@python3 scripts/vendor_ui_assets.py --fetch
+
+vendor-verify: ## Check ui/vendor against ui/vendor/MANIFEST.txt (offline)
+	@python3 scripts/vendor_ui_assets.py
 
 validate: ## Validate all scenario YAML files
 	@for f in scenarios/*.yaml; do \

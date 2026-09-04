@@ -7,6 +7,13 @@ from collections import defaultdict
 from pathlib import Path
 from statistics import mean, median, quantiles
 
+LABEL_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4, "lgtm": 5}
+TABLE_HEADER = (
+    f"{'Policy':<14} {'Count':>5} {'Mean(s)':>8} {'Median(s)':>9}"
+    f" {'P95(s)':>8} {'Min(s)':>7} {'Max(s)':>7}"
+)
+TABLE_RULE = f"{'─'*14} {'─'*5} {'─'*8} {'─'*9} {'─'*8} {'─'*7} {'─'*7}"
+
 
 def load_ndjson(path: Path) -> tuple[dict, list[dict]]:
     """Load NDJSON, return (scenario_meta, merge_events)."""
@@ -51,8 +58,12 @@ def compute_label_breakdown(report_dir: Path, tick_seconds: int = 30) -> dict:
             time_to_merge_seconds = time_to_merge_ticks * tick_seconds
 
             iid_str = str(iid)
-            priority_label = mr_catalog.get(iid_str, {}).get("priority_label", "unknown")
-            priority_tier = priority_label.replace("bot/approved: ", "").replace("bot/approved", "none")
+            priority_label = mr_catalog.get(iid_str, {}).get(
+                "priority_label", "unknown"
+            )
+            priority_tier = priority_label.replace("bot/approved: ", "").replace(
+                "bot/approved", "none"
+            )
 
             label_merges[priority_tier].append({
                 "iid": iid,
@@ -92,26 +103,31 @@ def print_table(policies: dict, report_name: str, tick_seconds: int = 30):
     print(f"{'='*80}")
     print(f"(tick = {tick_seconds}s, times in seconds)")
 
-    all_labels = sorted(set(
-        label for stats in policies.values() for label in stats
-    ), key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3, "none": 4, "lgtm": 5}.get(x, 9))
+    all_labels = sorted(
+        {label for stats in policies.values() for label in stats},
+        key=lambda x: LABEL_ORDER.get(x, 9),
+    )
 
     policy_names = sorted(policies.keys())
 
     for label in all_labels:
         print(f"\n--- Priority: {label} ---")
-        print(f"{'Policy':<14} {'Count':>5} {'Mean(s)':>8} {'Median(s)':>9} {'P95(s)':>8} {'Min(s)':>7} {'Max(s)':>7}")
-        print(f"{'─'*14} {'─'*5} {'─'*8} {'─'*9} {'─'*8} {'─'*7} {'─'*7}")
+        print(TABLE_HEADER)
+        print(TABLE_RULE)
         for pname in policy_names:
             s = policies[pname].get(label)
             if s:
-                print(f"{pname:<14} {s['count']:>5} {s['mean_seconds']:>8.1f} {s['median_seconds']:>9.1f} {s['p95_seconds']:>8.1f} {s['min_seconds']:>7.1f} {s['max_seconds']:>7.1f}")
+                print(
+                    f"{pname:<14} {s['count']:>5} {s['mean_seconds']:>8.1f}"
+                    f" {s['median_seconds']:>9.1f} {s['p95_seconds']:>8.1f}"
+                    f" {s['min_seconds']:>7.1f} {s['max_seconds']:>7.1f}"
+                )
             else:
                 print(f"{pname:<14} {'—':>5}")
 
-    print(f"\n--- All labels combined ---")
-    print(f"{'Policy':<14} {'Count':>5} {'Mean(s)':>8} {'Median(s)':>9} {'P95(s)':>8} {'Min(s)':>7} {'Max(s)':>7}")
-    print(f"{'─'*14} {'─'*5} {'─'*8} {'─'*9} {'─'*8} {'─'*7} {'─'*7}")
+    print("\n--- All labels combined ---")
+    print(TABLE_HEADER)
+    print(TABLE_RULE)
     for pname in policy_names:
         all_times = []
         for label_stats in policies[pname].values():
@@ -128,7 +144,11 @@ def print_table(policies: dict, report_name: str, tick_seconds: int = 30):
             overall_med = median(all_s) if all_s else 0
             overall_max = max(s["max_seconds"] for s in policies[pname].values())
             overall_min = min(s["min_seconds"] for s in policies[pname].values())
-            print(f"{pname:<14} {total_count:>5} {overall_mean:>8.1f} {overall_med:>9.1f} {'—':>8} {overall_min:>7.1f} {overall_max:>7.1f}")
+            print(
+                f"{pname:<14} {total_count:>5} {overall_mean:>8.1f}"
+                f" {overall_med:>9.1f} {'—':>8} {overall_min:>7.1f}"
+                f" {overall_max:>7.1f}"
+            )
 
 
 def output_json(all_results: dict, output_path: Path):
@@ -141,7 +161,9 @@ def output_json(all_results: dict, output_path: Path):
 def main():
     report_dirs = sys.argv[1:] if len(sys.argv) > 1 else []
     if not report_dirs:
-        print("Usage: extract_per_label_merge_times.py <report_dir> [<report_dir2> ...]")
+        print(
+            "Usage: extract_per_label_merge_times.py <report_dir> [<report_dir2> ...]"
+        )
         sys.exit(1)
 
     all_results = {}

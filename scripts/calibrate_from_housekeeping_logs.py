@@ -240,7 +240,9 @@ def _compute_performance_dimensions(
             sum(active_hours) / len(active_hours) if active_hours else 0.0
         ),
         "merge_per_hour_peak8": (
-            sum(peak_merge_counts) / len(peak_merge_counts) if peak_merge_counts else 0.0
+            sum(peak_merge_counts) / len(peak_merge_counts)
+            if peak_merge_counts
+            else 0.0
         ),
         "merge_per_hour_peak8_p90": _percentile(peak_merge_counts, 90),
         "merge_peak_offpeak_ratio": peak_offpeak_ratio,
@@ -362,7 +364,12 @@ def parse_log(path: Path, project_filter: str) -> LogStats:
                 action_project = action_m.group(2)
                 if action_project == project_filter:
                     project_action_ts.append(ts)
-                    if action_name in {"merge", "add_label", "remove_label", "close_item"}:
+                    if action_name in {
+                        "merge",
+                        "add_label",
+                        "remove_label",
+                        "close_item",
+                    }:
                         project_hourly_activity[ts.hour] += 1
                         project_weekday_activity[ts.weekday()] += 1
                     if action_name in {"add_label", "remove_label"}:
@@ -550,7 +557,9 @@ def build_scenario_dict(
         min_initial_open = 13
         extra_floor = 16
 
-    initial_open_base = max(min_initial_open, int(round(expected_merges * initial_open_ratio)))
+    initial_open_base = max(
+        min_initial_open, int(round(expected_merges * initial_open_ratio))
+    )
     total_mrs_base = max(
         initial_open_base + extra_floor,
         int(round(expected_merges * total_mrs_ratio)),
@@ -851,7 +860,8 @@ def print_stats(stats: list[LogStats]) -> None:
             f" rebase/merge={s.performance_dimensions['rebase_per_merge_global']:.3f}"
             f" peak_ratio={s.performance_dimensions['rebase_per_merge_peak8']:.3f}"
             f" offpeak_ratio={s.performance_dimensions['rebase_per_merge_offpeak']:.3f}"
-            f" interval_p95_s={s.performance_dimensions['merge_interval_seconds_p95']:.1f}"
+            " interval_p95_s="
+            f"{s.performance_dimensions['merge_interval_seconds_p95']:.1f}"
         )
         print()
 
@@ -875,7 +885,8 @@ def print_stats(stats: list[LogStats]) -> None:
     )
     print(
         "  dimensions:"
-        f" active_merge_per_hour={perf_dims.get('merge_per_hour_active_hours', 0.0):.3f}"
+        " active_merge_per_hour="
+        f"{perf_dims.get('merge_per_hour_active_hours', 0.0):.3f}"
         f" peak8_merge_per_hour={perf_dims.get('merge_per_hour_peak8', 0.0):.3f}"
         f" peak8_merge_p90={perf_dims.get('merge_per_hour_peak8_p90', 0.0):.3f}"
     )

@@ -5,6 +5,7 @@ This UI is intentionally **client-side only**:
 - no npm/yarn
 - no bundler/transpiler
 - plain `<script src="...">` loading order
+- no third-party requests: Chart.js, d3, and js-yaml are vendored in `../vendor/`
 
 ## File layout
 
@@ -18,7 +19,13 @@ This UI is intentionally **client-side only**:
 
 ## Load order contract
 
-`index.html` loads scripts in this exact order:
+`index.html` first loads the vendored third-party scripts in `../vendor/`
+(`chart.umd.min.js`, then the d3 modules in dependency order — `d3-color`,
+`d3-array`, `d3-format`, `d3-time`, `d3-interpolate`, `d3-time-format`,
+`d3-scale`, `d3-selection`, `d3-axis` — then `js-yaml.min.js`). Every d3 module's
+UMD build merges into the same `d3` global, so the dependency order matters.
+
+It then loads this repository's scripts in this exact order:
 
 1. `mqsim-common.js`
 2. `mqsim-core.js`

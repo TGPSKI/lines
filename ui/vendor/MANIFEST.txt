@@ -1,0 +1,19 @@
+# Third-party UI assets, pinned by version and SHA-384.
+# Format: <file> <sha384-base64> <upstream url>
+# Re-download with `make vendor`; check the tracked copies with `make vendor-verify`.
+#
+# chart.js 4.4.1 and js-yaml 4.1.0 are MIT (LICENSE-chart.js.txt, LICENSE-js-yaml.txt).
+# The nine d3 modules are ISC (LICENSE-d3.txt) at the versions d3 7.9.0 pins.
+# Their UMD builds each merge into one shared `d3` global, so index.html loads
+# them in dependency order.
+chart.umd.min.js 9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4 https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js
+js-yaml.min.js +pxiN6T7yvpryuJmE1gM9PX7yQit15auDb+ZwwvJOd/4be2Cie5/IuVXgQb/S9du https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js
+d3-color.min.js qeVKt5ofZEKt0cTx+PBxfcG00yP7tP+dESNy1bdg/QgA7dx9IEHR84+rXyR2U/Ss https://cdn.jsdelivr.net/npm/d3-color@3.1.0/dist/d3-color.min.js
+d3-array.min.js VpKMdU+TlpggHFip46tJ/xkFUs8NFBwLqUMo3+3uiu411lU6eUQYsHVU+JFpA5ja https://cdn.jsdelivr.net/npm/d3-array@3.2.4/dist/d3-array.min.js
+d3-format.min.js p/FCFGkjE9nXZlfZuZGVvw4WBJQrbiCEYfCH7gcqJd/e6Lo5FVgv4FXayGJuVu9o https://cdn.jsdelivr.net/npm/d3-format@3.1.0/dist/d3-format.min.js
+d3-time.min.js wJfZnOcpSynDnkpl0sG5tDfEBDIDFiqVED5qCAupiTpkc2txOOaXJI82B4UzgSDq https://cdn.jsdelivr.net/npm/d3-time@3.1.0/dist/d3-time.min.js
+d3-interpolate.min.js 2PtmDWTi6j7xzzZdS7tLjZbKPqs6g738z+tlEHvzaPZ8tCXfypcL9nM0lO4+x3Xe https://cdn.jsdelivr.net/npm/d3-interpolate@3.0.1/dist/d3-interpolate.min.js
+d3-time-format.min.js SKptCqEwZSAA3iMmg9zXSq7jjDm/cSiNcOqvkQM6Zrq2ErH81ukQrdz6hOffeNYf https://cdn.jsdelivr.net/npm/d3-time-format@4.1.0/dist/d3-time-format.min.js
+d3-scale.min.js wDCOH6guiWzlfjYWEYO48J4O2/Pr4pXpjpHjpZK7VgXxV41qBlEDENJwjDg2H//v https://cdn.jsdelivr.net/npm/d3-scale@4.0.2/dist/d3-scale.min.js
+d3-selection.min.js fpYWL7ZUVumFD+3Y+L5o9OvTX/TBgQKoQ/UP8BzGkkMTvfU9gS8NIxSoKmFgeVLs https://cdn.jsdelivr.net/npm/d3-selection@3.0.0/dist/d3-selection.min.js
+d3-axis.min.js EJhLtpzayhK6FaNz8ZX2Wyz4ymcK3otoZy4RdSENNh+gHcjEr8PhXruy3PaDbTE4 https://cdn.jsdelivr.net/npm/d3-axis@3.0.0/dist/d3-axis.min.js

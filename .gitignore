@@ -6,3 +6,4 @@ reports/*
 !reports/.gitkeep
 scenarios/generated/
 sessions/
+.private/
