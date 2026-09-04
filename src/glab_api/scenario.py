@@ -229,5 +229,5 @@ def _parse_failures_remaining(raw: Any) -> int:
         return -1
     try:
         return int(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return 0

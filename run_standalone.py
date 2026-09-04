@@ -204,9 +204,8 @@ def _extract_hourly_event_profile(
         bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
         hourly_arrivals[bucket] += len(arrivals)
 
-    calibration = (
-        scenario_meta.get("scenario_metadata", {})
-        .get("calibration_targets", {})
+    calibration = scenario_meta.get("scenario_metadata", {}).get(
+        "calibration_targets", {}
     )
     arrival_profile = calibration.get("arrival_profile", {})
     start_hour = int(arrival_profile.get("scenario_start_hour", 0) or 0) % 24
@@ -230,15 +229,11 @@ def _extract_hourly_event_profile(
             offpeak_merges.append(hourly_merges[idx])
             offpeak_arrivals.append(hourly_arrivals[idx])
 
-    peak_merge_avg = (
-        sum(peak_merges) / len(peak_merges) if peak_merges else 0.0
-    )
+    peak_merge_avg = sum(peak_merges) / len(peak_merges) if peak_merges else 0.0
     offpeak_merge_avg = (
         sum(offpeak_merges) / len(offpeak_merges) if offpeak_merges else 0.0
     )
-    peak_arrival_avg = (
-        sum(peak_arrivals) / len(peak_arrivals) if peak_arrivals else 0.0
-    )
+    peak_arrival_avg = sum(peak_arrivals) / len(peak_arrivals) if peak_arrivals else 0.0
     offpeak_arrival_avg = (
         sum(offpeak_arrivals) / len(offpeak_arrivals) if offpeak_arrivals else 0.0
     )
@@ -270,11 +265,15 @@ def parse_args() -> argparse.Namespace:
         "--limit", type=int, default=5, help="Rebase/merge limit per cycle"
     )
     parser.add_argument(
-        "--omm-group-size", type=int, default=None,
+        "--omm-group-size",
+        type=int,
+        default=None,
         help="Max pending MRs per OMM group (defaults to --limit)",
     )
     parser.add_argument(
-        "--omm-max-interval", type=int, default=5,
+        "--omm-max-interval",
+        type=int,
+        default=5,
         help="OMM group window in minutes after lead merges (default: 5)",
     )
     parser.add_argument(
@@ -614,9 +613,7 @@ def set_mr_labels(
     resp.raise_for_status()
 
 
-def add_mr_label(
-    sim_url: str, project_id: int, mr: dict, label: str
-) -> None:
+def add_mr_label(sim_url: str, project_id: int, mr: dict, label: str) -> None:
     current = list(mr.get("labels", []))
     if label not in current:
         current.append(label)
@@ -624,9 +621,7 @@ def add_mr_label(
         mr["labels"] = current
 
 
-def remove_mr_label(
-    sim_url: str, project_id: int, mr: dict, label: str
-) -> None:
+def remove_mr_label(sim_url: str, project_id: int, mr: dict, label: str) -> None:
     current = list(mr.get("labels", []))
     if label in current:
         current.remove(label)
@@ -886,9 +881,7 @@ def run_cycle_active_cap(
         if mr["state"] != "opened":
             continue
         pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-        if is_consuming_slot(
-            sim_url, project_id, mr, target_head, pipelines=pipelines
-        ):
+        if is_consuming_slot(sim_url, project_id, mr, target_head, pipelines=pipelines):
             already_active += 1
             continue
 
@@ -1130,9 +1123,7 @@ def run_cycle_active_cap_phase1(
         if mr["state"] != "opened":
             continue
         pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-        if is_consuming_slot(
-            sim_url, project_id, mr, target_head, pipelines=pipelines
-        ):
+        if is_consuming_slot(sim_url, project_id, mr, target_head, pipelines=pipelines):
             already_active += 1
             continue
         if pipelines and pipelines[0]["status"] == "failed":
@@ -1187,19 +1178,21 @@ _omm_stats: dict[str, int | list[int]] = {}
 
 def _omm_stats_reset() -> None:
     _omm_stats.clear()
-    _omm_stats.update({
-        "groups_formed": 0,
-        "groups_completed": 0,
-        "groups_failed_lead": 0,
-        "groups_diverged": 0,
-        "groups_adaptive_closed": 0,
-        "groups_window_expired": 0,
-        "pending_ejected": 0,
-        "skip_ci_rebases": 0,
-        "group_sizes": [],
-        "lead_merged_tick": None,
-        "max_interval_ticks": None,
-    })
+    _omm_stats.update(
+        {
+            "groups_formed": 0,
+            "groups_completed": 0,
+            "groups_failed_lead": 0,
+            "groups_diverged": 0,
+            "groups_adaptive_closed": 0,
+            "groups_window_expired": 0,
+            "pending_ejected": 0,
+            "skip_ci_rebases": 0,
+            "group_sizes": [],
+            "lead_merged_tick": None,
+            "max_interval_ticks": None,
+        }
+    )
 
 
 def _omm_stats_snapshot() -> dict:
@@ -1218,12 +1211,10 @@ def _omm_stats_snapshot() -> dict:
         "omm_groups_failed_lead": _omm_stats.get("groups_failed_lead", 0),
         "omm_groups_diverged": _omm_stats.get("groups_diverged", 0),
         "omm_groups_adaptive_closed": _omm_stats.get("groups_adaptive_closed", 0),
-        "omm_groups_destroyed_pct": round(
-            failed / formed * 100, 1
-        ) if formed > 0 else 0.0,
-        "omm_avg_group_size": round(
-            sum(sizes) / len(sizes), 2
-        ) if sizes else 0.0,
+        "omm_groups_destroyed_pct": round(failed / formed * 100, 1)
+        if formed > 0
+        else 0.0,
+        "omm_avg_group_size": round(sum(sizes) / len(sizes), 2) if sizes else 0.0,
         "omm_max_group_size": max(sizes) if sizes else 0,
         "omm_groups_window_expired": _omm_stats.get("groups_window_expired", 0),
         "omm_pending_ejected": _omm_stats.get("pending_ejected", 0),
@@ -1332,17 +1323,12 @@ def run_cycle_omm(
                         state = get_state(sim_url)
                         target_head = state["target_head"]
                     except requests.HTTPError as e:
-                        log.warning(
-                            f"  OMM MERGE LEAD FAILED !{lead['iid']}: {e}"
-                        )
+                        log.warning(f"  OMM MERGE LEAD FAILED !{lead['iid']}: {e}")
                 elif latest in ("running", "pending"):
-                    log.info(
-                        f"  OMM LEAD !{lead['iid']} pipeline {latest}, waiting"
-                    )
+                    log.info(f"  OMM LEAD !{lead['iid']} pipeline {latest}, waiting")
                 elif latest == "failed":
                     log.warning(
-                        f"  OMM LEAD !{lead['iid']} pipeline failed, "
-                        "clearing group"
+                        f"  OMM LEAD !{lead['iid']} pipeline failed, clearing group"
                     )
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
                     _omm_stats["groups_failed_lead"] += 1
@@ -1375,14 +1361,16 @@ def run_cycle_omm(
         if lead is not None and lead_merged:
             merge_sha = lead.get("merge_commit_sha") or ""
             if merge_sha and merge_sha != target_head:
-                compare = _get_session().get(
-                    f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
-                    params={"from": target_head, "to": merge_sha},
-                ).json()
-                if compare.get("commits"):
-                    log.warning(
-                        "  OMM head-moved (diverged), invalidating group"
+                compare = (
+                    _get_session()
+                    .get(
+                        f"{sim_url}/api/v4/projects/{project_id}/repository/compare",
+                        params={"from": target_head, "to": merge_sha},
                     )
+                    .json()
+                )
+                if compare.get("commits"):
+                    log.warning("  OMM head-moved (diverged), invalidating group")
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
                     _omm_stats["groups_diverged"] += 1
                     _omm_stats["lead_merged_tick"] = None
@@ -1423,24 +1411,18 @@ def run_cycle_omm(
                         state = get_state(sim_url)
                         target_head = state["target_head"]
                     except requests.HTTPError as e:
-                        log.warning(
-                            f"  OMM MERGE FAILED !{mr['iid']}: {e}"
-                        )
+                        log.warning(f"  OMM MERGE FAILED !{mr['iid']}: {e}")
                         remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
                     continue
 
                 if latest_status == "success":
                     log.info(f"  OMM SKIP-CI REBASE !{mr['iid']}")
                     try:
-                        rebase_mr(
-                            sim_url, project_id, mr["iid"], skip_ci=True
-                        )
+                        rebase_mr(sim_url, project_id, mr["iid"], skip_ci=True)
                         rebase_count += 1
                         _omm_stats["skip_ci_rebases"] += 1
                     except requests.HTTPError as e:
-                        log.warning(
-                            f"  OMM SKIP-CI REBASE FAILED !{mr['iid']}: {e}"
-                        )
+                        log.warning(f"  OMM SKIP-CI REBASE FAILED !{mr['iid']}: {e}")
                         remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
                     any_active = True
                     continue
@@ -1451,9 +1433,9 @@ def run_cycle_omm(
 
             if not any_active:
                 remaining = [
-                    m for m in pending
-                    if m.get("state") == "opened"
-                    and OMM_PENDING in m.get("labels", [])
+                    m
+                    for m in pending
+                    if m.get("state") == "opened" and OMM_PENDING in m.get("labels", [])
                 ]
                 log.info("  OMM adaptive-close: no active pending MRs")
                 _omm_clear_group(sim_url, project_id, lead, remaining, log)
@@ -1552,14 +1534,10 @@ def run_cycle_omm(
 
 POLICY_RUNNERS = {
     # Baseline: current production/master behavior
-    "old-burst": partial(
-        run_cycle_old_burst, wait_for_pipeline=False, insist=False
-    ),
+    "old-burst": partial(run_cycle_old_burst, wait_for_pipeline=False, insist=False),
     # Experimental: strategy variants under study
     "top-k": partial(run_cycle_top_k, wait_for_pipeline=False, insist=False),
-    "active-cap": partial(
-        run_cycle_active_cap, wait_for_pipeline=False, insist=False
-    ),
+    "active-cap": partial(run_cycle_active_cap, wait_for_pipeline=False, insist=False),
     "cap+phase1": partial(
         run_cycle_active_cap_phase1, wait_for_pipeline=False, insist=False
     ),
@@ -1575,9 +1553,7 @@ POLICY_RUNNERS = {
         run_cycle_active_cap_phase1, wait_for_pipeline=True, insist=False
     ),
     # wait-insist: wait_for_pipeline=True, insist=True
-    "top-k-wait-insist": partial(
-        run_cycle_top_k, wait_for_pipeline=True, insist=True
-    ),
+    "top-k-wait-insist": partial(run_cycle_top_k, wait_for_pipeline=True, insist=True),
     "active-cap-wait-insist": partial(
         run_cycle_active_cap, wait_for_pipeline=True, insist=True
     ),
@@ -1956,6 +1932,7 @@ def run_comparison(args: argparse.Namespace) -> None:
     reports_dir = os.path.join(base_reports, timestamp)
     if os.path.exists(reports_dir):
         import uuid
+
         timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
         reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
@@ -2385,6 +2362,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
     reports_dir = os.path.join(base_reports, timestamp)
     if os.path.exists(reports_dir):
         import uuid
+
         timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
         reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)

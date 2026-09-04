@@ -200,9 +200,7 @@ def get_mr_label_events(
         shapes.label_event_shape(
             i + 1,
             label,
-            created_at=(
-                mr.approved_at if label in MERGE_LABELS_SET else default_ts
-            ),
+            created_at=(mr.approved_at if label in MERGE_LABELS_SET else default_ts),
         )
         for i, label in enumerate(mr.labels)
     ]
@@ -463,14 +461,16 @@ def sim_merged_mrs(request: Request) -> list:
             if lbl.startswith("bot/approved:"):
                 priority = lbl.split(":", 1)[1].strip()
                 break
-        result.append({
-            "iid": mr.iid,
-            "arrival_tick": arrival,
-            "merge_tick": merge_tick,
-            "wait_ticks": wait,
-            "priority": priority,
-            "title": mr.title,
-        })
+        result.append(
+            {
+                "iid": mr.iid,
+                "arrival_tick": arrival,
+                "merge_tick": merge_tick,
+                "wait_ticks": wait,
+                "priority": priority,
+                "title": mr.title,
+            }
+        )
     return result
 
 

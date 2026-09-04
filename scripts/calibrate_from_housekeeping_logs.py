@@ -22,10 +22,8 @@ from typing import Any
 import yaml
 
 LINE_RE = re.compile(
-
-        r"^\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+"
-        r"\[(?P<lvl>INFO|ERROR)\].*?- (?P<msg>.*)$"
-
+    r"^\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+"
+    r"\[(?P<lvl>INFO|ERROR)\].*?- (?P<msg>.*)$"
 )
 GQL_RE = re.compile(r"using gql endpoint")
 MERGE_RE = re.compile(r"\['merge',\s*'([^']+)',\s*(\d+)\]")
@@ -695,9 +693,7 @@ def build_scenario_dict(
             "rebase_failure_rate": SYNTHETIC_API_FAILURE_RATE,
         },
         "sha_pools": {
-            "target_advances": {
-                "master": [f"target-{i:03d}" for i in range(2, 420)]
-            }
+            "target_advances": {"master": [f"target-{i:03d}" for i in range(2, 420)]}
         },
     }
 

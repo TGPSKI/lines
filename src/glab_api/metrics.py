@@ -129,9 +129,7 @@ class MetricsCollector:
         rebase_error_events = [
             e for e in self.events if e.get("event") == "rebase_error"
         ]
-        merge_error_events = [
-            e for e in self.events if e.get("event") == "merge_error"
-        ]
+        merge_error_events = [e for e in self.events if e.get("event") == "merge_error"]
 
         peak_active = 0
         same_root_pool_values: list[int] = []

@@ -560,9 +560,7 @@ def main() -> None:
     if len(policies) < 2:
         raise ValueError("at least two policies are required for discrimination")
     lhs_policy = args.lhs_policy.strip() if args.lhs_policy else policies[0]
-    rhs_policy = (
-        args.rhs_policy.strip() if args.rhs_policy else policies[1]
-    )
+    rhs_policy = args.rhs_policy.strip() if args.rhs_policy else policies[1]
     if lhs_policy == rhs_policy:
         raise ValueError("lhs_policy and rhs_policy must be different")
     if lhs_policy not in policies or rhs_policy not in policies:
@@ -580,6 +578,7 @@ def main() -> None:
         out_dir = ROOT / "reports" / "discrimination" / timestamp
         if out_dir.exists():
             import uuid
+
             timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
             out_dir = ROOT / "reports" / "discrimination" / timestamp
     scenarios_dir = out_dir / "scenarios"
@@ -659,9 +658,7 @@ def main() -> None:
             "rhs_throughput_mph": _metric_val(
                 m, "Throughput (merges/hour)", rhs_policy
             ),
-            "rhs_minus_lhs_mph": _metric_val(
-                m, "Throughput (merges/hour)", rhs_policy
-            )
+            "rhs_minus_lhs_mph": _metric_val(m, "Throughput (merges/hour)", rhs_policy)
             - _metric_val(m, "Throughput (merges/hour)", lhs_policy),
             "lhs_rebases": _metric_val(m, "Rebases", lhs_policy),
             "rhs_rebases": _metric_val(m, "Rebases", rhs_policy),
@@ -714,9 +711,7 @@ def main() -> None:
             total_arrivals = _metric_val(m, "Total Arrivals", policy)
             merged = _metric_val(m, "MRs Merged", policy)
             rebases = _metric_val(m, "Rebases", policy)
-            starved = _metric_val(
-                m, "Starved MRs (>100 ticks)", policy
-            )
+            starved = _metric_val(m, "Starved MRs (>100 ticks)", policy)
             row[f"throughput_mph__{k}"] = throughput_mph
             row[f"throughput_active_mph__{k}"] = throughput_active_mph
             row[f"throughput_peak8_mph__{k}"] = throughput_peak8_mph

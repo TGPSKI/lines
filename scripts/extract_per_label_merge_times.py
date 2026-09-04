@@ -12,7 +12,7 @@ TABLE_HEADER = (
     f"{'Policy':<14} {'Count':>5} {'Mean(s)':>8} {'Median(s)':>9}"
     f" {'P95(s)':>8} {'Min(s)':>7} {'Max(s)':>7}"
 )
-TABLE_RULE = f"{'─'*14} {'─'*5} {'─'*8} {'─'*9} {'─'*8} {'─'*7} {'─'*7}"
+TABLE_RULE = f"{'─' * 14} {'─' * 5} {'─' * 8} {'─' * 9} {'─' * 8} {'─' * 7} {'─' * 7}"
 
 
 def load_ndjson(path: Path) -> tuple[dict, list[dict]]:
@@ -65,11 +65,13 @@ def compute_label_breakdown(report_dir: Path, tick_seconds: int = 30) -> dict:
                 "bot/approved", "none"
             )
 
-            label_merges[priority_tier].append({
-                "iid": iid,
-                "time_to_merge_ticks": time_to_merge_ticks,
-                "time_to_merge_seconds": time_to_merge_seconds,
-            })
+            label_merges[priority_tier].append(
+                {
+                    "iid": iid,
+                    "time_to_merge_ticks": time_to_merge_ticks,
+                    "time_to_merge_seconds": time_to_merge_seconds,
+                }
+            )
 
         policy_stats = {}
         for label, items in sorted(label_merges.items()):
@@ -98,9 +100,9 @@ def compute_label_breakdown(report_dir: Path, tick_seconds: int = 30) -> dict:
 
 def print_table(policies: dict, report_name: str, tick_seconds: int = 30):
     """Print formatted comparison table."""
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"Per-Priority-Label Time-to-Merge Breakdown: {report_name}")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print(f"(tick = {tick_seconds}s, times in seconds)")
 
     all_labels = sorted(

@@ -339,7 +339,7 @@ def _format_dim_errors(dim_errors: dict[str, float]) -> str:
     if not dim_errors:
         return "none"
     ordered = sorted(dim_errors.items(), key=lambda kv: kv[1], reverse=True)
-    return ", ".join(f"{name}={err*100:.1f}%" for name, err in ordered)
+    return ", ".join(f"{name}={err * 100:.1f}%" for name, err in ordered)
 
 
 def _run_policy_with_retry(
@@ -397,8 +397,7 @@ def _run_policy_with_retry(
         )
         current_port += 1
     raise RuntimeError(
-        f"{policy} output stayed N/A after {retries} retries"
-        f" (last port={current_port})"
+        f"{policy} output stayed N/A after {retries} retries (last port={current_port})"
     )
 
 
@@ -845,7 +844,9 @@ def _write_metadata_file(
                 "tick_seconds": best_480.candidate.tick_seconds,
                 "arrival_skew": best_480.candidate.arrival_skew,
                 "queue_depth_scale": best_480.candidate.queue_depth_scale,
-            } if best_480 else {},
+            }
+            if best_480
+            else {},
             "decision_status": decision_status,
             "decision_reason_codes": decision_reason_codes,
             "decision_gates": decision_gates,
@@ -950,6 +951,7 @@ def main() -> None:
         run_out_dir = ROOT / "reports" / "calibration" / timestamp
         if run_out_dir.exists():
             import uuid
+
             timestamp = f"{timestamp}_{uuid.uuid4().hex[:6]}"
             run_out_dir = ROOT / "reports" / "calibration" / timestamp
     run_out_dir.mkdir(parents=True, exist_ok=True)
@@ -958,11 +960,7 @@ def main() -> None:
     target_anchor = _resolve_target_anchor(args.dimension_profile, args.target_anchor)
     target_anchor_dimension = TARGET_ANCHOR_TO_DIMENSION[target_anchor]
     derived_target_mph = target_dimensions.get(target_anchor_dimension, 0.0)
-    target_mph = (
-        args.target_mph
-        if args.target_mph is not None
-        else derived_target_mph
-    )
+    target_mph = args.target_mph if args.target_mph is not None else derived_target_mph
     if target_mph > 0 and target_anchor_dimension in target_dimensions:
         target_dimensions[target_anchor_dimension] = target_mph
     throughput_tolerance = args.tolerance_pct / 100.0
@@ -998,19 +996,13 @@ def main() -> None:
     _phase("Calibration Target")
     _status(f"project={args.project}")
     _status(f"policy={policy}")
-    _status(
-        f"logs={len(stats)}, weighted_window_hours={weighted_window_hours:.2f}"
-    )
+    _status(f"logs={len(stats)}, weighted_window_hours={weighted_window_hours:.2f}")
     _status(f"target_mph={target_mph:.3f}")
     _status(
         "target anchor:"
         f" {target_anchor} ({target_anchor_dimension})"
         f" derived={derived_target_mph:.3f}"
-        + (
-            f" overridden={target_mph:.3f}"
-            if args.target_mph is not None
-            else ""
-        )
+        + (f" overridden={target_mph:.3f}" if args.target_mph is not None else "")
     )
     _status(
         "target dimensions:"
@@ -1057,23 +1049,17 @@ def main() -> None:
                     idx += 1
                     candidate_start = perf_counter()
                     scenario_path = temp_dir / (
-                        f"cand-{idx}-t{tick_seconds}-a{arrival_skew}"
-                        f"-q{depth}.yaml"
+                        f"cand-{idx}-t{tick_seconds}-a{arrival_skew}-q{depth}.yaml"
                     )
                     _status(
                         f"[{idx:02d}/{total_candidates}] candidate start:"
                         f" tick={tick_seconds}, arrival={arrival_skew:.2f},"
                         f" depth={depth:.2f}"
                     )
-                    _status(
-                        f"[{idx:02d}] generating scenario"
-                        f" -> {scenario_path.name}"
-                    )
+                    _status(f"[{idx:02d}] generating scenario -> {scenario_path.name}")
                     scenario_dict = build_scenario_dict(
                         stats=stats,
-                        scenario_name=(
-                            f"Calib candidate {idx} ({policy})"
-                        ),
+                        scenario_name=(f"Calib candidate {idx} ({policy})"),
                         window_ticks=scenario_window_ticks,
                         seed=args.seed,
                         tick_seconds_override=tick_seconds,
@@ -1085,10 +1071,7 @@ def main() -> None:
                     )
                     _status(f"[{idx:02d}] scenario generated")
 
-                    _status(
-                        f"[{idx:02d}] running {policy} tuning"
-                        " simulation"
-                    )
+                    _status(f"[{idx:02d}] running {policy} tuning simulation")
                     run_metrics, port = _run_policy_with_retry(
                         policy=policy,
                         scenario_path=scenario_path,
@@ -1101,16 +1084,12 @@ def main() -> None:
                     mph = float(run_metrics["throughput_mph"])
                     merged = int(run_metrics["merged"])
                     rel_err = (
-                        abs(mph - target_mph) / target_mph
-                        if target_mph > 0
-                        else 0.0
+                        abs(mph - target_mph) / target_mph if target_mph > 0 else 0.0
                     )
-                    standard_score, max_dim_error, dim_errors = (
-                        _score_metrics(
-                            run_metrics=run_metrics,
-                            target_dimensions=target_dimensions,
-                            dimension_weights=dimension_weights,
-                        )
+                    standard_score, max_dim_error, dim_errors = _score_metrics(
+                        run_metrics=run_metrics,
+                        target_dimensions=target_dimensions,
+                        dimension_weights=dimension_weights,
                     )
                     ext_score = _extended_score(
                         standard_score=standard_score,
@@ -1131,9 +1110,7 @@ def main() -> None:
                         throughput_active_mph=float(
                             run_metrics["throughput_active_mph"]
                         ),
-                        throughput_peak8_mph=float(
-                            run_metrics["throughput_peak8_mph"]
-                        ),
+                        throughput_peak8_mph=float(run_metrics["throughput_peak8_mph"]),
                         throughput_peak8_p90_mph=float(
                             run_metrics["throughput_peak8_p90_mph"]
                         ),
@@ -1143,18 +1120,10 @@ def main() -> None:
                         throughput_offpeak_mph=float(
                             run_metrics["throughput_offpeak_mph"]
                         ),
-                        peak_offpeak_ratio=float(
-                            run_metrics["peak_offpeak_ratio"]
-                        ),
-                        modeled_hours=float(
-                            run_metrics["modeled_hours"]
-                        ),
-                        total_arrivals=float(
-                            run_metrics["total_arrivals"]
-                        ),
-                        rebase_per_merge=float(
-                            run_metrics["rebase_per_merge"]
-                        ),
+                        peak_offpeak_ratio=float(run_metrics["peak_offpeak_ratio"]),
+                        modeled_hours=float(run_metrics["modeled_hours"]),
+                        total_arrivals=float(run_metrics["total_arrivals"]),
+                        rebase_per_merge=float(run_metrics["rebase_per_merge"]),
                         merge_interval_p50_seconds=float(
                             run_metrics["merge_interval_p50_seconds"]
                         ),
@@ -1177,11 +1146,11 @@ def main() -> None:
                             f"[{idx:02d}] NEW BEST at"
                             f" {tune_cycles} cycles:"
                             f" mph={mph:.3f},"
-                            f" err={rel_err*100:.2f}%"
-                            f" std={standard_score*100:.2f}%"
-                            f" ext={ext_score*100:.2f}%"
-                            f" max_dim={max_dim_error*100:.2f}%"
-                            f" rank={ranking_score*100:.2f}%"
+                            f" err={rel_err * 100:.2f}%"
+                            f" std={standard_score * 100:.2f}%"
+                            f" ext={ext_score * 100:.2f}%"
+                            f" max_dim={max_dim_error * 100:.2f}%"
+                            f" rank={ranking_score * 100:.2f}%"
                             f" ({args.rank_score})"
                             f" dims[{_format_dim_errors(dim_errors)}]"
                         )
@@ -1191,10 +1160,10 @@ def main() -> None:
                         f" arrival={arrival_skew:.2f}"
                         f" depth={depth:.2f}"
                         f" -> mph={mph:.3f} merged={merged}"
-                        f" err={rel_err*100:.2f}%"
-                        f" std={standard_score*100:.2f}%"
-                        f" ext={ext_score*100:.2f}%"
-                        f" rank={ranking_score*100:.2f}%"
+                        f" err={rel_err * 100:.2f}%"
+                        f" std={standard_score * 100:.2f}%"
+                        f" ext={ext_score * 100:.2f}%"
+                        f" rank={ranking_score * 100:.2f}%"
                         f" elapsed={_fmt_seconds(elapsed)}"
                     )
                     if (
@@ -1232,11 +1201,11 @@ def main() -> None:
         )
         _status(
             f"mph={best.throughput_mph:.3f} merged={best.merged}"
-            f" rel_error={best.rel_error*100:.2f}%"
-            f" std={best.standard_score*100:.2f}%"
-            f" ext={best.extended_score*100:.2f}%"
-            f" max_dim={best.max_dimension_error*100:.2f}%"
-            f" rank={best.score*100:.2f}% ({args.rank_score})"
+            f" rel_error={best.rel_error * 100:.2f}%"
+            f" std={best.standard_score * 100:.2f}%"
+            f" ext={best.extended_score * 100:.2f}%"
+            f" max_dim={best.max_dimension_error * 100:.2f}%"
+            f" rank={best.score * 100:.2f}% ({args.rank_score})"
         )
         _status(f"dimension errors: {_format_dim_errors(best.dimension_errors)}")
 
@@ -1325,10 +1294,10 @@ def main() -> None:
                 f" arrival={cand.arrival_skew:.2f}"
                 f" depth={cand.queue_depth_scale:.2f}"
                 f" -> mph={v_mph:.3f} merged={v_merged}"
-                f" err={v_err*100:.2f}%"
-                f" std={v_std_score*100:.2f}%"
-                f" ext={v_ext_score*100:.2f}%"
-                f" rank={v_rank*100:.2f}% ({args.rank_score})"
+                f" err={v_err * 100:.2f}%"
+                f" std={v_std_score * 100:.2f}%"
+                f" ext={v_ext_score * 100:.2f}%"
+                f" rank={v_rank * 100:.2f}% ({args.rank_score})"
                 f" elapsed={_fmt_seconds(elapsed)}"
             )
 
@@ -1353,10 +1322,7 @@ def main() -> None:
                 " accepted"
             )
         else:
-            _status(
-                "no validation candidates pass all gates; selecting best"
-                " overall"
-            )
+            _status("no validation candidates pass all gates; selecting best overall")
         final_path = (
             Path(args.scenario_out).resolve()
             if args.scenario_out
@@ -1634,28 +1600,24 @@ def main() -> None:
             "target="
             f"{target_mph:.3f} mph | {policy}={best_validation.throughput_mph:.3f} mph"
             f" | merged={best_validation.merged}"
-            f" | throughput_rel_error={best_validation.rel_error*100:.2f}%"
-            f" | standard_score={best_validation.standard_score*100:.2f}%"
-            f" | extended_score={best_validation.extended_score*100:.2f}%"
-            f" | max_dim_error={best_validation.max_dimension_error*100:.2f}%"
-            f" | rank_score={best_validation.score*100:.2f}% ({args.rank_score})"
+            f" | throughput_rel_error={best_validation.rel_error * 100:.2f}%"
+            f" | standard_score={best_validation.standard_score * 100:.2f}%"
+            f" | extended_score={best_validation.extended_score * 100:.2f}%"
+            f" | max_dim_error={best_validation.max_dimension_error * 100:.2f}%"
+            f" | rank_score={best_validation.score * 100:.2f}% ({args.rank_score})"
         )
         dim_errors = _format_dim_errors(best_validation.dimension_errors)
         _status(f"dimension errors: {dim_errors}")
-        _status(
-            "PASS"
-            if final_gate_results["accepted"]
-            else "MISS"
-        )
+        _status("PASS" if final_gate_results["accepted"] else "MISS")
         _status(
             "gate results:"
             f" throughput={'PASS' if final_gate_results['throughput_pass'] else 'MISS'}"
-            f" ({best_validation.rel_error*100:.2f}% <= {args.tolerance_pct:.2f}%)"
+            f" ({best_validation.rel_error * 100:.2f}% <= {args.tolerance_pct:.2f}%)"
             f" | rank_score={'PASS' if final_gate_results['score_pass'] else 'MISS'}"
-            f" ({best_validation.score*100:.2f}% <= {args.score_tolerance_pct:.2f}%)"
+            f" ({best_validation.score * 100:.2f}% <= {args.score_tolerance_pct:.2f}%)"
             " | max_dim="
             f"{'PASS' if final_gate_results['max_dimension_pass'] else 'MISS'}"
-            f" ({best_validation.max_dimension_error*100:.2f}%"
+            f" ({best_validation.max_dimension_error * 100:.2f}%"
             f" <= {args.max_dimension_error_pct:.2f}%)"
         )
         _status(f"decision={decision_status} reasons={','.join(decision_reason_codes)}")

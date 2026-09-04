@@ -151,6 +151,5 @@ def test_shipped_scenarios_declare_synthetic_provenance() -> None:
         state = load_scenario(scenario_path)
         assert state.scenario_metadata["scenario_kind"] == "synthetic"
         assert state.scenario_metadata["provenance"] == (
-            "Fully fabricated for this repository; "
-            "not derived from operational logs."
+            "Fully fabricated for this repository; not derived from operational logs."
         )
