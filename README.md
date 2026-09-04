@@ -50,8 +50,8 @@ The fake GitLab server is compatible with the real `python-gitlab` path used by 
 ## Quick Start
 
 ```bash
-# Install from the repository root (Python 3.12)
-python3.12 -m venv .venv
+# Install from the repository root (Python 3.14)
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 

@@ -1,7 +1,7 @@
 # lines — mqsim + glab_api Makefile
 #
 # Uses this repository's `.venv`.
-# Create it with Python 3.12 and install the project with `pip install -e ".[dev]"`.
+# Create it with Python 3.14 and install the project with `pip install -e ".[dev]"`.
 #
 # Usage:
 #   make test                   # run unit tests
