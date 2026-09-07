@@ -284,7 +284,7 @@ function renderExperiments() {
     const hasBenchmarkSummary = expData.calibrationSummary.length > 0;
     hintEl.textContent = hasBenchmarkSummary
       ? "Calibration benchmark summary + candidate-level tuning/validation detail."
-      : "Calibration grid search and 480-cycle validation outcome.";
+      : "Calibration grid search and validation outcome.";
     renderCalibrationExperiments(content);
   }
 }

@@ -1,4 +1,26 @@
-/* mqsim-sweep.js — Limit Sweep visualization tab */
+/* mqsim-sweep.js — parameter sweep visualization tab */
+
+// A sweep varies one parameter. Older documents only ever varied --limit and
+// carry no axis metadata, so default to that; newer ones name the axis so the
+// chart cannot label an interval sweep "limit=10".
+function sweepAxis() {
+  const a = (sweepData && sweepData.axis) || {};
+  return {
+    key: a.key || "limit",
+    label: a.label || "Limit",
+    unit: a.unit || "",
+    reads: a.reads,
+  };
+}
+
+function sweepAxisValues() {
+  return (sweepData && (sweepData.axis_values || sweepData.limits)) || [];
+}
+
+function sweepTick(v) {
+  const a = sweepAxis();
+  return `${a.key}=${v}${a.unit}`;
+}
 
 const SWEEP_POLICY_COLORS = {
   "cap+phase1": "#a371f7",
@@ -32,17 +54,70 @@ const SWEEP_METRIC_GROUPS = [
 let sweepVisiblePolicies = new Set();
 let sweepCurrentMetric = "Rebases";
 
-function loadSweepData(data) {
-  sweepData = data;
-  sweepVisiblePolicies = new Set(data.policies);
+function loadSweepData(docs) {
+  sweepDocs = (Array.isArray(docs) ? docs : [docs]).filter(Boolean);
+  if (!sweepDocs.length) return;
+  selectSweepDoc(0);
   const navTab = document.querySelector('[data-tab="sweep"]');
   if (navTab) navTab.classList.remove("disabled");
+}
+
+function selectSweepDoc(i) {
+  sweepData = sweepDocs[i] || sweepDocs[0];
+  sweepVisiblePolicies = new Set(sweepData.policies);
+}
+
+// A policy that cannot read the swept flag still moves across the axis. That
+// movement is this scenario's run-to-run noise, and it is the bar any claimed
+// effect has to clear. Documents that name no reader (a --limit sweep, where
+// every policy reads it) get no control and no claim.
+function sweepSpread(policy, metric) {
+  const rows = sweepData.data[policy];
+  if (!rows) return null;
+  const vals = rows.map(r => Number(r[metric])).filter(Number.isFinite);
+  if (vals.length < 2) return null;
+  return Math.max(...vals) - Math.min(...vals);
+}
+
+function renderSweepNoiseFloor() {
+  const el = document.getElementById("sweepNoiseFloor");
+  if (!el) return;
+  const reads = sweepAxis().reads || (sweepData.axis && sweepData.axis.reads);
+  const metric = sweepCurrentMetric;
+  if (!Array.isArray(reads) || !reads.length) {
+    el.innerHTML = `<span class="nf-none">Every policy reads `
+      + `${mqEscapeHtml(sweepAxis().key)}, so this sweep has no control `
+      + `policy and no noise floor to measure against.</span>`;
+    return;
+  }
+  const controls = sweepData.policies.filter(p => !reads.includes(p));
+  const floors = controls
+    .map(p => ({ p, d: sweepSpread(p, metric) }))
+    .filter(x => x.d != null);
+  if (!floors.length) { el.innerHTML = ""; return; }
+  const floor = Math.max(...floors.map(x => x.d));
+  const worst = floors.find(x => x.d === floor);
+  const rows = reads
+    .map(p => ({ p, d: sweepSpread(p, metric) }))
+    .filter(x => x.d != null);
+  const verdict = rows.map(x => {
+    const clears = x.d > floor;
+    return `<b style="color:${clears ? "var(--green)" : "var(--muted)"}">`
+      + `${mqEscapeHtml(x.p)} ${x.d.toFixed(1)}</b>`
+      + (clears ? " clears it" : " is inside it");
+  }).join(", ");
+  el.innerHTML = `<b>Noise floor</b> for ${mqEscapeHtml(metric)}: `
+    + `${floor.toFixed(1)} — the spread of ${mqEscapeHtml(worst.p)}, which `
+    + `does not read ${mqEscapeHtml(sweepAxis().key)} and so cannot respond `
+    + `to it (controls: ${controls.map(mqEscapeHtml).join(", ")}). `
+    + `Swept policy spread: ${verdict}.`;
 }
 
 function renderSweepTab() {
   if (!sweepData) return;
   renderSweepHeader();
   renderSweepControls();
+  renderSweepNoiseFloor();
   renderSweepCharts();
   renderSweepTable();
 }
@@ -50,11 +125,24 @@ function renderSweepTab() {
 function renderSweepHeader() {
   const el = document.getElementById("sweepHeader");
   const s = sweepData.setup || {};
-  el.innerHTML = `<h2>${mqEscapeHtml(sweepData.title || "Limit Sweep")}</h2>`
+  // With more than one sweep loaded the axis picker is the primary control:
+  // the three caps are separate questions, not three views of one answer.
+  const picker = sweepDocs.length > 1
+    ? `<div class="sweep-axis-tabs">` + sweepDocs.map((d, i) => {
+      const label = (d.axis && d.axis.label) || "Limit";
+      const active = d === sweepData ? " active" : "";
+      return `<button class="cp-tab${active}" data-sweep-doc="${i}">${mqEscapeHtml(label)}</button>`;
+    }).join("") + `</div>`
+    : "";
+  el.innerHTML = picker
+    + `<h2>${mqEscapeHtml(sweepData.title || (sweepAxis().label + " Sweep"))}</h2>`
     + `<p>${mqEscapeHtml(sweepData.description || "")}</p>`
     + `<div class="sweep-setup">`
     + Object.entries(s).map(([k, v]) => `<span><b>${mqEscapeHtml(k)}:</b> ${mqEscapeHtml(String(v))}</span>`).join("")
     + `</div>`;
+  el.querySelectorAll("[data-sweep-doc]").forEach(b => {
+    b.onclick = () => { selectSweepDoc(Number(b.dataset.sweepDoc)); renderSweepTab(); };
+  });
 }
 
 let _sweepControlsInit = false;
@@ -75,6 +163,7 @@ function renderSweepControls() {
     });
     sel.addEventListener("change", () => {
       sweepCurrentMetric = sel.value;
+      renderSweepNoiseFloor();
       renderSweepCharts();
       renderSweepTable();
     });
@@ -121,7 +210,7 @@ function renderSweepCharts() {
 function renderSweepBarChart() {
   const ctx = document.getElementById("sweepBarCanvas");
   const series = getSweepSeriesForMetric(sweepCurrentMetric);
-  const labels = sweepData.limits.map(l => `limit=${l}`);
+  const labels = sweepAxisValues().map(sweepTick);
 
   document.getElementById("sweepBarTitle").textContent = `${sweepCurrentMetric} (grouped bars)`;
 
@@ -190,7 +279,7 @@ function renderSweepConvergeChart() {
   if (!aData || !bData) return;
 
   const metric = sweepCurrentMetric;
-  const labels = sweepData.limits.map(l => `limit=${l}`);
+  const labels = sweepAxisValues().map(sweepTick);
   const deltaMetric = aData.map((d, i) => (d[metric] ?? 0) - (bData[i][metric] ?? 0));
 
   const metricLabel = document.getElementById("sweepConvergeMetricLabel");
@@ -242,12 +331,13 @@ function renderSweepConvergeChart() {
 function renderSweepTable() {
   const table = document.getElementById("sweepDataTable");
   const metric = sweepCurrentMetric;
-  document.getElementById("sweepTableTitle").textContent = `${metric} — All Limits`;
+  document.getElementById("sweepTableTitle").textContent =
+    `${metric} — All ${sweepAxis().label}s`;
 
   const policies = sweepData.policies.filter(p => sweepVisiblePolicies.has(p));
-  const limits = sweepData.limits;
+  const limits = sweepAxisValues();
 
-  let html = `<thead><tr><th>Limit</th>` + policies.map(p =>
+  let html = `<thead><tr><th>${mqEscapeHtml(sweepAxis().label)}</th>` + policies.map(p =>
     `<th style="color:${SWEEP_POLICY_COLORS[p] || "#c9d1d9"}">${mqEscapeHtml(p)}</th>`
   ).join("") + `</tr></thead><tbody>`;
 

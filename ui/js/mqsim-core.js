@@ -17,7 +17,7 @@ const MERGE_LABELS_PRIORITY = [
   "auto-merge",
   "lgtm"
 ];
-let playhead = 0, playTimer = null, xRange = [0, 100];
+let playhead = 0, playTimer = null, xRange = null;
 let filesData = [], activeIndex = 0;
 
 // Time display mode: "ticks" | "relative" | "absolute"
@@ -132,6 +132,7 @@ let mcVisiblePolicies = new Set();
 // Sweep shared state
 let sweepLoaded = false;
 let sweepData = null;
+let sweepDocs = [];   // one per loaded sweep; each varies a different axis
 let multiMergeLoaded = false;
 let multiMergeFileName = "";
 let sweepLineChart = null;
@@ -784,9 +785,9 @@ function getActiveTabName() {
 
 function renderTabContent(name) {
   if (name === "kanban") renderKanbanTab();
-  if (name === "composition") { renderChartPolicyTabs(); refreshCharts(); }
-  if (name === "bars") renderBarsTab();
-  if (name === "swimlane") renderSwimlaneTab();
+  if (name === "composition") { renderChartPolicyTabs(); refreshCharts(); renderWindowBar("windowBarComposition"); }
+  if (name === "bars") { renderBarsTab(); renderWindowBar("windowBarBars"); }
+  if (name === "swimlane") { renderSwimlaneTab(); renderWindowBar("windowBarSwimlane"); }
   if (name === "experiments") renderExperiments();
   if (name === "stats") renderStats();
   if (name === "simulation") renderSimulationTab();
@@ -1769,6 +1770,7 @@ function unloadAllData() {
   mcData = null;
   sweepLoaded = false;
   sweepData = null;
+  sweepDocs = [];
   mqDestroyChartIfPresent(sweepLineChart); sweepLineChart = null;
   mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
   mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
@@ -1788,7 +1790,7 @@ function unloadAllData() {
   chartIdxR = 1;
   swimIdx = 0;
   playhead = 0;
-  xRange = [0, 0];
+  xRange = null;
   kanbanVisibleIdxs = new Set();
   barVisibleIdxs = new Set();
   mcVisiblePolicies = new Set();
@@ -1804,8 +1806,10 @@ function unloadAllData() {
     scrub.max = 0;
     scrub.value = 0;
   }
-  const playLabel = document.getElementById("playLabel");
-  if (playLabel) { playLabel.textContent = "Step 0 / 0"; playLabel.style.minWidth = ""; }
+  const playNow = document.getElementById("playNow");
+  const playTotal = document.getElementById("playTotal");
+  if (playNow) { playNow.textContent = "Step 0"; playNow.style.minWidth = ""; }
+  if (playTotal) playTotal.textContent = " / 0";
   _playLabelLockedWidth = 0;
 
   const mcContent = document.getElementById("mcContent");
@@ -1858,7 +1862,9 @@ function loadFiles(fl, opts = {}) {
         metricsFiles.push(x);
       });
       if (sweepFiles.length) {
-        loadSweepData(sweepFiles[sweepFiles.length - 1]);
+        // Three caps, three sweeps. Keeping only the last one meant a run
+        // directory holding all three showed one of them.
+        loadSweepData(sweepFiles);
         sweepLoaded = true;
         sweepJsonLoaded = true;
       }
@@ -1873,8 +1879,8 @@ function loadFiles(fl, opts = {}) {
         filesData.forEach(d => { if (!d.metrics) { const M = computeFileMetrics(d.events); d.metrics = M; d.packed = M.packed; } });
         kanbanVisibleIdxs = new Set(filesData.map((_, i) => i));
         barVisibleIdxs = new Set(filesData.map((_, i) => i));
-        const mx = globalMaxTick(); playhead = 0; xRange = [0, mx];
-        document.getElementById("playLabel").textContent = "Step 0 / " + mx;
+        const mx = globalMaxTick(); playhead = 0; xRange = null;
+        updatePlayLabel();
         document.getElementById("scrub").max = mx;
         document.getElementById("scrub").value = 0;
         enableTabs(["stats", "simulation", "kanban", "composition", "bars", "swimlane"]);
@@ -1985,7 +1991,7 @@ function renderFileList() {
     chips.push(`<span class="file-chip fc-csv" data-unload="calibration" title="Click to unload">calibration (${expData.calibrationGrid.length}t/${expData.calibrationValidation.length}v)<span class="fc-x">\u00d7</span></span>`);
   }
   if (sweepLoaded && sweepData) {
-    chips.push(`<span class="file-chip fc-ndjson" data-unload="sweep" title="Click to unload">sweep (${sweepData.limits.length} limits × ${sweepData.policies.length} policies)<span class="fc-x">\u00d7</span></span>`);
+    chips.push(`<span class="file-chip fc-ndjson" data-unload="sweep" title="Click to unload">sweep (${sweepDocs.length} ${sweepDocs.length === 1 ? 'axis' : 'axes'} × ${sweepData.policies.length} policies)<span class="fc-x">\u00d7</span></span>`);
   }
   if (perLabelData) {
     const pCount = Object.keys(perLabelData).length;
@@ -2022,6 +2028,7 @@ function renderFileList() {
     } else if (kind === "sweep") {
       sweepLoaded = false;
       sweepData = null;
+      sweepDocs = [];
       mqDestroyChartIfPresent(sweepLineChart); sweepLineChart = null;
       mqDestroyChartIfPresent(sweepBarChart); sweepBarChart = null;
       mqDestroyChartIfPresent(sweepConvergeChart); sweepConvergeChart = null;
@@ -3028,6 +3035,7 @@ function renderStats() {
 
   if (statsSubtab === "metrics" && filesData.length) {
     renderScenarioInfoCard();
+    renderVerdictBand();
     renderMetricPicker();
     const metrics = filesData.map(d => d.metrics);
     renderHeroCards(metrics);
@@ -3301,6 +3309,152 @@ document.getElementById("metricPicker").addEventListener("click", e => {
   else setActiveHeroMetricKeys([...current, k]);
   renderStats();
 });
+// --- Verdict band -----------------------------------------------------------
+// Throughput per hour is a platform accounting number and it read as a five-way
+// tie on this data. A tenant experiences wait time and the bad tail. Both are
+// in the same run summary; this states them against a baseline.
+let verdictBaseIdx = null, verdictCandIdx = null;
+
+const VERDICT_TENANT_ROWS = [
+  { key: "wait_p50", label: "Median time to merge", fmt: "dur" },
+  { key: "wait_p95", label: "p95 tail", fmt: "dur" },
+  { key: "wait_max", label: "Worst MR", fmt: "dur" },
+  { key: "starved_mrs", label: "MRs waiting > 100 ticks", fmt: "int" },
+];
+
+const VERDICT_PLATFORM_ROWS = [
+  { key: "_rebases_per_merge", label: "Rebases per merge", fmt: "d2" },
+  { key: "dup", label: "Wasted rebases", fmt: "int" },
+  { key: "ci_failures", label: "CI failures", fmt: "int" },
+  { key: "peak", label: "Peak CI concurrency", fmt: "int" },
+];
+
+function verdictValue(m, key) {
+  if (!m) return null;
+  if (key === "_rebases_per_merge") {
+    const merged = Number(m.mrs_merged);
+    if (!merged) return null;
+    return Number(m.rebase_calls) / merged;
+  }
+  const v = Number(m[key]);
+  return Number.isFinite(v) ? v : null;
+}
+
+// A tenant reads "6h22m", not the cmp table's "382:30".
+function verdictDuration(ticks, tickSeconds) {
+  const secs = Math.round(Number(ticks) * (Number(tickSeconds) || 60));
+  if (!Number.isFinite(secs)) return "—";
+  const h = Math.floor(secs / 3600), m = Math.round((secs % 3600) / 60);
+  if (h > 0) return m > 0 ? `${h}h${String(m).padStart(2, "0")}m` : `${h}h`;
+  return `${m}m`;
+}
+
+function verdictFmt(v, kind, tickSeconds) {
+  if (v == null) return "—";
+  if (kind === "dur") return verdictDuration(v, tickSeconds);
+  if (kind === "d2") return v.toFixed(2);
+  return String(Math.round(v));
+}
+
+// Both panels are "lower is better", so one rule covers every row.
+function verdictDelta(base, cand) {
+  if (base == null || cand == null || base === 0) return null;
+  return (cand - base) / base;
+}
+
+function pickVerdictPair() {
+  const sel = getSelectedIndices().filter(i => filesData[i]?.metrics);
+  if (sel.length < 2) return null;
+  const named = n => sel.find(i => filesData[i].name.includes(n));
+  const byWait = [...sel].sort(
+    (a, b) => (verdictValue(filesData[a].metrics, "wait_p50") ?? Infinity)
+      - (verdictValue(filesData[b].metrics, "wait_p50") ?? Infinity));
+  // old-burst is the pre-OMM production policy, so it is the default baseline
+  // whenever it is loaded; otherwise the slowest trace stands in for it.
+  let base = verdictBaseIdx != null && sel.includes(verdictBaseIdx)
+    ? verdictBaseIdx
+    : (named("old-burst") ?? byWait[byWait.length - 1]);
+  let cand = verdictCandIdx != null && sel.includes(verdictCandIdx)
+    ? verdictCandIdx
+    : byWait.find(i => i !== base);
+  if (cand == null || cand === base) return null;
+  return { base, cand };
+}
+
+function verdictHeadline(bm, cm) {
+  const p50b = verdictValue(bm, "wait_p50"), p50c = verdictValue(cm, "wait_p50");
+  const p95b = verdictValue(bm, "wait_p95"), p95c = verdictValue(cm, "wait_p95");
+  const parts = [];
+  if (p50b && p50c != null) {
+    const r = p50c / p50b;
+    parts.push(r < 1
+      ? `an MR merges in ${r.toFixed(2)}× the time`
+      : `an MR merges in ${r.toFixed(2)}× the time (slower)`);
+  }
+  if (p95b && p95c != null) {
+    const d = (p95b - p95c) / p95b;
+    parts.push(d > 0
+      ? `the p95 tail shrinks by ${Math.round(d * 100)}%`
+      : `the p95 tail grows by ${Math.round(-d * 100)}%`);
+  }
+  return parts.length ? parts.join(", and ") + "." : "";
+}
+
+function verdictRowsHtml(rows, bm, cm, tickSeconds) {
+  return rows.map(r => {
+    const b = verdictValue(bm, r.key), c = verdictValue(cm, r.key);
+    const d = verdictDelta(b, c);
+    const cls = d == null ? "" : d < -0.005 ? " better" : d > 0.005 ? " worse" : "";
+    const pct = d == null ? "—"
+      : `${d > 0 ? "+" : ""}${Math.round(d * 100)}%`;
+    return `<tr><th>${mqEscapeHtml(r.label)}</th>`
+      + `<td>${verdictFmt(c, r.fmt, tickSeconds)}</td>`
+      + `<td class="vd-was">${verdictFmt(b, r.fmt, tickSeconds)}</td>`
+      + `<td class="vd-delta${cls}">${pct}</td></tr>`;
+  }).join("");
+}
+
+function renderVerdictBand() {
+  const el = document.getElementById("verdictBand");
+  if (!el) return;
+  const pair = pickVerdictPair();
+  if (!pair) {
+    el.innerHTML = `<div class="vd-empty">Load two or more policy traces to compare.</div>`;
+    return;
+  }
+  const { base, cand } = pair;
+  const bm = filesData[base].metrics, cm = filesData[cand].metrics;
+  const tickSeconds = cm.tick_seconds || bm.tick_seconds;
+  const opts = idx => getSelectedIndices().filter(i => filesData[i]?.metrics).map(i =>
+    `<option value="${i}"${i === idx ? " selected" : ""}>${mqEscapeHtml(filesData[i].name)}</option>`
+  ).join("");
+
+  el.innerHTML =
+    `<div class="vd-top">`
+    + `<select id="verdictCand" class="vd-pick">${opts(cand)}</select>`
+    + `<span class="vd-vs">vs</span>`
+    + `<select id="verdictBase" class="vd-pick">${opts(base)}</select>`
+    + `<p class="vd-headline">${mqEscapeHtml(verdictHeadline(bm, cm))}</p>`
+    + `</div>`
+    + `<div class="vd-cols">`
+    + `<div class="vd-col"><h4>Tenant — what an MR author waits for</h4>`
+    + `<table class="vd-table"><thead><tr><th></th><th>${mqEscapeHtml(filesData[cand].name)}</th>`
+    + `<th>${mqEscapeHtml(filesData[base].name)}</th><th>Δ</th></tr></thead>`
+    + `<tbody>${verdictRowsHtml(VERDICT_TENANT_ROWS, bm, cm, tickSeconds)}</tbody></table></div>`
+    + `<div class="vd-col"><h4>Platform — what the CI fleet pays</h4>`
+    + `<table class="vd-table"><thead><tr><th></th><th>${mqEscapeHtml(filesData[cand].name)}</th>`
+    + `<th>${mqEscapeHtml(filesData[base].name)}</th><th>Δ</th></tr></thead>`
+    + `<tbody>${verdictRowsHtml(VERDICT_PLATFORM_ROWS, bm, cm, tickSeconds)}</tbody></table></div>`
+    + `</div>`;
+
+  el.querySelector("#verdictCand").onchange = e => {
+    verdictCandIdx = Number(e.target.value); renderVerdictBand();
+  };
+  el.querySelector("#verdictBase").onchange = e => {
+    verdictBaseIdx = Number(e.target.value); renderVerdictBand();
+  };
+}
+
 function renderHeroCards(metrics) {
   const activeKeys = getActiveHeroMetricKeys();
   const cards = getVisibleHeroMetrics().filter(m => activeKeys.includes(m.key));
@@ -3723,11 +3877,11 @@ function refreshCharts() {
   const yMax = getSharedYMax();
   if (pL) {
     doChart(pL, "chartCanvasL", "L", yMax, chartIdxL);
-    dSwim(pL, "swimAreaL", { forceFullRange: true });
+    dSwim(pL, "swimAreaL");
   }
   if (chartViewMode === "compare" && pR) {
     doChart(pR, "chartCanvasR", "R", yMax, chartIdxR);
-    dSwim(pR, "swimAreaR", { forceFullRange: true });
+    dSwim(pR, "swimAreaR");
   }
 }
 
@@ -3752,16 +3906,17 @@ function getBarsSeriesValues(packed, key, windowFilter, fileIdx) {
               : []
   );
   if (!Array.isArray(src)) return [];
-  if (!windowFilter || windowFilter === "all") {
-    return src.map(v => Number(v)).filter(v => Number.isFinite(v));
-  }
+  // Clipped to the visible window first: a mean drawn across a peak-only view
+  // but computed over all 24 hours states something false.
+  const [lo, hi] = getXWindow(packed.maxTick);
+  const inWindow = src.slice(lo, Math.min(hi, src.length - 1) + 1);
   const ctx = getTimeContext(fileIdx);
-  if (!ctx.peakHoursUtc.size) {
-    return src.map(v => Number(v)).filter(v => Number.isFinite(v));
+  if (!windowFilter || windowFilter === "all" || !ctx.peakHoursUtc.size) {
+    return inWindow.map(v => Number(v)).filter(v => Number.isFinite(v));
   }
   const wantPeak = windowFilter === "peak";
-  return src.map((v, t) => {
-    const isPeak = isTickInPeak(t, ctx);
+  return inWindow.map((v, i) => {
+    const isPeak = isTickInPeak(lo + i, ctx);
     return (isPeak === wantPeak) ? Number(v) : NaN;
   }).filter(v => Number.isFinite(v));
 }
@@ -3811,7 +3966,8 @@ function plBarsStatLine(packed, fileIdx) {
 
       const color = BARS_LEGEND_COLORS[key] || "#8b949e";
       const winLabel = _barsStatWindowLabel(barsStatsWindow);
-      const label = `${key} ${winLabel}${mode.toUpperCase()}: ${formatBarsStatLabelValue(value)}`;
+      const label = `${key} ${winLabel}${mode.toUpperCase()}: ${formatBarsStatLabelValue(value)}`
+        + (isXWindowed() ? " · in window" : "");
 
       const ctx = chart.ctx;
       ctx.save();
@@ -3909,7 +4065,6 @@ function renderBarsTab() {
     return;
   }
   const single = selected.length === 1;
-  const computeSeriesMax = (arr) => (Array.isArray(arr) && arr.length ? Math.max(...arr.map(v => Number(v) || 0)) : 0);
   const sharedYMax = (() => {
     if (!selected.length) return null;
     let maxAcross = 0;
@@ -3917,17 +4072,14 @@ function renderBarsTab() {
       const packed = filesData[idx]?.packed;
       if (!packed?.series) return;
       const s = packed.series;
-      const stackMax = Math.max(
-        0,
-        ...s.labels.map((_, i) => (
-          (Number(s.pool[i]) || 0)
-          + (Number(s.active[i]) || 0)
-          + (Number(s.stale[i]) || 0)
-          + (Number(s.rest[i]) || 0)
-        ))
-      );
-      const openMax = computeSeriesMax(s.open);
-      maxAcross = Math.max(maxAcross, stackMax, openMax);
+      // Windowed: a y axis sized by the peak flattens an off-peak window to
+      // nothing. Still shared across policies, so the comparison holds.
+      const [lo, hi] = getXWindow(packed.maxTick);
+      for (let i = lo; i <= Math.min(hi, s.labels.length - 1); i++) {
+        const stack = (Number(s.pool[i]) || 0) + (Number(s.active[i]) || 0)
+          + (Number(s.stale[i]) || 0) + (Number(s.rest[i]) || 0);
+        maxAcross = Math.max(maxAcross, stack, Number(s.open[i]) || 0);
+      }
     });
     // Keep a little headroom so line/legend never clips.
     return maxAcross > 0 ? Math.ceil(maxAcross * 1.05) : 1;
@@ -3982,7 +4134,7 @@ function renderSwimlaneTab() {
     area.innerHTML = `<div class="kanban-empty">No data for selected policy.</div>`;
     return;
   }
-  dSwim(d.packed, "swimAreaSingle", { forceFullRange: true });
+  dSwim(d.packed, "swimAreaSingle");
 }
 
 const segmentColorForKind = kind => (
@@ -4614,10 +4766,10 @@ function refreshLockedSwimOnly(swimId, opts = {}) {
   const panelPos = getPanelScroll(swimId);
   if (swimId === "swimAreaL") {
     const p = filesData[chartIdxL]?.packed;
-    if (p) dSwim(p, "swimAreaL", { skipTipRender, forceFullRange: true });
+    if (p) dSwim(p, "swimAreaL", { skipTipRender });
   } else if (swimId === "swimAreaR") {
     const p = filesData[chartIdxR]?.packed;
-    if (chartViewMode === "compare" && p) dSwim(p, "swimAreaR", { skipTipRender, forceFullRange: true });
+    if (chartViewMode === "compare" && p) dSwim(p, "swimAreaR", { skipTipRender });
   } else if (swimId === "swimAreaSingle") {
     const p = filesData[swimIdx]?.packed;
     if (p) dSwim(p, "swimAreaSingle", { skipTipRender });
@@ -4692,19 +4844,203 @@ function getSharedYMax() {
   if (chartViewMode !== "compare") return undefined;
   const pL = filesData[chartIdxL]?.packed, pR = filesData[chartIdxR]?.packed;
   if (!pL || !pR) return undefined;
-  const x0 = 0;
-  const x1L = pL.maxTick;
-  const x1R = pR.maxTick;
   let mx = 0;
   for (const p of [pL, pR]) {
-    const hi = p === pL ? x1L : x1R;
-    for (let t = Math.max(0, Math.floor(x0)); t <= Math.min(p.maxTick, Math.ceil(hi)); t++) {
+    const [lo, hi] = getXWindow(p.maxTick);
+    for (let t = Math.max(0, Math.floor(lo)); t <= Math.min(p.maxTick, Math.ceil(hi)); t++) {
       const stack = (p.series.pool[t] || 0) + (p.series.active[t] || 0) + (p.series.stale[t] || 0) + (p.series.rest[t] || 0);
       const line = p.series.open[t] || 0;
       mx = Math.max(mx, stack, line);
     }
   }
   return mx > 0 ? mx : undefined;
+}
+
+// --- Time window ------------------------------------------------------------
+// A 24h run at 30s ticks is 2880 columns wide. Every surface still renders, but
+// one CI pipeline is under half a pixel and the swimlane reads as noise. The
+// window narrows the tick domain that every composition chart, All-Policies
+// panel and swimlane share.
+// xRange === null is the whole run.
+const WINDOW_MIN_SPAN = 20;
+
+function getXWindow(maxTick) {
+  const mx = Math.max(0, maxTick || 0);
+  if (!Array.isArray(xRange)) return [0, mx];
+  let a = Math.round(xRange[0]), b = Math.round(xRange[1]);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return [0, mx];
+  if (b < a) [a, b] = [b, a];
+  a = Math.max(0, Math.min(mx, a));
+  b = Math.max(0, Math.min(mx, b));
+  const minSpan = Math.min(WINDOW_MIN_SPAN, mx);
+  if (b - a < minSpan) {
+    b = Math.min(mx, a + minSpan);
+    a = Math.max(0, b - minSpan);
+  }
+  return [a, b];
+}
+
+function isXWindowed() { return Array.isArray(xRange); }
+
+function setXWindow(range) {
+  xRange = range ? [range[0], range[1]] : null;
+  const name = getActiveTabName();
+  renderTabContent(name);
+  updateSwimTooltipVisibilityForTab(name);
+}
+
+// The window is global, but its overview strip is drawn from whichever trace
+// the active tab is showing, so the strip and the surface below it agree.
+function windowReferenceIdx() {
+  const name = getActiveTabName();
+  if (name === "swimlane") return swimIdx;
+  if (name === "bars") return [...barVisibleIdxs][0] ?? 0;
+  return chartIdxL;
+}
+
+function windowSpanText(span, tCtx) {
+  const secs = span * (tCtx?.tickSeconds || 60);
+  if (secs < 5400) return `${(secs / 60).toFixed(0)} min`;
+  return `${(secs / 3600).toFixed(1)} h`;
+}
+
+function windowPresets(mx, tCtx) {
+  const peak = getPeakTickRanges(tCtx, mx);
+  const out = [{ key: "full", label: "Full", range: null }];
+  if (peak.length) {
+    out.push({ key: "peak", label: "Peak", range: [peak[0][0], peak[peak.length - 1][1]] });
+    const off = peak[peak.length - 1][1];
+    if (mx - off > WINDOW_MIN_SPAN) out.push({ key: "offpeak", label: "Off-peak", range: [off, mx] });
+  }
+  out.push({ key: "first", label: "First quarter", range: [0, Math.round(mx / 4)] });
+  out.push({ key: "last", label: "Last quarter", range: [Math.round(mx * 0.75), mx] });
+  return out;
+}
+
+function renderWindowBar(hostId) {
+  const host = document.getElementById(hostId);
+  if (!host) return;
+  const idx = windowReferenceIdx();
+  const p = filesData[idx]?.packed || filesData[0]?.packed;
+  const mx = globalMaxTick();
+  if (!p || !mx) { host.innerHTML = ""; host.hidden = true; return; }
+  host.hidden = false;
+  const tCtx = getTimeContext(idx);
+  const [w0, w1] = getXWindow(mx);
+  const presets = windowPresets(mx, tCtx);
+  const activeKey = !isXWindowed()
+    ? "full"
+    : (presets.find(o => o.range && o.range[0] === w0 && o.range[1] === w1)?.key || "custom");
+
+  host.innerHTML =
+    `<div class="win-head"><span class="tab-control-title">Window</span>`
+    + presets.map(o =>
+      `<button class="win-preset${o.key === activeKey ? " active" : ""}" data-win-preset="${o.key}">${mqEscapeHtml(o.label)}</button>`
+    ).join("")
+    + `<button class="win-preset" data-win-nudge="out" title="Double the window">Zoom out</button>`
+    + `<button class="win-preset" data-win-nudge="prev" title="Pan one window earlier">&#9664;</button>`
+    + `<button class="win-preset" data-win-nudge="next" title="Pan one window later">&#9654;</button>`
+    + `<span class="win-readout">${isXWindowed()
+      ? `ticks ${w0}–${w1} · ${windowSpanText(w1 - w0, tCtx)} · ${Math.round(100 * (w1 - w0) / mx)}% of run`
+      : `ticks 0–${mx} · ${windowSpanText(mx, tCtx)} · full run`}</span>`
+    + `</div><div class="win-brush"></div>`;
+
+  host.querySelectorAll("[data-win-preset]").forEach(b => {
+    b.onclick = () => {
+      const o = presets.find(x => x.key === b.dataset.winPreset);
+      if (o) setXWindow(o.range);
+    };
+  });
+  host.querySelectorAll("[data-win-nudge]").forEach(b => {
+    b.onclick = () => {
+      const span = w1 - w0;
+      if (b.dataset.winNudge === "out") {
+        const grow = Math.round(span / 2);
+        const a = w0 - grow, z = w1 + grow;
+        setXWindow(a <= 0 && z >= mx ? null : [Math.max(0, a), Math.min(mx, z)]);
+        return;
+      }
+      const dir = b.dataset.winNudge === "next" ? 1 : -1;
+      let a = w0 + dir * span, z = w1 + dir * span;
+      if (a < 0) { a = 0; z = span; }
+      if (z > mx) { z = mx; a = mx - span; }
+      setXWindow([a, z]);
+    };
+  });
+  drawWindowBrush(host.querySelector(".win-brush"), p, mx, tCtx);
+}
+
+function drawWindowBrush(container, p, mx, tCtx) {
+  // Hand-rolled rather than d3.brushX: the vendored d3 is scale/selection/axis
+  // only, and a drag-select over one rect does not justify pulling in
+  // d3-brush, d3-drag, d3-transition and d3-shape under a self-only CSP.
+  if (!container) return;
+  const w = Math.max(240, container.clientWidth || container.parentElement?.clientWidth || 600);
+  const h = 46, axisH = 14, plot = h - axisH;
+  const sel = d3.select(container).html("");
+  const svg = sel.append("svg").attr("width", w).attr("height", h);
+  const x = d3.scaleLinear().domain([0, mx]).range([0, w]);
+
+  getPeakTickRanges(tCtx, mx).forEach(([t0, t1]) => {
+    svg.append("rect").attr("x", x(t0)).attr("y", 0)
+      .attr("width", Math.max(1, x(t1) - x(t0))).attr("height", plot)
+      .attr("fill", "rgba(210,153,34,0.13)");
+  });
+
+  // One sample per pixel column: 2880 path points would render identically.
+  const open = p.series?.open || [];
+  if (open.length) {
+    const openMax = d3.max(open) || 1;
+    const y = d3.scaleLinear().domain([0, openMax]).range([plot - 1, 1]);
+    const cols = Math.min(open.length, Math.round(w));
+    const pts = [];
+    for (let i = 0; i < cols; i++) {
+      const lo = Math.floor(i * open.length / cols);
+      const hi = Math.max(lo + 1, Math.floor((i + 1) * open.length / cols));
+      let peak = 0;
+      for (let k = lo; k < hi; k++) peak = Math.max(peak, open[k]);
+      pts.push(`${(i * w / cols).toFixed(1)},${y(peak).toFixed(1)}`);
+    }
+    svg.append("path")
+      .attr("d", `M0,${plot} L${pts.join(" L")} L${w},${plot} Z`)
+      .attr("fill", "rgba(88,166,255,0.22)").attr("stroke", "rgba(88,166,255,0.75)")
+      .attr("stroke-width", 1);
+  }
+
+  const ax = d3.axisBottom(x).ticks(8);
+  if (timeDisplayMode !== "ticks") ax.tickFormat(tick => fmtTickAsTime(tick, tCtx));
+  svg.append("g").attr("class", "win-axis").attr("transform", `translate(0,${plot})`).call(ax);
+
+  const selRect = svg.append("rect").attr("class", "win-sel").attr("y", 0).attr("height", plot)
+    .attr("pointer-events", "none").style("display", "none");
+  const paint = (px0, px1) => {
+    selRect.attr("x", Math.min(px0, px1)).attr("width", Math.abs(px1 - px0))
+      .style("display", null);
+  };
+  if (isXWindowed()) {
+    const [w0, w1] = getXWindow(mx);
+    paint(x(w0), x(w1));
+  }
+
+  // Drag to select; a click with no drag clears the window.
+  const hit = svg.append("rect").attr("class", "win-hit")
+    .attr("x", 0).attr("y", 0).attr("width", w).attr("height", plot)
+    .attr("fill", "transparent").style("cursor", "crosshair");
+  let anchor = null;
+  hit.on("pointerdown", function(event) {
+    anchor = d3.pointer(event, this)[0];
+    this.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  }).on("pointermove", function(event) {
+    if (anchor == null) return;
+    paint(anchor, d3.pointer(event, this)[0]);
+  }).on("pointerup", function(event) {
+    if (anchor == null) return;
+    const px = d3.pointer(event, this)[0];
+    const a = anchor;
+    anchor = null;
+    setXWindow(Math.abs(px - a) < 4 ? null : [x.invert(Math.min(a, px)), x.invert(Math.max(a, px))]);
+  }).on("pointercancel", () => { anchor = null; });
 }
 
 function buildCompositionChart(canvas, packed, opts = {}) {
@@ -4715,6 +5051,7 @@ function buildCompositionChart(canvas, packed, opts = {}) {
   // factories — is shared config both tabs already read identically.
   const { fileIdx = 0, sharedYMax = null, tooltipScope = "composition" } = opts;
   const tCtx = getTimeContext(fileIdx);
+  const [winX0, winX1] = getXWindow(packed.maxTick);
   const labels = timeDisplayMode === "ticks"
     ? packed.series.labels
     : packed.series.labels.map(t => fmtTickAsTime(t, tCtx));
@@ -4730,8 +5067,8 @@ function buildCompositionChart(canvas, packed, opts = {}) {
     },
     scales: {
       x: {
-        min: 0,
-        max: packed.maxTick,
+        min: winX0,
+        max: winX1,
         title: { display: true, text: timeAxisTitle() },
         ticks: { maxTicksLimit: 12 },
       },
@@ -4791,28 +5128,29 @@ function syncWindow() {
   const yMax = getSharedYMax();
   if (pL) {
     doChart(pL, "chartCanvasL", "L", yMax, chartIdxL);
-    dSwim(pL, "swimAreaL", { forceFullRange: true });
+    dSwim(pL, "swimAreaL");
   }
   if (chartViewMode === "compare" && pR) {
     doChart(pR, "chartCanvasR", "R", yMax, chartIdxR);
-    dSwim(pR, "swimAreaR", { forceFullRange: true });
+    dSwim(pR, "swimAreaR");
   }
   const pS = filesData[swimIdx]?.packed;
-  if (pS) dSwim(pS, "swimAreaSingle", { forceFullRange: true });
+  if (pS) dSwim(pS, "swimAreaSingle");
 }
 
 function dSwim(p, swimId, opts = {}) {
   const skipTipRender = !!opts.skipTipRender;
-  const forceFullRange = !!opts.forceFullRange;
-  const x0 = 0;
-  const x1 = p.maxTick;
+  const [x0, x1] = getXWindow(p.maxTick);
   const swimEl = document.getElementById(swimId);
   const prevScrollLeft = swimEl ? swimEl.scrollLeft : 0;
   const prevScrollTop = swimEl ? swimEl.scrollTop : 0;
   const panelPos = getPanelScroll(swimId);
   const pagePos = getPageScroll();
   const sw = d3.select("#" + swimId).html(""); const t = p.maxTick;
-  const list = new Set(); p.segs.forEach(s => list.add(s.mr));
+  // Only lanes with something inside the window; 108 mostly-empty rows
+  // otherwise.
+  const list = new Set();
+  p.segs.forEach(s => { if (s.end >= x0 && s.start <= x1) list.add(s.mr); });
   const mrL = Array.from(list).sort((a, b) => a - b);
   if (!mrL.length) { sw.append("p").text("No segments."); return; }
   const owner = filesData.find(d => d.packed === p);
@@ -4989,7 +5327,7 @@ function dSwim(p, swimId, opts = {}) {
       st.lockMinTick = lockMin;
       st.lockMaxTick = lockMax;
       renderLockedSwimTip(swimId);
-      dSwim(p, swimId, { skipTipRender: true, forceFullRange }); // repaint indicator at locked tick
+      dSwim(p, swimId, { skipTipRender: true }); // repaint indicator at locked tick
       restorePageScroll(pagePos);
       return;
     }
@@ -5013,18 +5351,23 @@ function dSwim(p, swimId, opts = {}) {
 function stop() { if (playTimer) { clearInterval(playTimer); playTimer = null; } document.getElementById("btnPlay").textContent = "Play"; }
 let _playLabelLockedWidth = 0;
 function lockPlayLabelWidth() {
-  const el = document.getElementById("playLabel");
+  const el = document.getElementById("playNow");
   if (!el) return;
   const mx = globalMaxTick();
   if (!mx) return;
   const ctx = getTimeContext(activeIndex);
-  const widest = timeDisplayMode === "ticks"
-    ? "Step " + mx + " / " + mx
-    : fmtTickAsTime(mx, ctx) + " / " + fmtTickAsTime(mx, ctx);
+  // The last tick is not the widest string: fmtTickAsTime drops zero
+  // components, so a run ending at "10h" passes through "9h59m30s" on the way.
+  // Sample across the run and take the widest actually rendered.
   const prev = el.textContent;
   el.style.minWidth = "";
-  el.textContent = widest;
-  const measured = el.offsetWidth;
+  let measured = 0;
+  for (let i = 0; i <= 24; i++) {
+    const t = Math.round(mx * i / 24);
+    el.textContent = timeDisplayMode === "ticks"
+      ? "Step " + t : fmtTickAsTime(t, ctx);
+    measured = Math.max(measured, el.offsetWidth);
+  }
   el.textContent = prev;
   if (measured > 0 && measured + 2 > _playLabelLockedWidth) {
     _playLabelLockedWidth = measured + 2;
@@ -5032,14 +5375,17 @@ function lockPlayLabelWidth() {
   el.style.minWidth = _playLabelLockedWidth + "px";
 }
 function updatePlayLabel() {
-  const el = document.getElementById("playLabel");
-  if (!el) return;
+  const now = document.getElementById("playNow");
+  const total = document.getElementById("playTotal");
+  if (!now || !total) return;
   const mx = globalMaxTick();
   const ctx = getTimeContext(activeIndex);
   if (timeDisplayMode === "ticks") {
-    el.textContent = "Step " + playhead + " / " + mx;
+    now.textContent = "Step " + playhead;
+    total.textContent = " / " + mx;
   } else {
-    el.textContent = fmtTickAsTime(playhead, ctx) + " / " + fmtTickAsTime(mx, ctx);
+    now.textContent = fmtTickAsTime(playhead, ctx);
+    total.textContent = " / " + fmtTickAsTime(mx, ctx);
   }
 }
 function tick() { const mx = globalMaxTick(); if (!mx) { stop(); return; } playhead++;
@@ -5141,7 +5487,7 @@ function refreshAllTimeViews() {
   if (typeof renderBarsTab === "function") renderBarsTab();
   const pS = filesData[swimIdx]?.packed;
   if (pS && typeof dSwim === "function") {
-    dSwim(pS, "swimAreaSingle", { forceFullRange: true });
+    dSwim(pS, "swimAreaSingle");
   }
   if (typeof renderLockedSwimTip === "function") renderLockedSwimTip();
   if (typeof renderSimulationTab === "function") renderSimulationTab();
