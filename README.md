@@ -11,13 +11,11 @@ multi-merge. Promote your production logs into a scenario, prove the scenario
 reproduces what you measured, then run every policy against it and read the
 result as a tenant feels it - time to merge and the p95 tail, not throughput.
 
-
 `lines` was built to develop optimistic multi-merge
 ([ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
 for `gitlab_housekeeping`, the merge queue in
 [qontract-reconcile](https://github.com/app-sre/qontract-reconcile) that serves
 app-interface - Red Hat AppSRE's GitOps monorepo.
-
 
 ![Three merge-queue policies replayed on one playhead: kanban boards for
 active-cap, old-burst and top-k, each card a merge request moving through
@@ -29,10 +27,10 @@ two.](docs/media/replay-hero.gif)
 
 * **`mqsim`** is the policy simulator: it drives
 policies, records metrics, and renders them in a browser UI called **Merge
-Queue Sim**. 
+Queue Sim**.
 * **`glab_api`** is the fake GitLab API server it drives them
 against — a scenario-loaded FastAPI service that speaks the same shapes as the
-real thing. 
+real thing.
 
 ## Purpose
 
