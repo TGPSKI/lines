@@ -7,7 +7,9 @@ Three subcommands:
     measure   Single-algorithm performance report with hourly breakdowns.
     plan      Phase 1 multi-merge overlap analysis with GitLab API enrichment.
 
-Input: JSON log export in the shape [{@timestamp, message}, ...]
+Input: any log an adapter in `mqsim.adapters` reads — the JSON export
+shape [{@timestamp, message}, ...], the pod text dialect, or neutral
+NDJSON records. See docs/log-format.md.
 Output: Markdown reports written to --output directory.
 """
 
@@ -24,18 +26,13 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from mqsim.adapters import DIALECTS, read_log  # noqa: E402
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-FUNC_MERGE = "merge_merge_requests"
-FUNC_REBASE_AC = "_try_rebase"
-FUNC_REBASE_OB = "rebase_merge_requests"
-
-KNOWN_ALGORITHMS: dict[str, str] = {
-    FUNC_REBASE_AC: "active-cap",
-    FUNC_REBASE_OB: "old-burst",
-}
 
 PRIORITY_LABELS = [
     "bot/approved: critical",
@@ -49,14 +46,6 @@ PRIORITY_LABELS = [
 TENANT_LABEL_PREFIX = "tenant-"
 
 # ---------------------------------------------------------------------------
-# Regex patterns — adapted from calibrate_from_housekeeping_logs.py
-# ---------------------------------------------------------------------------
-
-FUNC_RE = re.compile(r"gitlab_housekeeping\.py:(?P<func>\w+):(?P<line>\d+)\]")
-IID_NUMERIC_RE = re.compile(r",\s*(\d+)\]$")
-
-
-# ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
 
@@ -65,10 +54,8 @@ IID_NUMERIC_RE = re.compile(r",\s*(\d+)\]$")
 class LogEvent:
     ts: datetime
     kind: str  # "merge" | "rebase"
-    algorithm: str  # "active-cap" | "old-burst"
+    algorithm: str  # the policy that emitted it, or "unknown"
     iid: str
-    func: str
-    line: int
 
 
 @dataclass
@@ -90,6 +77,7 @@ class ParsedLog:
     windows: list[AlgorithmWindow]
     time_start: datetime
     time_end: datetime
+    dialect: str = ""
 
     @property
     def hours(self) -> float:
@@ -135,77 +123,41 @@ class WindowMetrics:
 # ---------------------------------------------------------------------------
 
 
-def _parse_ts(raw: str) -> datetime:
-    """Parse '@timestamp' from CloudWatch JSON."""
-    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(raw, fmt)
-        except ValueError:
-            continue
-    raise ValueError(f"Cannot parse timestamp: {raw!r}")
+def ingest(path: Path, dialect: str = "auto") -> ParsedLog:
+    """Read a log through an adapter and shape its records for the reports."""
+    source = read_log(path, dialect)
 
-
-def ingest(path: Path) -> ParsedLog:
-    """Load a CloudWatch Logs Insights JSON file and extract events."""
-    with open(path) as f:
-        data: list[dict[str, str]] = json.load(f)
-
-    events: list[LogEvent] = []
-
-    for entry in data:
-        msg = entry["message"]
-        ts = _parse_ts(entry["@timestamp"])
-
-        m = FUNC_RE.search(msg)
-        if not m:
-            continue
-
-        func = m.group("func")
-        line = int(m.group("line"))
-
-        # Match on function name; IID_NUMERIC_RE naturally excludes
-        # "rebase limit reached" messages (they don't end with a bare IID).
-        if func == FUNC_MERGE:
-            iid_m = IID_NUMERIC_RE.search(msg)
-            if iid_m:
-                events.append(LogEvent(ts, "merge", "", iid_m.group(1), func, line))
-
-        elif func == FUNC_REBASE_AC:
-            iid_m = IID_NUMERIC_RE.search(msg)
-            if iid_m:
-                events.append(
-                    LogEvent(ts, "rebase", "active-cap", iid_m.group(1), func, line)
-                )
-
-        elif func == FUNC_REBASE_OB:
-            iid_m = IID_NUMERIC_RE.search(msg)
-            if iid_m:
-                events.append(
-                    LogEvent(ts, "rebase", "old-burst", iid_m.group(1), func, line)
-                )
-
+    # A merge carries no policy of its own; it is attributed below to the
+    # rebase window containing it.
+    events = [
+        LogEvent(
+            r.ts,
+            r.event,
+            "" if r.event == "merge" else (r.policy or "unknown"),
+            str(r.iid),
+        )
+        for r in source.records
+        if r.event in {"merge", "rebase"} and r.iid is not None
+    ]
     events.sort(key=lambda e: e.ts)
 
-    # Assign algorithm to merge events by nearest rebase context
     windows = _detect_windows(events)
     _assign_merge_algorithms(events, windows)
 
-    ts_all = [e.ts for e in events]
-    if not ts_all:
-        ts_all = [_parse_ts(d["@timestamp"]) for d in data if "@timestamp" in d]
-
+    fallback = source.first_ts or datetime.min
     return ParsedLog(
         path=path,
-        raw_entries=len(data),
+        raw_entries=source.entries,
         events=events,
         windows=windows,
-        time_start=min(ts_all) if ts_all else datetime.min,
-        time_end=max(ts_all) if ts_all else datetime.min,
+        time_start=min((e.ts for e in events), default=fallback),
+        time_end=max((e.ts for e in events), default=source.last_ts or fallback),
+        dialect=source.dialect,
     )
 
 
 def _detect_windows(events: list[LogEvent]) -> list[AlgorithmWindow]:
-    """Detect algorithm windows from rebase function transitions."""
+    """Detect algorithm windows from rebase policy transitions."""
     rebase_events = [e for e in events if e.kind == "rebase"]
     if not rebase_events:
         return []
@@ -589,27 +541,55 @@ def cmd_compare(parsed: ParsedLog, output_dir: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def cmd_measure(parsed: ParsedLog, algorithm: str | None, output_dir: Path) -> Path:
-    """Single-algorithm performance report with hourly breakdown."""
+def _adopt_unknown_window(parsed: ParsedLog, algorithm: str) -> bool:
+    """Label a single policy-less window from --algorithm.
+
+    Records carry the emitting policy only when the log dialect names it. A
+    log without it yields one window called "unknown"; naming it is the
+    caller asserting which policy ran, and nothing in the log confirms it.
+    """
+    if len(parsed.windows) != 1 or parsed.windows[0].name != "unknown":
+        return False
+    parsed.windows[0].name = algorithm
+    for ev in parsed.events:
+        ev.algorithm = algorithm
+    print(f"  Records name no policy; window labelled '{algorithm}' as told.")
+    return True
+
+
+def _select_window(
+    parsed: ParsedLog, algorithm: str | None, *, default_last: bool = False
+) -> AlgorithmWindow:
+    """Pick the window to report on, or exit with what was available."""
     if algorithm:
         matching = [w for w in parsed.windows if w.name == algorithm]
+        if not matching and _adopt_unknown_window(parsed, algorithm):
+            matching = parsed.windows
         if not matching:
-            available = [w.name for w in parsed.windows]
             print(
-                f"ERROR: Algorithm '{algorithm}' not found. Available: {available}",
+                f"ERROR: Algorithm '{algorithm}' not found. "
+                f"Available: {[w.name for w in parsed.windows]}",
                 file=sys.stderr,
             )
             sys.exit(1)
-        window = matching[0]
-    elif len(parsed.windows) == 1:
-        window = parsed.windows[0]
-    else:
-        print(
-            "ERROR: Multiple algorithms detected. Specify --algorithm. "
-            f"Available: {[w.name for w in parsed.windows]}",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+        return matching[0]
+    if len(parsed.windows) == 1:
+        return parsed.windows[0]
+    if default_last:
+        if parsed.windows:
+            return parsed.windows[-1]
+        return AlgorithmWindow("unknown", parsed.time_start, parsed.time_end)
+    print(
+        "ERROR: Multiple algorithms detected. Specify --algorithm. "
+        f"Available: {[w.name for w in parsed.windows]}",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def cmd_measure(parsed: ParsedLog, algorithm: str | None, output_dir: Path) -> Path:
+    """Single-algorithm performance report with hourly breakdown."""
+    window = _select_window(parsed, algorithm)
 
     wm = compute_metrics(parsed.events, window)
     date_tag = window.start.strftime("%Y%m%d") + "-" + window.end.strftime("%Y%m%d")
@@ -814,23 +794,7 @@ def cmd_plan(
     ssl_verify: bool = True,
 ) -> list[Path]:
     """Phase 1 multi-merge overlap analysis."""
-    # Select window
-    if algorithm:
-        matching = [w for w in parsed.windows if w.name == algorithm]
-        if not matching:
-            print(
-                f"ERROR: Algorithm '{algorithm}' not found. "
-                f"Available: {[w.name for w in parsed.windows]}",
-                file=sys.stderr,
-            )
-            sys.exit(1)
-        window = matching[0]
-    else:
-        window = (
-            parsed.windows[-1]
-            if parsed.windows
-            else AlgorithmWindow("unknown", parsed.time_start, parsed.time_end)
-        )
+    window = _select_window(parsed, algorithm, default_last=True)
 
     # Get merge IIDs in chronological order
     merges = sorted(
@@ -1095,7 +1059,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- compare --
     p_cmp = sub.add_parser("compare", help="A/B/(N) algorithm comparison")
-    p_cmp.add_argument("--input", "-i", required=True, help="CloudWatch JSON file")
+    p_cmp.add_argument("--input", "-i", required=True, help="Log file")
+    p_cmp.add_argument(
+        "--log-dialect",
+        default="auto",
+        choices=["auto", *DIALECTS],
+        help="Log dialect to read. Default: detect from the file",
+    )
     p_cmp.add_argument(
         "--output", "-o", default="reports/log-analysis", help="Output directory"
     )
@@ -1105,7 +1075,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- measure --
     p_msr = sub.add_parser("measure", help="Single-algorithm performance report")
-    p_msr.add_argument("--input", "-i", required=True, help="CloudWatch JSON file")
+    p_msr.add_argument("--input", "-i", required=True, help="Log file")
+    p_msr.add_argument(
+        "--log-dialect",
+        default="auto",
+        choices=["auto", *DIALECTS],
+        help="Log dialect to read. Default: detect from the file",
+    )
     p_msr.add_argument(
         "--algorithm",
         "-a",
@@ -1117,7 +1093,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     # -- plan --
     p_pln = sub.add_parser("plan", help="Phase 1 multi-merge planning")
-    p_pln.add_argument("--input", "-i", required=True, help="CloudWatch JSON file")
+    p_pln.add_argument("--input", "-i", required=True, help="Log file")
+    p_pln.add_argument(
+        "--log-dialect",
+        default="auto",
+        choices=["auto", *DIALECTS],
+        help="Log dialect to read. Default: detect from the file",
+    )
     p_pln.add_argument(
         "--algorithm", "-a", help="Algorithm window to analyze (default: last detected)"
     )
@@ -1174,8 +1156,8 @@ def main() -> None:
         sys.exit(1)
 
     output_dir = Path(args.output)
-    print(f"Loading {input_path.name}...")
-    parsed = ingest(input_path)
+    parsed = ingest(input_path, args.log_dialect)
+    print(f"Loaded {input_path.name} as {parsed.dialect}")
     print(
         f"  {parsed.raw_entries:,} entries, {len(parsed.events)} relevant events, "
         f"{len(parsed.windows)} algorithm window(s) detected"

@@ -6,16 +6,17 @@ secret reader, state) so that it talks directly to the sim server without
 needing a live qontract-server, Vault, or S3.
 
 Requirements:
-    Must be run from an environment where qontract-reconcile and its dependencies
-    are installed (e.g., after `uv sync` in the qontract-reconcile root).
+    qontract-reconcile installed in this interpreter — `pip install
+    'mqsim[harness]'` — or a checkout passed with --qontract-reconcile-root.
 
 Usage:
     # 1. Start the sim server from this repository root:
     #    PYTHONPATH=src python -m glab_api.cli serve \
     #        --scenario scenarios/mvp-active-cap.yaml
     #
-    # 2. Run the harness with qontract-reconcile installed or its root supplied:
-    #    python run_harness.py --qontract-reconcile-root /path/to/qontract-reconcile
+    # 2. Run the harness, after pip install -e ".[harness]":
+    #    python run_harness.py
+    #    (or --qontract-reconcile-root /path/to/qontract-reconcile)
     #
     # 3. After the run, advance pipelines:
     #    curl -X POST http://127.0.0.1:8080/__sim/tick
@@ -29,15 +30,40 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import importlib
 import ipaddress
 import logging
 import os
 import sys
 from collections.abc import Mapping
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 from unittest.mock import patch
 from urllib.parse import urlparse
+
+# The integration under test is not a dependency of this project: harness mode
+# imports it into this process, so one interpreter has to satisfy both.
+QONTRACT_RECONCILE_COMMIT = "5d6cf917ab73472068ff746196f13c5e52662508"
+MISSING_RECONCILE = f"""\
+{{error}}
+
+Harness mode runs the real gitlab_housekeeping integration, which ships in
+qontract-reconcile. Install it either way:
+
+  pip install 'mqsim[harness]'      # pins {QONTRACT_RECONCILE_COMMIT[:7]}
+  python run_harness.py --qontract-reconcile-root /path/to/qontract-reconcile
+
+Standalone mode needs none of this: python run_standalone.py --compare.\
+"""
+
+
+def _import_or_explain(name: str) -> ModuleType:
+    """Import part of qontract-reconcile, or exit saying how to install it."""
+    try:
+        return importlib.import_module(name)
+    except ImportError as exc:
+        raise SystemExit(MISSING_RECONCILE.format(error=exc)) from exc
 
 
 def _is_loopback_url(url: str) -> bool:
@@ -265,29 +291,29 @@ def run_harness(args: argparse.Namespace) -> None:
     _secret_reader = FakeSecretReader()  # noqa: F841
 
     # Import here so patches apply before the module's internals resolve
-    import reconcile.queries
-    import reconcile.utils.gitlab_api
-    import reconcile.utils.sharding
-    import reconcile.utils.state
+    queries = _import_or_explain("reconcile.queries")
+    gitlab_api = _import_or_explain("reconcile.utils.gitlab_api")
+    sharding = _import_or_explain("reconcile.utils.sharding")
+    state = _import_or_explain("reconcile.utils.state")
 
     patches = []
 
     # Patch query functions
-    p1 = patch.object(reconcile.queries, "get_gitlab_instance", return_value=instance)
+    p1 = patch.object(queries, "get_gitlab_instance", return_value=instance)
     p2 = patch.object(
-        reconcile.queries, "get_app_interface_settings", return_value=settings
+        queries, "get_app_interface_settings", return_value=settings
     )
     p3 = patch.object(
-        reconcile.queries, "get_repos_gitlab_housekeeping", return_value=repos
+        queries, "get_repos_gitlab_housekeeping", return_value=repos
     )
     patches.extend([p1, p2, p3])
 
     # Patch state init to return our in-memory state
-    p4 = patch.object(reconcile.utils.state, "init_state", return_value=FakeState())
+    p4 = patch.object(state, "init_state", return_value=FakeState())
     patches.append(p4)
 
     # Patch sharding to always accept
-    p5 = patch.object(reconcile.utils.sharding, "is_in_shard", return_value=True)
+    p5 = patch.object(sharding, "is_in_shard", return_value=True)
     patches.append(p5)
 
     # Patch GitLabApi to use our FakeSecretReader and skip instrumented session
@@ -334,13 +360,13 @@ def run_harness(args: argparse.Namespace) -> None:
             self.project = self.gl.projects.get(project_id)
 
     p6 = patch.object(
-        reconcile.utils.gitlab_api.GitLabApi, "__init__", patched_gitlab_api_init
+        gitlab_api.GitLabApi, "__init__", patched_gitlab_api_init
     )
     p7 = patch.object(
-        reconcile.utils.gitlab_api.GitLabApi, "__enter__", lambda self: self
+        gitlab_api.GitLabApi, "__enter__", lambda self: self
     )
     p8 = patch.object(
-        reconcile.utils.gitlab_api.GitLabApi, "__exit__", lambda self, *a: None
+        gitlab_api.GitLabApi, "__exit__", lambda self, *a: None
     )
     patches.extend([p6, p7, p8])
 
@@ -353,7 +379,7 @@ def run_harness(args: argparse.Namespace) -> None:
         log.info("Starting gitlab-housekeeping run against sim")
         log.info("=" * 60)
 
-        import reconcile.gitlab_housekeeping as hk_module
+        hk_module = _import_or_explain("reconcile.gitlab_housekeeping")
 
         hk_module.run(dry_run=args.dry_run, wait_for_pipeline=args.wait_for_pipeline)
 

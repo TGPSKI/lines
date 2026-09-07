@@ -15,6 +15,7 @@
 #   make compare-calibrated      # compare against the synthetic calibration demo
 #   make discrimination-pass      # run policy-pair stress variants
 #   make compare-quick          # quick comparison (~2 min)
+#   make convert-log LOG_FILE=...     # any log -> neutral records
 #   make calibrate-scenario LOGS="a.log b.log c.log"
 #   make tune-calibration LOGS="a.log b.log c.log" CALIBRATION_POLICY=active-cap
 #   make monte-carlo-small      # Monte Carlo: 10 trials (~30 min)
@@ -66,15 +67,18 @@ VENV_PYTHON := .venv/bin/python
 PYTHON := $(VENV_PYTHON)
 PYTEST := $(VENV_PYTHON) -m pytest
 
-# Required by the harness targets; set this to a qontract-reconcile checkout.
+# Harness mode reads qontract-reconcile from this interpreter — install it with
+# `pip install -e ".[harness]"`. Set this instead to run against a checkout.
 QONTRACT_RECONCILE_ROOT ?=
+QR_ROOT_FLAG := $(if $(QONTRACT_RECONCILE_ROOT),--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)",)
 
 .PHONY: test validate serve serve-bg kill-server run check-qontract-root \
         run-harness run-harness-dry compare compare-advanced compare-calibrated \
         compare-quick calibrate-scenario tune-calibration discrimination-pass \
         monte-carlo-small monte-carlo-medium monte-carlo-large \
         tick ticks metrics state reset report full-cycle clean ui help \
-        lint vendor vendor-verify \
+        lint vendor vendor-verify demo-data metric-spec backfill-summaries \
+        promote-scenario \
         analyze-compare analyze-measure analyze-plan
 
 ui: ## Open the queue visualization (load NDJSON in the browser; runs offline)
@@ -93,8 +97,22 @@ lint: ## Lint Python sources with ruff
 vendor: ## Re-download the pinned UI assets in ui/vendor (needs network)
 	@python3 scripts/vendor_ui_assets.py --fetch
 
+promote-scenario: ## Promote a proofed scenario into scenarios/ (RUN=dir NAME=name)
+	@if [ -z "$(RUN)" ] || [ -z "$(NAME)" ]; then echo 'Set RUN=reports/calibration/<run> NAME=<name>'; exit 1; fi
+	@python3 scripts/promote_scenario.py "$(RUN)" --name "$(NAME)"
+
+metric-spec: ## Regenerate ui/metrics-spec.js from src/mqsim/metrics.json
+	@python3 scripts/build_metric_spec.py
+
+backfill-summaries: ## Add run_summary to older metrics NDJSON (TREE=path)
+	@if [ -z "$(TREE)" ]; then echo 'Set TREE=path/to/reports'; exit 1; fi
+	@python3 scripts/backfill_run_summary.py "$(TREE)"
+
 vendor-verify: ## Check ui/vendor against ui/vendor/MANIFEST.txt (offline)
 	@python3 scripts/vendor_ui_assets.py
+
+demo-data: ## Rebuild ui/demo/demo-runs.js from reports/comparisons/latest
+	@python3 scripts/build_demo_runs.py reports/comparisons/latest
 
 validate: ## Validate all scenario YAML files
 	@for f in scenarios/*.yaml; do \
@@ -274,25 +292,28 @@ monte-carlo-large: ## Monte Carlo: 30 trials (~90 min)
 # ---------------------------------------------------------------------------
 
 check-qontract-root:
-	@if [ -z "$(QONTRACT_RECONCILE_ROOT)" ]; then \
-		echo "Set QONTRACT_RECONCILE_ROOT=/path/to/qontract-reconcile"; \
-		exit 1; \
+	@if [ -n "$(QONTRACT_RECONCILE_ROOT)" ]; then \
+		test -d "$(QONTRACT_RECONCILE_ROOT)/reconcile" || { \
+			echo "QONTRACT_RECONCILE_ROOT must contain the reconcile package"; \
+			exit 1; \
+		}; \
+	else \
+		$(PYTHON) -c "import reconcile" 2>/dev/null || { \
+			echo "Harness mode needs qontract-reconcile. Either:"; \
+			echo "  pip install -e '.[harness]'"; \
+			echo "  make run-harness QONTRACT_RECONCILE_ROOT=/path/to/checkout"; \
+			exit 1; \
+		}; \
 	fi
-	@test -d "$(QONTRACT_RECONCILE_ROOT)/reconcile" || { \
-		echo "QONTRACT_RECONCILE_ROOT must contain the reconcile package"; \
-		exit 1; \
-	}
 
-run-harness: check-qontract-root ## Run REAL gitlab-housekeeping (requires qontract-reconcile deps)
-	PYTHONPATH=src:. $(PYTHON) run_harness.py \
-		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
+run-harness: check-qontract-root ## Run REAL gitlab-housekeeping (needs the harness extra)
+	PYTHONPATH=src:. $(PYTHON) run_harness.py $(QR_ROOT_FLAG) \
 		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--no-dry-run \
 		--limit $(LIMIT)
 
 run-harness-dry: check-qontract-root ## Run REAL gitlab-housekeeping in dry-run mode
-	PYTHONPATH=src:. $(PYTHON) run_harness.py \
-		--qontract-reconcile-root "$(QONTRACT_RECONCILE_ROOT)" \
+	PYTHONPATH=src:. $(PYTHON) run_harness.py $(QR_ROOT_FLAG) \
 		--sim-url $(SIM_URL) $(NETWORK_OVERRIDE) \
 		--dry-run \
 		--limit $(LIMIT)
@@ -354,9 +375,13 @@ full-cycle: ## Automated: serve + run with ticks + report
 # Log analysis (caller-supplied JSON logs)
 # ---------------------------------------------------------------------------
 
-LOG_FILE ?= $(error Set LOG_FILE=path/to/logs-insights-results.json)
+LOG_FILE ?= $(error Set LOG_FILE=path/to/log)
 LOG_OUTPUT ?= reports/log-analysis
 LOG_ALGORITHM ?= active-cap
+RECORDS_OUT ?= $(LOG_OUTPUT)/records.ndjson
+
+convert-log: ## Convert any supported log to neutral records
+	$(PYTHON) scripts/convert_log.py --input "$(LOG_FILE)" --output $(RECORDS_OUT)
 
 analyze-compare: ## Compare algorithms from caller-supplied logs
 	$(PYTHON) scripts/analyze_logs.py compare --input "$(LOG_FILE)" --output $(LOG_OUTPUT)

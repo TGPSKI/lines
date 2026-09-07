@@ -10,6 +10,28 @@ from glab_api.metrics import compute_summary, load_metrics
 from .phase1 import compute_phase1_metrics
 
 
+def api_call_counts(events: list[dict[str, Any]]) -> tuple[dict[str, int], int]:
+    """Return (endpoint counts, total) from api_call events or their summary.
+
+    scripts/migrate_reports.py replaces api_call events with a single
+    api_call_summary carrying the same counts, so both shapes read alike.
+    """
+    counts: dict[str, int] = {}
+    total = 0
+    for event in events:
+        if event.get("event") == "api_call":
+            endpoint = event.get("endpoint", "unknown")
+            counts[endpoint] = counts.get(endpoint, 0) + 1
+            total += 1
+    if total:
+        return counts, total
+    for event in events:
+        if event.get("event") == "api_call_summary":
+            summary = event.get("endpoints") or {}
+            return dict(summary), int(event.get("total", sum(summary.values())))
+    return {}, 0
+
+
 def generate_single_report(
     metrics_path: str | Path,
     scenario_name: str = "",
@@ -29,16 +51,12 @@ def generate_single_report(
 
     lines.append("## API Call Summary")
     lines.append("")
-    api_calls = [e for e in events if e.get("event") == "api_call"]
-    endpoint_counts: dict[str, int] = {}
-    for call in api_calls:
-        ep = call.get("endpoint", "unknown")
-        endpoint_counts[ep] = endpoint_counts.get(ep, 0) + 1
+    endpoint_counts, api_total = api_call_counts(events)
     lines.append("| Endpoint | Calls |")
     lines.append("|---|---:|")
     for ep, count in sorted(endpoint_counts.items(), key=lambda x: -x[1]):
         lines.append(f"| {ep} | {count} |")
-    lines.append(f"| **Total** | **{len(api_calls)}** |")
+    lines.append(f"| **Total** | **{api_total}** |")
     lines.append("")
 
     lines.append("## Rebase / Merge Summary")
@@ -125,9 +143,7 @@ def generate_comparison_report(
 
     for name, s in summaries.items():
         p1 = phase1_summaries[name]
-        api_total = sum(
-            1 for e in load_metrics(runs[name]) if e.get("event") == "api_call"
-        )
+        _, api_total = api_call_counts(load_metrics(runs[name]))
         avg_advance = p1.get(
             "average_mrs_per_target_advance", s.get("average_mrs_per_target_advance", 0)
         )

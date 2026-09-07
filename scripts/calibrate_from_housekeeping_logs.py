@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 import random
-import re
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -21,17 +21,10 @@ from typing import Any
 
 import yaml
 
-LINE_RE = re.compile(
-    r"^\[(?P<ts>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]\s+"
-    r"\[(?P<lvl>INFO|ERROR)\].*?- (?P<msg>.*)$"
-)
-GQL_RE = re.compile(r"using gql endpoint")
-MERGE_RE = re.compile(r"\['merge',\s*'([^']+)',\s*(\d+)\]")
-MERGE_ERR_RE = re.compile(r"unable to merge\s+(\d+):")
-REBASE_RE = re.compile(r"\['rebase',\s*'([^']+)',\s*(\d+)\]")
-REBASE_LIMIT_RE = re.compile(r"rebase limit reached for this reconcile loop")
-ACTION_RE = re.compile(r"\['([^']+)',\s*'([^']+)'")
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from mqsim.adapters import DIALECTS, read_log  # noqa: E402
+from mqsim.logrecord import LogSource  # noqa: E402
 
 # Authored demonstration distributions. These values are deliberately simple and
 # were not derived from operational logs. Input logs calibrate aggregate timing
@@ -323,9 +316,17 @@ def _sample_arrival_ticks(
     return sorted(rng.choices(candidate_ticks, weights=candidate_weights, k=arrivals))
 
 
-def parse_log(path: Path, project_filter: str) -> LogStats:
-    first_ts: datetime | None = None
-    last_ts: datetime | None = None
+def parse_log(path: Path, project_filter: str, dialect: str = "auto") -> LogStats:
+    """Reduce one log to the aggregates calibration reads.
+
+    The log reaches this function as neutral records — see `mqsim.adapters`.
+    Nothing below knows which dialect produced them.
+    """
+    return stats_from_source(read_log(path, dialect), project_filter)
+
+
+def stats_from_source(source: LogSource, project_filter: str) -> LogStats:
+    """Reduce neutral records to the aggregates calibration reads."""
     gql_ts: list[datetime] = []
     project_action_ts: list[datetime] = []
     project_hourly_activity = [0 for _ in range(24)]
@@ -342,73 +343,50 @@ def parse_log(path: Path, project_filter: str) -> LogStats:
     rebases = 0
     rebase_limit_hits = 0
 
-    with path.open(encoding="utf-8", errors="replace") as f:
-        for line in f:
-            m = LINE_RE.match(line)
-            if not m:
-                continue
-            ts = datetime.strptime(m.group("ts"), "%Y-%m-%d %H:%M:%S")
-            msg = m.group("msg")
-            if first_ts is None:
-                first_ts = ts
-            last_ts = ts
+    # Stable, so a merge and the failure that cancels it keep their file order
+    # when they share a timestamp.
+    for record in sorted(source.records, key=lambda r: r.ts):
+        ts = record.ts
+        event = record.event
 
-            if GQL_RE.search(msg):
-                gql_ts.append(ts)
+        if event == "cycle":
+            gql_ts.append(ts)
+            continue
+        if event == "rebase_limit":
+            rebase_limit_hits += 1
+            continue
+        if event == "merge_failure":
+            # Named by iid alone: the dialect reporting it names no project.
+            if merge_pending[record.iid]:
+                merge_pending[record.iid].pop()["failed"] = True
+            continue
+        if record.project != project_filter:
+            continue
 
-            action_m = ACTION_RE.search(msg)
-            if action_m:
-                action_name = action_m.group(1)
-                action_project = action_m.group(2)
-                if action_project == project_filter:
-                    project_action_ts.append(ts)
-                    if action_name in {
-                        "merge",
-                        "add_label",
-                        "remove_label",
-                        "close_item",
-                    }:
-                        project_hourly_activity[ts.hour] += 1
-                        project_weekday_activity[ts.weekday()] += 1
-                    if action_name in {"add_label", "remove_label"}:
-                        project_hourly_arrivals[ts.hour] += 1
-                        project_weekday_arrivals[ts.weekday()] += 1
+        project_action_ts.append(ts)
+        if event in {"merge", "label_change", "close"}:
+            project_hourly_activity[ts.hour] += 1
+            project_weekday_activity[ts.weekday()] += 1
+        if event == "label_change":
+            project_hourly_arrivals[ts.hour] += 1
+            project_weekday_arrivals[ts.weekday()] += 1
 
-            merge_m = MERGE_RE.search(msg)
-            if merge_m:
-                project = merge_m.group(1)
-                if project != project_filter:
-                    continue
-                iid = int(merge_m.group(2))
-                rec = {"iid": iid, "failed": False}
-                merges.append(rec)
-                merge_pending[iid].append(rec)
-                merge_timestamps.append(ts)
-                project_hourly_merges[ts.hour] += 1
-                hour_key = ts.replace(minute=0, second=0)
-                hourly_merge_by_abs[hour_key] += 1
-                continue
+        hour_key = ts.replace(minute=0, second=0, microsecond=0)
+        if event == "merge":
+            rec = {"iid": record.iid, "failed": False}
+            merges.append(rec)
+            merge_pending[record.iid].append(rec)
+            merge_timestamps.append(ts)
+            project_hourly_merges[ts.hour] += 1
+            hourly_merge_by_abs[hour_key] += 1
+        elif event == "rebase":
+            rebases += 1
+            project_hourly_rebases[ts.hour] += 1
+            hourly_rebase_by_abs[hour_key] += 1
 
-            err_m = MERGE_ERR_RE.search(msg)
-            if err_m:
-                iid = int(err_m.group(1))
-                if merge_pending[iid]:
-                    merge_pending[iid].pop()["failed"] = True
-                continue
-
-            rebase_m = REBASE_RE.search(msg)
-            if rebase_m and rebase_m.group(1) == project_filter:
-                rebases += 1
-                project_hourly_rebases[ts.hour] += 1
-                hour_key = ts.replace(minute=0, second=0)
-                hourly_rebase_by_abs[hour_key] += 1
-                continue
-
-            if REBASE_LIMIT_RE.search(msg):
-                rebase_limit_hits += 1
-
+    first_ts, last_ts = source.first_ts, source.last_ts
     if first_ts is None or last_ts is None:
-        raise ValueError(f"no parseable log lines in {path}")
+        raise ValueError(f"no parseable log lines in {source.path}")
 
     window_hours = (last_ts - first_ts).total_seconds() / 3600.0
     intervals = [
@@ -428,8 +406,8 @@ def parse_log(path: Path, project_filter: str) -> LogStats:
         )
     merge_successes = sum(1 for m in merges if not m["failed"])
     merge_failures = len(merges) - merge_successes
-    start_hour = first_ts.replace(minute=0, second=0)
-    end_hour = last_ts.replace(minute=0, second=0)
+    start_hour = first_ts.replace(minute=0, second=0, microsecond=0)
+    end_hour = last_ts.replace(minute=0, second=0, microsecond=0)
     hourly_merges_abs: list[int] = []
     hourly_rebases_abs: list[int] = []
     cursor = start_hour
@@ -463,7 +441,7 @@ def parse_log(path: Path, project_filter: str) -> LogStats:
     )
 
     return LogStats(
-        path=path,
+        path=source.path,
         window_hours=window_hours,
         cycles=cycles,
         avg_cycle_seconds=avg_cycle_seconds,
@@ -905,7 +883,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--project",
         required=True,
-        help="Project name filter from ['merge', '<project>', iid] log entries",
+        help="Project the records must name; other projects are ignored",
+    )
+    parser.add_argument(
+        "--log-dialect",
+        default="auto",
+        choices=["auto", *DIALECTS],
+        help="Log dialect to read. Default: detect from the file",
     )
     parser.add_argument(
         "--emit-scenario",
@@ -953,7 +937,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     log_paths = [Path(p) for p in args.logs]
-    stats = [parse_log(p, args.project) for p in log_paths]
+    stats = [parse_log(p, args.project, args.log_dialect) for p in log_paths]
     print_stats(stats)
 
     if args.emit_scenario:

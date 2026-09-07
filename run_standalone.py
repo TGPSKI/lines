@@ -41,6 +41,11 @@ except ImportError:
     sys.exit(1)
 
 from glab_api.state import HOLD_LABELS, MERGE_LABELS_SET, label_priority
+from mqsim.summary import (
+    _load_ndjson_events,
+    append_run_summary,
+    summarize_run,
+)
 
 # ---------------------------------------------------------------------------
 # Policy set presets for Monte Carlo and comparison runs
@@ -66,194 +71,14 @@ POLICY_SETS: dict[str, list[str]] = {
 }
 
 
-def _percentile(sorted_vals: list, pct: int) -> int:
-    """Compute percentile from a pre-sorted list of values."""
-    if not sorted_vals:
-        return 0
-    idx = int(len(sorted_vals) * pct / 100)
-    idx = min(idx, len(sorted_vals) - 1)
-    return sorted_vals[idx]
 
 
-def _percentile_float(values: list[float], pct: int) -> float:
-    if not values:
-        return 0.0
-    ordered = sorted(values)
-    idx = min(len(ordered) - 1, int(len(ordered) * pct / 100))
-    return float(ordered[idx])
 
 
-def _compute_hourly_throughput_dims(
-    *,
-    merge_ticks: list[int],
-    total_time_ticks: int,
-    tick_seconds: int,
-) -> dict[str, float]:
-    if total_time_ticks <= 0:
-        return {
-            "throughput_active_merges_per_hour": 0.0,
-            "throughput_peak8_merges_per_hour": 0.0,
-            "throughput_peak8_p90_merges_per_hour": 0.0,
-            "merge_interval_p50_seconds": 0.0,
-            "merge_interval_p95_seconds": 0.0,
-        }
-
-    hour_count = max(1, int(math.ceil((total_time_ticks * tick_seconds) / 3600.0)))
-    hourly_merges = [0 for _ in range(hour_count)]
-    for tick in merge_ticks:
-        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
-        hourly_merges[bucket] += 1
-
-    active_hourly = [v for v in hourly_merges if v > 0]
-    active_mph = sum(active_hourly) / len(active_hourly) if active_hourly else 0.0
-    peak_window = min(8, hour_count)
-    best_avg = 0.0
-    best_slice = hourly_merges[:peak_window] if peak_window else []
-    for start in range(0, hour_count - peak_window + 1):
-        window_vals = hourly_merges[start : start + peak_window]
-        avg = sum(window_vals) / peak_window
-        if avg > best_avg:
-            best_avg = avg
-            best_slice = window_vals
-
-    merge_ticks_sorted = sorted(merge_ticks)
-    merge_intervals_seconds = [
-        (b - a) * tick_seconds
-        for a, b in zip(merge_ticks_sorted, merge_ticks_sorted[1:], strict=False)
-        if b > a
-    ]
-    return {
-        "throughput_active_merges_per_hour": active_mph,
-        "throughput_peak8_merges_per_hour": best_avg,
-        "throughput_peak8_p90_merges_per_hour": _percentile_float(best_slice, 90),
-        "merge_interval_p50_seconds": _percentile_float(merge_intervals_seconds, 50),
-        "merge_interval_p95_seconds": _percentile_float(merge_intervals_seconds, 95),
-    }
 
 
-def _load_ndjson_events(path: str | None) -> list[dict[str, Any]]:
-    if not path or not os.path.exists(path):
-        return []
-    events: list[dict[str, Any]] = []
-    with open(path) as f:
-        for raw in f:
-            line = raw.strip()
-            if not line:
-                continue
-            try:
-                evt = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(evt, dict):
-                events.append(evt)
-    return events
 
 
-def _extract_hourly_event_profile(
-    *,
-    events: list[dict[str, Any]],
-    tick_seconds: int,
-    total_time_ticks: int,
-) -> dict[str, Any]:
-    if not events or total_time_ticks <= 0:
-        return {
-            "modeled_hours": 0.0,
-            "total_arrivals": 0,
-            "throughput_peak_window_merges_per_hour": 0.0,
-            "throughput_offpeak_merges_per_hour": 0.0,
-            "arrival_peak_window_per_hour": 0.0,
-            "arrival_offpeak_window_per_hour": 0.0,
-            "peak_offpeak_throughput_ratio": 0.0,
-            "scenario_start_hour_utc": 0,
-            "peak_window_hours_utc": [],
-            "hourly_merges": [],
-            "hourly_arrivals": [],
-        }
-
-    hour_count = max(1, int(math.ceil((total_time_ticks * tick_seconds) / 3600.0)))
-    hourly_merges = [0 for _ in range(hour_count)]
-    hourly_arrivals = [0 for _ in range(hour_count)]
-
-    for evt in events:
-        if evt.get("event") != "merge":
-            continue
-        tick = evt.get("tick")
-        if not isinstance(tick, int):
-            continue
-        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
-        hourly_merges[bucket] += 1
-
-    scenario_meta = next((e for e in events if e.get("event") == "scenario_meta"), {})
-    arrivals_meta = scenario_meta.get("arrivals", [])
-    if isinstance(arrivals_meta, list):
-        for item in arrivals_meta:
-            if not isinstance(item, dict):
-                continue
-            tick = item.get("tick")
-            if not isinstance(tick, int):
-                continue
-            bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
-            hourly_arrivals[bucket] += 1
-    for evt in events:
-        if evt.get("event") != "tick":
-            continue
-        tick = evt.get("tick")
-        arrivals = evt.get("arrivals")
-        if not isinstance(tick, int) or not isinstance(arrivals, list):
-            continue
-        bucket = min(hour_count - 1, max(0, int((tick * tick_seconds) // 3600)))
-        hourly_arrivals[bucket] += len(arrivals)
-
-    calibration = scenario_meta.get("scenario_metadata", {}).get(
-        "calibration_targets", {}
-    )
-    arrival_profile = calibration.get("arrival_profile", {})
-    start_hour = int(arrival_profile.get("scenario_start_hour", 0) or 0) % 24
-    peak_hours_raw = arrival_profile.get("peak_window_hours_utc", [])
-    peak_hours = {
-        int(h) % 24
-        for h in peak_hours_raw
-        if isinstance(h, (str, int, float)) and str(h).strip()
-    }
-
-    peak_merges: list[int] = []
-    offpeak_merges: list[int] = []
-    peak_arrivals: list[int] = []
-    offpeak_arrivals: list[int] = []
-    for idx in range(hour_count):
-        utc_hour = (start_hour + idx) % 24
-        if utc_hour in peak_hours:
-            peak_merges.append(hourly_merges[idx])
-            peak_arrivals.append(hourly_arrivals[idx])
-        else:
-            offpeak_merges.append(hourly_merges[idx])
-            offpeak_arrivals.append(hourly_arrivals[idx])
-
-    peak_merge_avg = sum(peak_merges) / len(peak_merges) if peak_merges else 0.0
-    offpeak_merge_avg = (
-        sum(offpeak_merges) / len(offpeak_merges) if offpeak_merges else 0.0
-    )
-    peak_arrival_avg = sum(peak_arrivals) / len(peak_arrivals) if peak_arrivals else 0.0
-    offpeak_arrival_avg = (
-        sum(offpeak_arrivals) / len(offpeak_arrivals) if offpeak_arrivals else 0.0
-    )
-    peak_offpeak_ratio = (
-        peak_merge_avg / offpeak_merge_avg if offpeak_merge_avg > 0 else 0.0
-    )
-
-    return {
-        "modeled_hours": (total_time_ticks * tick_seconds) / 3600.0,
-        "total_arrivals": int(sum(hourly_arrivals)),
-        "throughput_peak_window_merges_per_hour": peak_merge_avg,
-        "throughput_offpeak_merges_per_hour": offpeak_merge_avg,
-        "arrival_peak_window_per_hour": peak_arrival_avg,
-        "arrival_offpeak_window_per_hour": offpeak_arrival_avg,
-        "peak_offpeak_throughput_ratio": peak_offpeak_ratio,
-        "scenario_start_hour_utc": start_hour,
-        "peak_window_hours_utc": sorted(peak_hours),
-        "hourly_merges": hourly_merges,
-        "hourly_arrivals": hourly_arrivals,
-    }
 
 
 def parse_args() -> argparse.Namespace:
@@ -1598,7 +1423,6 @@ def run_policy(
     total_ticks = 0
     merge_ticks: list[int] = []  # tick at which each merge happened
     initial_state = get_state(sim_url)
-    total_mrs = initial_state.get("total_mrs", initial_state["open_mrs"])
     tick_seconds = max(1, int(initial_state.get("tick_seconds", 60)))
 
     if policy.startswith("omm"):
@@ -1637,172 +1461,31 @@ def run_policy(
 
     log.info("=" * 60)
     metrics = get_metrics(sim_url)
-    final_state = get_state(sim_url)
 
     # Compute temporal metrics
-    mrs_merged = metrics.get("merge_calls", 0) or len(merge_ticks)
-    total_time_ticks = total_ticks
-    throughput = mrs_merged / total_time_ticks if total_time_ticks > 0 else 0
-    total_time_hours = (total_time_ticks * tick_seconds) / 3600
-    throughput_per_hour = mrs_merged / total_time_hours if total_time_hours > 0 else 0
 
     # Time to first merge
-    time_to_first_merge = merge_ticks[0] if merge_ticks else total_time_ticks
 
     # Time to merge top-10 (first 10 MRs merged)
-    time_to_merge_10 = merge_ticks[9] if len(merge_ticks) >= 10 else total_time_ticks
 
     # Average time between merges
-    avg_merge_interval = (
-        total_time_ticks / mrs_merged if mrs_merged > 0 else total_time_ticks
-    )
 
     # Avg MRs per merge-cycle (Phase 1 key metric)
     # Serial: ~1 MR per merge-cycle. Phase 1 goal: >1 MR per merge-cycle.
-    avg_mrs_per_merge_cycle = mrs_merged / merge_cycles if merge_cycles > 0 else 0
-    throughput_dims = _compute_hourly_throughput_dims(
-        merge_ticks=merge_ticks,
-        total_time_ticks=total_time_ticks,
-        tick_seconds=tick_seconds,
-    )
-    rebase_calls = float(metrics.get("rebase_calls", 0))
-    rebase_per_merge = rebase_calls / mrs_merged if mrs_merged > 0 else 0.0
 
-    # Enrich metrics with temporal data
-    metrics["total_time_ticks"] = total_time_ticks
-    metrics["mrs_merged"] = mrs_merged
-    metrics["tick_seconds"] = tick_seconds
-    metrics["throughput_merges_per_tick"] = round(throughput, 4)
-    metrics["throughput_merges_per_hour"] = round(throughput_per_hour, 3)
-    metrics["time_to_first_merge"] = time_to_first_merge
-    metrics["time_to_merge_10"] = time_to_merge_10
-    metrics["avg_merge_interval_ticks"] = round(avg_merge_interval, 2)
-    metrics["queue_drain_pct"] = (
-        round(mrs_merged / total_mrs * 100, 1) if total_mrs > 0 else 0
-    )
-    metrics["merge_cycles"] = merge_cycles
-    metrics["avg_mrs_per_merge_cycle"] = round(avg_mrs_per_merge_cycle, 2)
-    metrics["throughput_active_merges_per_hour"] = round(
-        throughput_dims["throughput_active_merges_per_hour"],
-        3,
-    )
-    metrics["throughput_peak8_merges_per_hour"] = round(
-        throughput_dims["throughput_peak8_merges_per_hour"],
-        3,
-    )
-    metrics["throughput_peak8_p90_merges_per_hour"] = round(
-        throughput_dims["throughput_peak8_p90_merges_per_hour"],
-        3,
-    )
-    metrics["merge_interval_p50_seconds"] = round(
-        throughput_dims["merge_interval_p50_seconds"],
-        1,
-    )
-    metrics["merge_interval_p95_seconds"] = round(
-        throughput_dims["merge_interval_p95_seconds"],
-        1,
-    )
-    metrics["rebase_per_merge_ratio"] = round(rebase_per_merge, 3)
-
-    events = _load_ndjson_events(metrics_path)
-    hourly_profile = _extract_hourly_event_profile(
-        events=events,
-        tick_seconds=tick_seconds,
-        total_time_ticks=total_time_ticks,
-    )
-    metrics["modeled_hours"] = round(float(hourly_profile["modeled_hours"]), 3)
-    metrics["total_arrivals"] = int(hourly_profile["total_arrivals"])
-    metrics["throughput_peak_window_merges_per_hour"] = round(
-        float(hourly_profile["throughput_peak_window_merges_per_hour"]),
-        3,
-    )
-    metrics["throughput_offpeak_merges_per_hour"] = round(
-        float(hourly_profile["throughput_offpeak_merges_per_hour"]),
-        3,
-    )
-    metrics["arrival_peak_window_per_hour"] = round(
-        float(hourly_profile["arrival_peak_window_per_hour"]),
-        3,
-    )
-    metrics["arrival_offpeak_window_per_hour"] = round(
-        float(hourly_profile["arrival_offpeak_window_per_hour"]),
-        3,
-    )
-    metrics["peak_offpeak_throughput_ratio"] = round(
-        float(hourly_profile["peak_offpeak_throughput_ratio"]),
-        3,
-    )
-    metrics["scenario_start_hour_utc"] = int(hourly_profile["scenario_start_hour_utc"])
-    metrics["peak_window_hours_utc_json"] = json.dumps(
-        hourly_profile["peak_window_hours_utc"],
-        separators=(",", ":"),
-    )
-    metrics["hourly_merges_json"] = json.dumps(
-        hourly_profile["hourly_merges"],
-        separators=(",", ":"),
-    )
-    metrics["hourly_arrivals_json"] = json.dumps(
-        hourly_profile["hourly_arrivals"],
-        separators=(",", ":"),
-    )
-
-    # Starvation tracking: fetch per-MR wait times
-    resp = _get_session().get(f"{sim_url}/__sim/merged_mrs")
-    resp.raise_for_status()
-    merged_mrs = resp.json()
-
-    wait_times = sorted(m["wait_ticks"] for m in merged_mrs)
-    if wait_times:
-        metrics["wait_p50"] = _percentile(wait_times, 50)
-        metrics["wait_p95"] = _percentile(wait_times, 95)
-        metrics["wait_max"] = wait_times[-1]
-        metrics["starved_mrs"] = sum(1 for w in wait_times if w > 100)
+    # One implementation of the summary, shared with scripts/backfill_run_summary.py
+    # and the UI. See mqsim/summary.py.
+    summary_events = _load_ndjson_events(metrics_path) if metrics_path else []
+    if summary_events:
+        metrics = summarize_run(summary_events)
+        # The run now carries its own summary, so every reader sees the same
+        # numbers instead of recomputing them.
+        append_run_summary(metrics_path, metrics)
     else:
-        metrics["wait_p50"] = 0
-        metrics["wait_p95"] = 0
-        metrics["wait_max"] = 0
-        metrics["starved_mrs"] = 0
+        log.warning(
+            "no metrics file for this run; summary limited to server counters"
+        )
 
-    log.info("Final metrics:")
-    log.info(f"  total_time: {total_time_ticks} ticks")
-    log.info(f"  mrs_merged: {mrs_merged}")
-    log.info(f"  throughput: {throughput:.4f} merges/tick")
-    log.info(
-        f"  throughput_hourly: {throughput_per_hour:.3f} merges/hour"
-        f" (tick_seconds={tick_seconds})"
-    )
-    log.info(
-        "  throughput profile:"
-        f" active={metrics['throughput_active_merges_per_hour']:.3f}/h"
-        f" peak8={metrics['throughput_peak8_merges_per_hour']:.3f}/h"
-        f" peak8_p90={metrics['throughput_peak8_p90_merges_per_hour']:.3f}/h"
-    )
-    log.info(
-        "  peak/off-peak profile:"
-        f" peak={metrics['throughput_peak_window_merges_per_hour']:.3f}/h"
-        f" offpeak={metrics['throughput_offpeak_merges_per_hour']:.3f}/h"
-        f" ratio={metrics['peak_offpeak_throughput_ratio']:.3f}"
-    )
-    log.info(f"  time_to_first_merge: {time_to_first_merge} ticks")
-    log.info(f"  time_to_merge_10: {time_to_merge_10} ticks")
-    log.info(f"  avg_merge_interval: {avg_merge_interval:.1f} ticks")
-    log.info(f"  queue_drain: {metrics['queue_drain_pct']}%")
-    log.info(
-        "  merge intervals:"
-        f" p50={metrics['merge_interval_p50_seconds']:.1f}s"
-        f" p95={metrics['merge_interval_p95_seconds']:.1f}s"
-    )
-    log.info(f"  rebase_per_merge: {metrics['rebase_per_merge_ratio']:.3f}")
-    log.info(f"  peak_active_pipelines: {metrics.get('peak_active_pipelines')}")
-    log.info(f"  duplicate_rebases: {metrics.get('duplicate_rebase_total')}")
-    log.info(f"  remaining open MRs: {final_state['open_mrs']}")
-    log.info(
-        f"  wait times: p50={metrics['wait_p50']}"
-        f" p95={metrics['wait_p95']} max={metrics['wait_max']}"
-    )
-    log.info(f"  starved MRs (>100 ticks): {metrics['starved_mrs']}")
-
-    if policy.startswith("omm"):
         omm = _omm_stats_snapshot()
         metrics.update(omm)
         log.info(
@@ -2113,7 +1796,11 @@ def run_comparison(args: argparse.Namespace) -> None:
         vals = []
         for policy in policy_keys:
             v = results.get(policy, {}).get(key, "N/A")
-            if isinstance(v, float):
+            if v is None:
+                # A threshold the run never reached, e.g. ten merges in a run
+                # that merged four.
+                vals.append("—")
+            elif isinstance(v, float):
                 vals.append(f"{v:.3f}")
             else:
                 vals.append(str(v))

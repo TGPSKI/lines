@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from .state import Commit, MergeRequest, Pipeline, Project
+
+
+def _now_iso() -> str:
+    """The moment a merge request reports as last updated.
+
+    gitlab_housekeeping's stale-item pass compares `updated_at` against
+    wall-clock now, in days. The sim's clock is ticks, so every merge request
+    reports as freshly updated and nothing is stale by age: a scenario models
+    staleness through labels and pipeline state instead.
+    """
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def project_shape(project: Project, base_url: str) -> dict[str, Any]:
@@ -55,6 +67,8 @@ def mr_shape(mr: MergeRequest, project: Project, base_url: str) -> dict[str, Any
         },
         "labels": mr.labels,
         "web_url": web_url,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
         "work_in_progress": mr.draft,
         "merge_when_pipeline_succeeds": False,
         "squash": True,

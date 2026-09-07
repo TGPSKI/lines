@@ -15,6 +15,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Harness mode only. The integration under test is imported into this process,
+# so it installs into the same interpreter. No usable tag exists — the newest,
+# 0.10.1 (2024-12-10), has no gitlab_housekeeping.py — so the pin is a commit,
+# and qontract-reconcile is not on PyPI.
+harness = [
+    "qontract-reconcile @ git+https://github.com/app-sre/qontract-reconcile@5d6cf917ab73472068ff746196f13c5e52662508",
+    # Two of its dependencies are uv workspace members of that same repo. uv
+    # resolves them from the checkout; pip would take the unrelated packages
+    # of those names from PyPI, whose pins do not resolve against upstream's.
+    "qontract-utils @ git+https://github.com/app-sre/qontract-reconcile@5d6cf917ab73472068ff746196f13c5e52662508#subdirectory=qontract_utils",
+    "qontract-api-client @ git+https://github.com/app-sre/qontract-reconcile@5d6cf917ab73472068ff746196f13c5e52662508#subdirectory=qontract_api_client",
+]
 dev = [
     "pytest>=9.0",
     "httpx>=0.24",
@@ -26,12 +38,16 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.metadata]
+# The harness extra pins qontract-reconcile by commit; it is not on PyPI.
+allow-direct-references = true
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/mqsim", "src/glab_api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src", "."]
+pythonpath = ["src", ".", "scripts"]
 
 [tool.ruff]
 line-length = 88

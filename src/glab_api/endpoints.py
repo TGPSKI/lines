@@ -200,7 +200,13 @@ def get_mr_label_events(
         shapes.label_event_shape(
             i + 1,
             label,
-            created_at=(mr.approved_at if label in MERGE_LABELS_SET else default_ts),
+            # A scenario need not record an approval time; GitLab would still
+            # date the event, and the integration parses this field.
+            created_at=(
+                (mr.approved_at or default_ts)
+                if label in MERGE_LABELS_SET
+                else default_ts
+            ),
         )
         for i, label in enumerate(mr.labels)
     ]
