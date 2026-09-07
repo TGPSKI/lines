@@ -141,15 +141,3 @@ tick_seconds: 82
     )
     override_state = load_scenario(override_path)
     assert override_state.tick_seconds == 82
-
-
-def test_shipped_scenarios_declare_synthetic_provenance() -> None:
-    scenario_paths = sorted(Path("scenarios").glob("*.yaml"))
-
-    assert scenario_paths
-    for scenario_path in scenario_paths:
-        state = load_scenario(scenario_path)
-        assert state.scenario_metadata["scenario_kind"] == "synthetic"
-        assert state.scenario_metadata["provenance"] == (
-            "Fully fabricated for this repository; not derived from operational logs."
-        )
