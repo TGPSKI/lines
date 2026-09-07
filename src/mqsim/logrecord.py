@@ -55,9 +55,7 @@ IID_EVENTS: frozenset[str] = frozenset({"merge", "merge_failure", "rebase"})
 # Events the --project filter applies to. merge_failure is matched by iid
 # against a pending merge, because the dialect that reports it names no
 # project on the failure line.
-PROJECT_EVENTS: frozenset[str] = frozenset(
-    {"merge", "rebase", "label_change", "close"}
-)
+PROJECT_EVENTS: frozenset[str] = frozenset({"merge", "rebase", "label_change", "close"})
 
 
 def parse_ts(raw: str) -> datetime:

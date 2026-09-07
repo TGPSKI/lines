@@ -136,13 +136,13 @@ serve: ## Start the sim server (use SCENARIO= to pick scenario)
 serve-bg: ## Start sim server in background
 	@mkdir -p reports/comparisons $(METRICS_DIR)
 	@echo "Starting sim server on $(SIM_URL) with scenario $(SCENARIO)..."
-	PYTHONPATH=src:. nohup $(PYTHON) -m glab_api.cli serve \
+	@PYTHONPATH=src:. nohup $(PYTHON) -m glab_api.cli serve \
 		--scenario $(SCENARIO) \
 		--host $(SIM_HOST) \
 		--port $(SIM_PORT) $(NETWORK_OVERRIDE) \
 		--metrics-out $(METRICS_FILE) \
-		> reports/comparisons/server.log 2>&1 &
-	@echo $$! > reports/comparisons/server.pid
+		> reports/comparisons/server.log 2>&1 & \
+	echo $$! > reports/comparisons/server.pid
 	@sleep 2
 	@if curl -sf $(SIM_URL)/api/v4/user > /dev/null 2>&1; then \
 		echo "Server running (PID $$(cat reports/comparisons/server.pid))"; \

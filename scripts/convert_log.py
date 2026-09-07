@@ -53,8 +53,7 @@ def main() -> None:
     projects = {r.project for r in source.records if r.project}
     print(f"{source.path} read as {source.dialect}", file=sys.stderr)
     print(
-        f"  {source.entries:,} timestamped entries, "
-        f"{len(source.records):,} records",
+        f"  {source.entries:,} timestamped entries, {len(source.records):,} records",
         file=sys.stderr,
     )
     if source.first_ts and source.last_ts:

@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import csv
 import json
 import logging
@@ -71,16 +72,6 @@ POLICY_SETS: dict[str, list[str]] = {
 }
 
 
-
-
-
-
-
-
-
-
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="mqsim — standalone merge-queue policy driver"
@@ -88,12 +79,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sim-url", default="http://127.0.0.1:8080")
     parser.add_argument(
         "--limit", type=int, default=5, help="Rebase/merge limit per cycle"
-    )
-    parser.add_argument(
-        "--omm-group-size",
-        type=int,
-        default=None,
-        help="Max pending MRs per OMM group (defaults to --limit)",
     )
     parser.add_argument(
         "--omm-max-interval",
@@ -380,7 +365,7 @@ def is_consuming_slot(
 ) -> bool:
     """Check if MR is consuming a CI concurrency slot.
 
-    Production-like active-cap slot logic (PR #5508):
+    Production-like active-cap slot logic (app-sre/qontract-reconcile#5508):
     - Rebased MR with running/pending/success latest pipeline = active slot.
     - Non-rebased MRs are not counted as active slots.
     """
@@ -601,7 +586,8 @@ def run_cycle_top_k(
 
     Production-equivalent ordering:
     - Merge phase sees full preprocessed queue (opened MRs).
-    - Rebase phase applies top-K visibility window (PR #5508 behavior).
+    - Rebase phase applies top-K visibility window, per
+      app-sre/qontract-reconcile#5508.
     - If wait_for_pipeline=False (integration default), insist branch is unreachable.
     """
     state = get_state(sim_url)
@@ -664,7 +650,8 @@ def run_cycle_active_cap(
 ) -> None:
     """Active-cap policy: maintain steady-state CI concurrency budget.
 
-    Models PR #5508 use_active_cap=True with production merge semantics:
+    Models app-sre/qontract-reconcile#5508 with use_active_cap=True and
+    production merge semantics:
     - Merge phase (single merge, rebase=True): if insist=True, block on
       first rebased MR with running pipeline. If insist=False, skip it.
     - Rebase phase: classify all MRs for active slots, compute budget,
@@ -744,9 +731,11 @@ def run_cycle_old_burst(
     insist: bool = True,
     wait_for_pipeline: bool = False,
 ) -> None:
-    """Old burst policy: current production master behavior.
+    """Old burst policy: the pre-OMM per-run rebase limit.
 
-    Models reconcile/gitlab_housekeeping.py on master with rebase=True:
+    Production ran this before optimistic multi-merge shipped; it is kept as a
+    comparison point, not as a description of what runs today. Models
+    reconcile/gitlab_housekeeping.py with rebase=True and no active cap:
     - Merge phase (single merge, rebase=True): if insist=True, block on
       first rebased MR with running pipeline. If insist=False, skip it.
     - Rebase phase: rebase up to `limit` non-rebased MRs per run.
@@ -1016,6 +1005,10 @@ def _omm_stats_reset() -> None:
             "group_sizes": [],
             "lead_merged_tick": None,
             "max_interval_ticks": None,
+            # Target heads produced by this group's own merges. Upstream
+            # tolerates head movement it caused itself and invalidates only on
+            # an external merge -- see is_target_safe_to_continue() upstream.
+            "group_shas": set(),
         }
     )
 
@@ -1194,8 +1187,10 @@ def run_cycle_omm(
                     )
                     .json()
                 )
-                if compare.get("commits"):
-                    log.warning("  OMM head-moved (diverged), invalidating group")
+                if compare.get("commits") and (
+                    target_head not in _omm_stats.get("group_shas", set())
+                ):
+                    log.warning("  OMM external-merge detected, invalidating group")
                     _omm_clear_group(sim_url, project_id, lead, pending, log)
                     _omm_stats["groups_diverged"] += 1
                     _omm_stats["lead_merged_tick"] = None
@@ -1211,12 +1206,15 @@ def run_cycle_omm(
 
         if lead is not None and lead_merged and pending:
             any_active = False
+            group_merges = 0
+            merge_limit_hit = False
             for mr in pending:
                 pipelines = get_mr_pipelines(sim_url, project_id, mr["iid"])
-                if not pipelines:
-                    continue
-
-                latest_status = pipelines[0]["status"]
+                # A skip-CI rebase deliberately produces no new pipeline. The
+                # group's optimism is that the pre-formation green result still
+                # holds, so "already rebased" merges through the pipeline gate
+                # rather than being gated on a pipeline existing.
+                latest_status = pipelines[0]["status"] if pipelines else None
 
                 if latest_status == "failed":
                     log.info(f"  OMM EJECT !{mr['iid']} (pipeline failed)")
@@ -1231,10 +1229,21 @@ def run_cycle_omm(
                     log.info(f"  OMM MERGE !{mr['iid']}")
                     try:
                         merge_mr(sim_url, project_id, mr["iid"])
+                        _omm_stats["group_shas"].add(
+                            get_state(sim_url).get("target_head", "")
+                        )
                         merge_count += 1
+                        group_merges += 1
                         remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
                         state = get_state(sim_url)
                         target_head = state["target_head"]
+                        if group_merges >= limit:
+                            log.info(
+                                f"  OMM merge-limit reached (limit={limit}),"
+                                " clearing group"
+                            )
+                            merge_limit_hit = True
+                            break
                     except requests.HTTPError as e:
                         log.warning(f"  OMM MERGE FAILED !{mr['iid']}: {e}")
                         remove_mr_label(sim_url, project_id, mr, OMM_PENDING)
@@ -1255,6 +1264,62 @@ def run_cycle_omm(
                 if latest_status in ("running", "pending"):
                     any_active = True
                     continue
+
+            if merge_limit_hit:
+                remaining = [
+                    m
+                    for m in pending
+                    if m.get("state") == "opened" and OMM_PENDING in m.get("labels", [])
+                ]
+                _omm_clear_group(sim_url, project_id, lead, remaining, log)
+                _omm_stats["groups_completed"] += 1
+                _omm_stats["lead_merged_tick"] = None
+                lead = None
+                pending = []
+
+            # Dynamic group expansion, every cycle while the window is open --
+            # _form_omm_group is called both at formation and from
+            # _process_omm_group at origin/master. Candidates that do not
+            # overlap the accumulated group scope are labelled and skip-CI
+            # rebased, and any retained candidate keeps the group alive.
+            group_labels: set[str] = get_tenant_domains(lead) if lead else set()
+            pending_iids = {m["iid"] for m in pending}
+            for m in pending:
+                group_labels |= get_tenant_domains(m)
+            _, expansion_queue = get_preprocessed_open_mrs(sim_url, project_id)
+            added = 0
+            if lead is None:
+                expansion_queue = []
+            for cand in expansion_queue:
+                if cand["iid"] in pending_iids or cand["iid"] == lead["iid"]:
+                    continue
+                if cand["state"] != "opened":
+                    continue
+                cand_domains = get_tenant_domains(cand)
+                if not cand_domains or (cand_domains & group_labels):
+                    continue
+                cand_pipelines = get_mr_pipelines(sim_url, project_id, cand["iid"])
+                if not cand_pipelines:
+                    continue
+                if cand_pipelines[0]["status"] not in (
+                    "running",
+                    "pending",
+                    "success",
+                ):
+                    continue
+                add_mr_label(sim_url, project_id, cand, OMM_PENDING)
+                try:
+                    rebase_mr(sim_url, project_id, cand["iid"], skip_ci=True)
+                    rebase_count += 1
+                    _omm_stats["skip_ci_rebases"] += 1
+                except requests.HTTPError as e:
+                    log.warning(f"  OMM REBASE-FAILED-AT-FORMATION !{cand['iid']}: {e}")
+                    remove_mr_label(sim_url, project_id, cand, OMM_PENDING)
+                    continue
+                log.info(f"  OMM EXPANDED add-pending !{cand['iid']}")
+                group_labels |= cand_domains
+                added += 1
+                any_active = True
 
             if not any_active:
                 remaining = [
@@ -1286,6 +1351,7 @@ def run_cycle_omm(
                 merge_mr(sim_url, project_id, mr["iid"])
                 merge_count += 1
                 add_mr_label(sim_url, project_id, mr, OMM_GROUP_LEAD)
+                _omm_stats["group_shas"] = {get_state(sim_url).get("target_head", "")}
             except requests.HTTPError as e:
                 log.warning(f"  OMM MERGE LEAD FAILED !{mr['iid']}: {e}")
                 break
@@ -1295,15 +1361,51 @@ def run_cycle_omm(
 
             _, refreshed = get_preprocessed_open_mrs(sim_url, project_id)
             group_size = 0
+            # OMM and Phase 1 are one algorithm. The non-overlap guarantee is
+            # the algorithm; the lead/pending labels are only how it is carried
+            # across reconcile cycles. Upstream enforces it at group formation
+            # via is_eligible_for_optimistic_merge() and has_overlapping_labels()
+            # in reconcile/gitlab_housekeeping.py.
+            used_domains: set[str] = get_tenant_domains(mr)
             for candidate in refreshed:
                 if candidate["iid"] == mr["iid"]:
                     continue
                 if candidate["state"] != "opened":
                     continue
-                if group_size >= limit:
-                    break
+                cand_domains = get_tenant_domains(candidate)
+                if not cand_domains:
+                    # No tenant label: conservatively serialised, never grouped.
+                    continue
+                if cand_domains & used_domains:
+                    log.debug(
+                        f"    OMM SKIP !{candidate['iid']}"
+                        f" (overlap: {cand_domains & used_domains})"
+                    )
+                    continue
+                cand_pipelines = get_mr_pipelines(sim_url, project_id, candidate["iid"])
+                if not cand_pipelines:
+                    continue
+                if cand_pipelines[0]["status"] not in (
+                    "running",
+                    "pending",
+                    "success",
+                ):
+                    continue
                 add_mr_label(sim_url, project_id, candidate, OMM_PENDING)
+                try:
+                    # Upstream skip-CI rebases at formation; a candidate whose
+                    # rebase fails is dropped from the group, not retained.
+                    rebase_mr(sim_url, project_id, candidate["iid"], skip_ci=True)
+                    rebase_count += 1
+                    _omm_stats["skip_ci_rebases"] += 1
+                except requests.HTTPError as e:
+                    log.warning(
+                        f"  OMM REBASE-FAILED-AT-FORMATION !{candidate['iid']}: {e}"
+                    )
+                    remove_mr_label(sim_url, project_id, candidate, OMM_PENDING)
+                    continue
                 log.info(f"  OMM ADD-PENDING !{candidate['iid']}")
+                used_domains |= cand_domains
                 group_size += 1
 
             _omm_stats["groups_formed"] += 1
@@ -1408,10 +1510,7 @@ def run_policy(
     runner = POLICY_RUNNERS[policy]
     _omm_stats_reset()
 
-    omm_group_size = kwargs.get("omm_group_size")
     omm_max_interval = kwargs.get("omm_max_interval", 5)
-    if omm_group_size is not None:
-        _omm_stats["group_size_limit"] = omm_group_size
 
     log.info(
         f"Policy: {policy}, limit={limit},"
@@ -1478,14 +1577,15 @@ def run_policy(
     summary_events = _load_ndjson_events(metrics_path) if metrics_path else []
     if summary_events:
         metrics = summarize_run(summary_events)
-        # The run now carries its own summary, so every reader sees the same
-        # numbers instead of recomputing them.
-        append_run_summary(metrics_path, metrics)
     else:
-        log.warning(
-            "no metrics file for this run; summary limited to server counters"
-        )
+        log.warning("no metrics file for this run; summary limited to server counters")
 
+    # OMM group statistics are driver state, not events, so summarize_run()
+    # cannot derive them -- and summarize_run() replaces the metrics dict
+    # wholesale. Attach them here, before the summary is persisted, or every
+    # reader (comparison table, run_summary, UI) reports N/A for the policy
+    # production actually runs.
+    if policy.startswith("omm"):
         omm = _omm_stats_snapshot()
         metrics.update(omm)
         log.info(
@@ -1501,6 +1601,11 @@ def run_policy(
             f"  OMM skip_ci rebases: {omm['omm_skip_ci_rebases']},"
             f" ejected: {omm['omm_pending_ejected']}"
         )
+
+    if summary_events:
+        # The run now carries its own summary, so every reader sees the same
+        # numbers instead of recomputing them.
+        append_run_summary(metrics_path, metrics)
 
     return metrics
 
@@ -1595,6 +1700,25 @@ def _compute_per_label_merge_times(reports_dir: str, policies: list[str]) -> dic
     return result
 
 
+def point_latest_at(base_reports: str, timestamp: str) -> None:
+    """Repoint <base_reports>/latest atomically.
+
+    unlink-then-symlink loses the race when two runs finish together: the
+    second unlink raises FileNotFoundError and takes the run down after the
+    work is already done. Concurrent sweeps hit this every time.
+    """
+    link = os.path.join(base_reports, "latest")
+    tmp = f"{link}.{os.getpid()}.tmp"
+    try:
+        os.symlink(timestamp, tmp)
+        os.replace(tmp, link)
+    except OSError:
+        # A stale directory (not a symlink) at `latest` is the only case
+        # os.replace refuses; leave it alone rather than delete a run.
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+
+
 def run_comparison(args: argparse.Namespace) -> None:
     """Run all policies against the same scenario and print comparison."""
     if not args.scenario:
@@ -1620,10 +1744,7 @@ def run_comparison(args: argparse.Namespace) -> None:
         reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
 
-    latest_link = os.path.join(base_reports, "latest")
-    if os.path.islink(latest_link):
-        os.unlink(latest_link)
-    os.symlink(timestamp, latest_link)
+    point_latest_at(base_reports, timestamp)
 
     log.info(f"Reports directory: {reports_dir}")
 
@@ -1681,7 +1802,6 @@ def run_comparison(args: argparse.Namespace) -> None:
                 args.ticks_per_cycle,
                 log,
                 metrics_path=metrics_out,
-                omm_group_size=getattr(args, "omm_group_size", None),
                 omm_max_interval=getattr(args, "omm_max_interval", 5),
             )
         finally:
@@ -2054,10 +2174,7 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
         reports_dir = os.path.join(base_reports, timestamp)
     os.makedirs(reports_dir, exist_ok=True)
 
-    latest_link = os.path.join(base_reports, "latest")
-    if os.path.islink(latest_link):
-        os.unlink(latest_link)
-    os.symlink(timestamp, latest_link)
+    point_latest_at(base_reports, timestamp)
 
     log.info(f"Monte Carlo: {n_trials} trials, policies={policies}")
     log.info(f"Base seed: {base_seed}, base port: {base_port}")
@@ -2119,7 +2236,6 @@ def run_monte_carlo(args: argparse.Namespace) -> None:
                 args.ticks_per_cycle,
                 policy_log,
                 metrics_path=_metrics_out_by_policy.get(policy),
-                omm_group_size=getattr(args, "omm_group_size", None),
                 omm_max_interval=getattr(args, "omm_max_interval", 5),
             )
             return policy, result
@@ -2341,7 +2457,6 @@ def main() -> None:
         args.cycles,
         args.ticks_per_cycle,
         log,
-        omm_group_size=getattr(args, "omm_group_size", None),
         omm_max_interval=getattr(args, "omm_max_interval", 5),
     )
 

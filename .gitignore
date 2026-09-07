@@ -8,3 +8,4 @@ scenarios/generated/
 sessions/
 .private/
 dist/
+docs/media/.chrome-gallery

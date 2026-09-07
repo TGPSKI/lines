@@ -30,12 +30,14 @@ def _percentile(sorted_vals: list, pct: int) -> int:
     idx = min(idx, len(sorted_vals) - 1)
     return sorted_vals[idx]
 
+
 def _percentile_float(values: list[float], pct: int) -> float:
     if not values:
         return 0.0
     ordered = sorted(values)
     idx = min(len(ordered) - 1, int(len(ordered) * pct / 100))
     return float(ordered[idx])
+
 
 def _compute_hourly_throughput_dims(
     *,
@@ -84,6 +86,7 @@ def _compute_hourly_throughput_dims(
         "merge_interval_p95_seconds": _percentile_float(merge_intervals_seconds, 95),
     }
 
+
 def _load_ndjson_events(path: str | None) -> list[dict[str, Any]]:
     if not path or not os.path.exists(path):
         return []
@@ -100,6 +103,7 @@ def _load_ndjson_events(path: str | None) -> list[dict[str, Any]]:
             if isinstance(evt, dict):
                 events.append(evt)
     return events
+
 
 def _extract_hourly_event_profile(
     *,

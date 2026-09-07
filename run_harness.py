@@ -11,7 +11,7 @@ Requirements:
 
 Usage:
     # 1. Start the sim server from this repository root:
-    #    PYTHONPATH=src python -m glab_api.cli serve \
+    #    PYTHONPATH=src python -m glab_api.cli serve
     #        --scenario scenarios/mvp-active-cap.yaml
     #
     # 2. Run the harness, after pip install -e ".[harness]":
@@ -300,12 +300,8 @@ def run_harness(args: argparse.Namespace) -> None:
 
     # Patch query functions
     p1 = patch.object(queries, "get_gitlab_instance", return_value=instance)
-    p2 = patch.object(
-        queries, "get_app_interface_settings", return_value=settings
-    )
-    p3 = patch.object(
-        queries, "get_repos_gitlab_housekeeping", return_value=repos
-    )
+    p2 = patch.object(queries, "get_app_interface_settings", return_value=settings)
+    p3 = patch.object(queries, "get_repos_gitlab_housekeeping", return_value=repos)
     patches.extend([p1, p2, p3])
 
     # Patch state init to return our in-memory state
@@ -359,15 +355,9 @@ def run_harness(args: argparse.Namespace) -> None:
         elif project_id is not None:
             self.project = self.gl.projects.get(project_id)
 
-    p6 = patch.object(
-        gitlab_api.GitLabApi, "__init__", patched_gitlab_api_init
-    )
-    p7 = patch.object(
-        gitlab_api.GitLabApi, "__enter__", lambda self: self
-    )
-    p8 = patch.object(
-        gitlab_api.GitLabApi, "__exit__", lambda self, *a: None
-    )
+    p6 = patch.object(gitlab_api.GitLabApi, "__init__", patched_gitlab_api_init)
+    p7 = patch.object(gitlab_api.GitLabApi, "__enter__", lambda self: self)
+    p8 = patch.object(gitlab_api.GitLabApi, "__exit__", lambda self, *a: None)
     patches.extend([p6, p7, p8])
 
     # Start all patches

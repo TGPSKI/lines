@@ -191,6 +191,17 @@ def _run_capture(cmd: list[str], cwd: Path) -> str:
     return proc.stdout
 
 
+def _parse_table_raw(output: str) -> dict[str, str]:
+    rows: dict[str, str] = {}
+    for match in TABLE_ROW_RE.finditer(output):
+        label = match.group("label").strip()
+        value_raw = match.group("value").strip()
+        if not label or not value_raw:
+            continue
+        rows[label] = value_raw
+    return rows
+
+
 def _parse_table_metrics(output: str) -> dict[str, float]:
     rows: dict[str, float] = {}
     for match in TABLE_ROW_RE.finditer(output):
@@ -206,11 +217,6 @@ def _parse_table_metrics(output: str) -> dict[str, float]:
 
 
 def _extract_run_metrics(output: str) -> dict[str, float] | None:
-    # run_standalone can return "N/A" table rows if a policy server failed to start;
-    # treat as a retriable run instead of a hard parse error.
-    if "N/A" in output:
-        return None
-    table = _parse_table_metrics(output)
     required = [
         "Throughput (merges/hour)",
         "Throughput Active (merges/hour)",
@@ -220,6 +226,14 @@ def _extract_run_metrics(output: str) -> dict[str, float] | None:
         "Rebase/Merge Ratio",
         "Merge Interval p95 (seconds)",
     ]
+    # run_standalone renders "N/A" for metric families the compared policies do
+    # not populate -- the OMM group stats whenever omm is absent from the run.
+    # Only a required metric coming back N/A means the policy server failed to
+    # start, which is the retriable case.
+    raw = _parse_table_raw(output)
+    if any(raw.get(key) == "N/A" for key in required):
+        return None
+    table = _parse_table_metrics(output)
     missing = [k for k in required if k not in table]
     if missing:
         raise RuntimeError(
@@ -612,7 +626,7 @@ def parse_args() -> argparse.Namespace:
         "--validate-top-n",
         type=int,
         default=3,
-        help="Validate this many best 240-cycle candidates at 480 cycles",
+        help="Validate this many best tuning candidates at the validation cycle count",
     )
     parser.add_argument(
         "--early-stop",
@@ -752,7 +766,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--validation-out",
         default="",
-        help="Optional path for 480-cycle validation CSV output",
+        help="Optional path for the validation CSV output",
     )
     parser.add_argument(
         "--metadata",

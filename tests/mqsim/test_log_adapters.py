@@ -22,6 +22,7 @@ from mqsim.logrecord import (
 
 SAMPLE = Path(__file__).resolve().parents[2] / "docs/sample-housekeeping-log.json"
 
+
 def _text_line(clock: str, level: str, msg: str) -> str:
     return f"[2026-05-06 {clock}] [{level}] reconcile.gitlab_housekeeping - {msg}"
 
