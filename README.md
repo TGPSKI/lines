@@ -2,26 +2,22 @@
 
 [UI tour](docs/ui-tour.md) | [methodology](docs/methodology.md) | [scenario schema](docs/scenario-schema.md) | [logs to scenario](docs/logs-to-scenario.md) | [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md) | [pate.sh](https://pate.sh)
 
-**A merge-queue policy lab — design a strategy, calibrate it against your own
+**A merge-queue policy lab - design a strategy, calibrate it against your own
 logs, and watch it run.**
-
-`lines` was built to develop optimistic multi-merge
-([ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
-for `gitlab_housekeeping`, the merge queue in
-[qontract-reconcile](https://github.com/app-sre/qontract-reconcile) that serves
-App-Interface — Red Hat AppSRE's GitOps monorepo. That queue is in production
-and OMM runs in it today. The simulator is how the policy was designed and
-compared before it shipped, and it generalises to any queue whose logs you can
-read.
 
 Compare merge-queue policies under controlled GitLab-like conditions: per-run
 rebase limit, top-K eligibility, active-cap CI inventory, and optimistic
 multi-merge. Promote your production logs into a scenario, prove the scenario
 reproduces what you measured, then run every policy against it and read the
-result as a tenant feels it — time to merge and the p95 tail, not throughput.
+result as a tenant feels it - time to merge and the p95 tail, not throughput.
 
-Python 3.14 and a browser. No hosted service, no build step, no data leaving
-your machine; the UI parses files locally and vendors every asset.
+
+`lines` was built to develop optimistic multi-merge
+([ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
+for `gitlab_housekeeping`, the merge queue in
+[qontract-reconcile](https://github.com/app-sre/qontract-reconcile) that serves
+app-interface - Red Hat AppSRE's GitOps monorepo.
+
 
 ![Three merge-queue policies replayed on one playhead: kanban boards for
 active-cap, old-burst and top-k, each card a merge request moving through
@@ -29,26 +25,29 @@ Queue, Rebasing, CI, Ready, Stale and Merged as the step counter advances.
 old-burst holds visibly more merge requests in CI than the other
 two.](docs/media/replay-hero.gif)
 
-The bundled demo run, replayed in the browser UI. `make ui` opens on it with no
-download and no server. Every view is in the [UI tour](docs/ui-tour.md).
+`lines` provides two packages:
 
-`lines` holds two packages. **`mqsim`** is the policy simulator: it drives
+* **`mqsim`** is the policy simulator: it drives
 policies, records metrics, and renders them in a browser UI called **Merge
-Queue Sim**. **`glab_api`** is the fake GitLab API server it drives them
+Queue Sim**. 
+* **`glab_api`** is the fake GitLab API server it drives them
 against — a scenario-loaded FastAPI service that speaks the same shapes as the
-real thing. `mqsim` depends on `glab_api`; nothing goes the other way.
+real thing. 
 
 ## Purpose
 
 **What does each policy optimize, and under which queue conditions does it
 fail?**
 
-You cannot A/B a merge queue. One queue serves every tenant, a policy change is
-global, and the counterfactual — what the other policy would have done with the
-same arrivals — is never observable in production. A calibrated simulator is
+You cannot A/B a merge queue.
+
+One queue serves every tenant, a policy change is
+global, and the counterfactual - *what the other policy would have done with the
+same arrivals* - is never observable in production.
+
+A calibrated simulator is
 how you get that counterfactual, and calibration is what makes the answer worth
-anything. [docs/methodology.md](docs/methodology.md) covers the two loops, the
-three gates, and when not to use the method.
+anything. [docs/methodology.md](docs/methodology.md) provides a deep dive.
 
 ## Architecture
 
@@ -388,18 +387,6 @@ The default policy set is `phase0` — `old-burst`, `top-k`, `active-cap` — so
 `make compare` and the Monte Carlo targets do not exercise it. Use
 `POLICY_SET=phase1` or `all` to include it.
 
-## Core Invariant ([qontract-reconcile ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
-
-`--limit` caps rebases and merges per cycle. It does not cap CI concurrency.
-Concurrency is emergent, and it is the number a merge-queue policy is actually
-trying to govern.
-
-On the 24h showcase run at `--limit 5`, peak concurrent pipelines land at 11
-for `old-burst`, 11 for `top-k`, 10 for `active-cap`, 9 for `cap+phase1` and 8
-for `omm`. Same per-cycle cap, and every policy holds more CI than the cap
-suggests. `peak_active_pipelines` is where you read it; ADR-019 is the argument
-for why that is the number to govern.
-
 ## Standalone Trace Modes
 
 `run_standalone.py` models three runtime modes per policy without a separate
@@ -601,8 +588,8 @@ make test          # or: PYTHONPATH=. .venv/bin/pytest tests/ -v
 
 Built by Tyler Pate ([@TGPSKI](https://github.com/TGPSKI)), who wrote
 [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md),
-and Ryan Hur ([@rhur-pixel](https://github.com/rhur-pixel)), who joined after and built the
-optimistic multi-merge implementation this simulator validates.
+and Ryan Hur ([@rhur-pixel](https://github.com/rhur-pixel)), who implemented
+optimistic multi-merge as his first project on the AppSRE team.
 
 Reviewed and refined in design and code review by
 Di Wang ([@hemslo](https://github.com/hemslo)), Christian Assing ([@chassing](https://github.com/chassing)),
