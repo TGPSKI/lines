@@ -109,5 +109,5 @@ Assemble into `reports/findings/<run>-findings.md`:
 <phenomena you saw and chose not to seed, with the reason>
 ```
 
-That last section is not filler. It is what stops the next reader re-opening a
-question you already judged not worth the run.
+That last section is what stops the next reader re-opening a question you
+already judged not worth the run.

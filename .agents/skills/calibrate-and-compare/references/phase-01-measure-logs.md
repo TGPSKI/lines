@@ -31,9 +31,11 @@ writing a third adapter takes.
 
 ## Step 2 — Choose the project filter
 
-**Decide**: `--project` is required and has no default. Ask which project's
-merges to measure. One repository's queue is the unit of analysis; mixing
-projects produces a throughput number describing nothing.
+**Decide**: ask which project's merges to measure, and carry the answer to
+phase 2. `analyze_logs.py measure` has no `--project` flag and reads the whole
+file; the generator in phase 2 requires one. One repository's queue is the unit
+of analysis, and a filter that matches no project measures nothing --
+`convert-log`'s `projects` line above is where you check the spelling.
 
 ## Step 3 — Measure
 

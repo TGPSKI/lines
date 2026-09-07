@@ -8,7 +8,9 @@ Validate any scenario with `make validate`, which loads every file in
 `scenarios/` and reports the first field that fails.
 
 Read alongside `scenarios/large-mixed-queue-advanced.yaml`, the richest shipped
-example — it exercises every field below.
+example. It carries every top-level section and every `merge_requests[]` field
+below except `cancel_tick`. No shipped scenario uses `cancel_tick` or
+`scheduled_target_advances`.
 
 ## Top level
 
@@ -49,13 +51,24 @@ later. An MR is in the queue from `arrival_tick` onward, not from t=0.
 | `arrival_tick` | int | no | when it enters the queue. Absent or 0 means present at t=0 |
 | `push_tick` | int | no | author pushes at this tick, invalidating the rebase and cancelling any running pipeline |
 | `force_merge_tick` | int | no | merged out of band at this tick, advancing the target head |
+| `cancel_tick` | int | no | the author closes the MR at this tick, cancelling any running pipeline |
 
 ### Labels carry two meanings
 
-Priority, highest first:
+Priority, highest first — the full order, from `MERGE_LABELS_PRIORITY` in
+`src/glab_api/state.py`:
 
 ```
-bot/approved: critical  >  high  >  medium  >  low  >  bot/approved  >  lgtm
+bot/approved: critical
+bot/approved: urgent
+bot/approved: high
+bot/approved: progressive-delivery
+bot/approved: medium
+bot/approved: low
+bot/approved
+bot/automerge
+auto-merge
+lgtm
 ```
 
 Conflict grouping: any `tenant-*` label. Two MRs sharing a `tenant-*` label
@@ -107,8 +120,17 @@ sha_pools:
 ```
 
 The SHAs the target head advances through. Without enough of them a long run
-runs out of targets. `scheduled_target_advances` in metadata moves the head
-independently of merges, modelling other repositories pushing to the branch.
+runs out of targets.
+
+`scheduled_target_advances` is a separate **top-level** key — not part of
+`sha_pools` and not under `metadata` — mapping tick to SHA. It moves the head
+independently of merges, modelling other repositories pushing to the branch:
+
+```yaml
+scheduled_target_advances:
+  10: external-push-sha-1
+  25: external-push-sha-2
+```
 
 ## `metadata`
 
@@ -131,7 +153,7 @@ metadata:
       merge_interval_seconds_p95: 2209.0
     arrival_profile:
       scenario_start_hour: 13
-      peak_window_hours: [13, 14, 15, 16, 17, 18, 19, 20]
+      peak_window_hours_utc: ["13", "14", "15", "16", "17", "18", "19", "20"]
 ```
 
 With it, the Simulation tab shows "calibration target vs this run" and the tuner
@@ -143,7 +165,6 @@ claim to represent anything.
 Usually you should not. `scripts/calibrate_from_housekeeping_logs.py` generates
 a scenario from measured logs, already carrying `calibration_targets` — see
 [docs/logs-to-scenario.md](logs-to-scenario.md) for which fields it derives and
-which it fabricates. Hand
-authoring is for probe scenarios that isolate one behaviour — see
+which it fabricates. Hand authoring is for probe scenarios that isolate one behaviour — see
 `scenarios/overlap-conflict-phase1.yaml` for a scenario built to make a single
 policy difference visible.

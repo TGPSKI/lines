@@ -57,7 +57,7 @@ These are the mismatches that actually occur. Check them in order.
 | **Limit** | the limit you ran vs the limit you meant | `metadata.json` → `context.limit`. Limit moves results more than any other flag |
 | **Which tree** | `reports/`, `reports-migrated/`, a load set | Comparing a run from one tree against remembered numbers from another |
 | **Metric name** | `queue_drain` vs `queue_drain_pct`, `trial` vs `run` | `src/mqsim/metrics.json` maps the UI's short names to the canonical ones |
-| **Policy name** | `cap+phase1`, `active-cap+phase1`, "OMM" | All the same policy. Check `context.policies` |
+| **Policy name** | `cap+phase1` vs `omm` | Two policies, not one. Both model optimistic multi-merge, but `cap+phase1` batches same-root successes within a cycle and `omm` implements the shipped lead/pending protocol. Check `context.policies` |
 
 ## Resolve the reader
 
@@ -210,5 +210,5 @@ Verdict: COORDINATE MISMATCH | COORDINATES VERIFIED
 |---|---|
 ```
 
-A finding with no DEFINITIVE line under it is a hypothesis wearing a finding's
-clothes. Label it speculative and say what would settle it.
+A finding with no DEFINITIVE line under it is a hypothesis. Label it
+speculative and say what would settle it.

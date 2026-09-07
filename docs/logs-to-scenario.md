@@ -5,7 +5,7 @@ the proof at the end. This is the machinery between them: what each stage reads,
 what it derives, what it fabricates, and where it will mislead you.
 
 Every number below was produced by running the stage against
-`docs/sample-housekeeping-log.json` — 268 entries, 5h26m of one queue.
+`docs/sample-housekeeping-log.json` — 268 entries spanning 5h27m of one queue.
 
 ## The four stages
 
@@ -142,11 +142,9 @@ in `calibrate_from_housekeeping_logs.py`, identical for every input:
 length dominates policy behaviour more than any other input, and these logs
 cannot supply it: `gitlab_housekeeping` reads the GitLab API, not the CI
 system. `ci_model: fixed-minutes-distribution` in the emitted metadata
-records that the distribution is authored. It is a deliberate estimate, not an
-oversight: the 5–25 minute spread is close enough for policy ranking, and the
-scenario says so in its own metadata. Quote it when the result depends on CI
-cost. `docs/golden-scenarios.md` carries the same caveat next to the honesty
-principle.
+records that the distribution is authored. The 5–25 minute spread is close
+enough for policy ranking, and the scenario says so in its own metadata. Quote
+it when the result depends on CI cost.
 
 **At least one merge failure is always injected.**
 `max(1, round(expected_merges * merge_failure_rate))`. The sample observed a

@@ -14,7 +14,7 @@ measured targets from phase 1.
 **Inspect**: `scenarios/large-mixed-queue-advanced.yaml` is the richest shipped
 example — arrivals, per-MR CI durations, failures, force-merges. `docs/scenario-schema.md`
 documents the fields. Top level is `metadata`, `project`, `merge_requests`,
-`sha_pools`.
+`pipeline_durations` and `sha_pools`.
 
 Do not hand-write a scenario for this phase. The generator below produces one
 that already matches the schema.
@@ -24,8 +24,12 @@ that already matches the schema.
 **Generate**:
 
 ```bash
-make calibrate-scenario LOGS="<path> [<path> ...]"
+make calibrate-scenario LOGS="<path> [<path> ...]" CALIBRATION_PROJECT=<project>
 ```
+
+`CALIBRATION_PROJECT` defaults to `queue-lab`, which matches the shipped sample
+and nothing else. Pass the project phase 1 named, spelled as `convert-log`
+printed it, or the generator filters every record out and measures nothing.
 
 Write to: `scenarios/generated/`
 

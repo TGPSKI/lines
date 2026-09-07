@@ -5,9 +5,7 @@ A policy comparison is only as good as the scenario it ran on. "cap+phase1 uses
 file behaves like a real queue.
 
 A **golden scenario** is one that has been shown to reproduce measured behaviour
-within stated tolerances, and that carries the evidence with it. Everything in
-this document exists to make that claim checkable by someone who was not there
-when it was made.
+within stated tolerances, and that carries the evidence with it.
 
 ## Two kinds of scenario, two different jobs
 
@@ -67,7 +65,7 @@ candidates over a longer run, and then accepts or rejects against three gates:
 | `max_dimension_pass` | is the *worst single* dimension within its limit? |
 
 The third exists because the first two can both pass while one dimension is
-badly wrong. A weighted score averages; a queue does not.
+badly wrong.
 
 On acceptance the tuner writes `selected-scenario.yaml`. On rejection it writes
 `rejected-scenario.yaml` and exits non-zero, so automation cannot mistake a

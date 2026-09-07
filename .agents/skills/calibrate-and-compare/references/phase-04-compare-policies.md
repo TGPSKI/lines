@@ -18,9 +18,10 @@ phases 1–3 were skipped.
 
 ## Step 2 — Choose the policy set and the limit
 
-**Inspect**: `run_standalone.py --help` lists the policy sets. `--limit` is the
-reconcile-cycle concurrency budget and changes the answer more than any other
-flag — it is the axis the Sweep tab exists to explore.
+**Inspect**: `run_standalone.py --help` lists the policy sets. `--limit` caps
+rebases and merges per cycle; it does not cap CI concurrency, which is emergent.
+It changes the answer more than any other flag — it is the axis the Sweep tab
+exists to explore.
 
 **Decide**: ask for the limit your queue actually runs. Comparing at a limit
 nobody uses produces a true statement about a hypothetical.

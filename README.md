@@ -1,10 +1,36 @@
 # lines
 
-**A merge-queue policy lab — design a strategy, calibrate it against real logs,
-and watch it run.**
+[UI tour](docs/ui-tour.md) | [methodology](docs/methodology.md) | [scenario schema](docs/scenario-schema.md) | [logs to scenario](docs/logs-to-scenario.md) | [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md) | [pate.sh](https://pate.sh)
 
-Algorithm design · scenario creation · simulation · parameter discrimination ·
-Monte Carlo · replay
+**A merge-queue policy lab — design a strategy, calibrate it against your own
+logs, and watch it run.**
+
+`lines` was built to develop optimistic multi-merge
+([ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
+for `gitlab_housekeeping`, the merge queue in
+[qontract-reconcile](https://github.com/app-sre/qontract-reconcile) that serves
+App-Interface — Red Hat AppSRE's GitOps monorepo. That queue is in production
+and OMM runs in it today. The simulator is how the policy was designed and
+compared before it shipped, and it generalises to any queue whose logs you can
+read.
+
+Compare merge-queue policies under controlled GitLab-like conditions: per-run
+rebase limit, top-K eligibility, active-cap CI inventory, and optimistic
+multi-merge. Promote your production logs into a scenario, prove the scenario
+reproduces what you measured, then run every policy against it and read the
+result as a tenant feels it — time to merge and the p95 tail, not throughput.
+
+Python 3.14 and a browser. No hosted service, no build step, no data leaving
+your machine; the UI parses files locally and vendors every asset.
+
+![Three merge-queue policies replayed on one playhead: kanban boards for
+active-cap, old-burst and top-k, each card a merge request moving through
+Queue, Rebasing, CI, Ready, Stale and Merged as the step counter advances.
+old-burst holds visibly more merge requests in CI than the other
+two.](docs/media/replay-hero.gif)
+
+The bundled demo run, replayed in the browser UI. `make ui` opens on it with no
+download and no server. Every view is in the [UI tour](docs/ui-tour.md).
 
 `lines` holds two packages. **`mqsim`** is the policy simulator: it drives
 policies, records metrics, and renders them in a browser UI called **Merge
@@ -14,16 +40,15 @@ real thing. `mqsim` depends on `glab_api`; nothing goes the other way.
 
 ## Purpose
 
-```
-Compare merge-queue policies under controlled GitLab-like conditions:
-old per-run limit, top-K eligibility, active-cap CI inventory, and Phase 1 optimistic multi-merge.
-```
+**What does each policy optimize, and under which queue conditions does it
+fail?**
 
-Primary question:
-
-```
-What does each policy optimize, and under which queue conditions does it fail?
-```
+You cannot A/B a merge queue. One queue serves every tenant, a policy change is
+global, and the counterfactual — what the other policy would have done with the
+same arrivals — is never observable in production. A calibrated simulator is
+how you get that counterfactual, and calibration is what makes the answer worth
+anything. [docs/methodology.md](docs/methodology.md) covers the two loops, the
+three gates, and when not to use the method.
 
 ## Architecture
 
@@ -42,27 +67,9 @@ mqsim: single-run + policy comparison reports
 ```
 
 The compatibility harness invokes the upstream `run()` function unchanged and
-monkeypatches its GitLab queries and API client to use the simulator. It is a
-development harness, not a reverse proxy.
-
-The fake GitLab server is compatible with the real `python-gitlab` path used by `qontract-reconcile`.
-
-### Harness mode
-
-`pip install -e ".[harness]"` pulls qontract-reconcile at commit
-[`5d6cf91`](https://github.com/app-sre/qontract-reconcile/commit/5d6cf917ab73472068ff746196f13c5e52662508)
-into the same interpreter — the integration is imported into this process, so
-one environment has to satisfy both. It is not on PyPI and has no usable tag:
-the newest, 0.10.1 (2024-12-10), predates `gitlab_housekeeping.py`. Two of its
-dependencies are uv workspace members of that repo, pinned here by git
-subdirectory because pip would otherwise take unrelated packages of those
-names from PyPI. `--qontract-reconcile-root /path/to/checkout` remains the
-alternative; without either, the harness exits saying so.
-
-Validated 2026-09-04 on Python 3.14.6: qontract-reconcile 0.10.2.dev859 at
-that commit rebased three merge requests against
-`scenarios/mvp-active-cap.yaml`, then merged MR 1 and advanced the target head
-after four ticks. Everything else in this repository runs without it.
+monkeypatches its GitLab queries and API client to use the simulator. The fake
+GitLab server is compatible with the real `python-gitlab` path
+`qontract-reconcile` uses — see [Harness mode (provenance)](#harness-mode-provenance).
 
 ## Documentation
 
@@ -71,7 +78,7 @@ after four ticks. Everything else in this repository runs without it.
 | [docs/log-format.md](docs/log-format.md) | The record every stage reads, the two shipped log adapters, and what writing your own takes |
 | [docs/methodology.md](docs/methodology.md) | Why the pipeline is shaped this way: the counterfactual production cannot provide, why CI duration is not a knob, and what a passing calibration does and does not prove |
 | [docs/logs-to-scenario.md](docs/logs-to-scenario.md) | The four stages from a production log to a proofed scenario: what each derives, what it fabricates, and the traps between them |
-| [docs/scenario-schema.md](docs/scenario-schema.md) | Every field a scenario YAML can carry, and which two carry meaning rather than data |
+| [docs/scenario-schema.md](docs/scenario-schema.md) | Every field a scenario YAML can carry, and the three in `metadata` that are read rather than stored |
 | [docs/golden-scenarios.md](docs/golden-scenarios.md) | What makes a scenario trustworthy, how to author a probe, and why the proof must travel with it |
 
 Three agent-executable patterns live in `.agents/skills/`:
@@ -82,7 +89,9 @@ Three agent-executable patterns live in `.agents/skills/`:
 | `queue-behaviour-triage` | a run's numbers contradict what you expected |
 | `findings-readout` | a comparison has run and you need what it means, not what it measured |
 
-## Quick Start
+## Running it
+
+`make` targets wrap each of these; use whichever you prefer.
 
 ```bash
 # Install from the repository root (Python 3.14)
@@ -99,10 +108,6 @@ python -m glab_api.cli serve \
   --host 127.0.0.1 \
   --port 8080 \
   --metrics-out reports/active-cap/metrics.ndjson
-
-# In another shell, run the optional qontract-reconcile compatibility harness:
-# pip install -e ".[harness]"
-# SIM_URL=http://127.0.0.1:8080 .venv/bin/python run_harness.py
 
 # Generate a report
 python -m mqsim.cli report \
@@ -121,46 +126,49 @@ The server has no authentication. Keep it bound to loopback; non-loopback
 binding requires an explicit unsafe override. The harness likewise accepts
 only a loopback simulator URL.
 
-## Simulator Control API
+## The pipeline
 
-While the server is running, advance simulation with:
+Six stages, in the order you run them. Each links the section that documents it.
+
+1. [Scrape your logs into a scenario](#scrape-your-logs-into-a-scenario) — derive
+   targets from logs you are authorised to process
+2. [What a scenario can express](#scenarios) — arrivals, priorities, CI duration,
+   failure modes
+3. [Calibrate and gate it](#calibrate-and-gate-it) — tune knobs until the scenario
+   reproduces what you measured, and reject it when it does not
+4. [Prove it on a golden scenario](docs/golden-scenarios.md) — the proof travels
+   with the scenario
+5. [Test the policies](#policy-families) — every policy against the same arrivals
+6. [Compare across axes](#key-metrics) — throughput, CI cost, wait time, the p95
+   tail, and the tradeoffs between them
+
+`.agents/skills/calibrate-and-compare` walks this end to end.
+
+## Scrape your logs into a scenario
+
+The repository ships no operational logs or scenarios derived from them.
+`scenarios/synthetic-calibration-demo.yaml` is fully fabricated. Use the
+calibration script locally to derive targets from logs you are authorized to
+process and generate your own scenario. It writes a multidimensional target
+vector — 24h throughput, active-hour throughput, peak-window throughput, rebase
+pressure and merge-interval percentiles — into
+`metadata.calibration_targets.performance_dimensions`:
 
 ```bash
-# Advance pipeline state by one tick
-curl -X POST http://127.0.0.1:8080/__sim/tick
+.venv/bin/python scripts/calibrate_from_housekeeping_logs.py \
+  --project example-project \
+  --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
+  --emit-scenario scenarios/generated/local-calibrated.yaml
 
-# Get computed metrics
-curl http://127.0.0.1:8080/__sim/metrics
-
-# Get current state
-curl http://127.0.0.1:8080/__sim/state
-
-# List merge requests merged during this run
-curl http://127.0.0.1:8080/__sim/merged_mrs
-
-# Reset to initial scenario
-curl -X POST http://127.0.0.1:8080/__sim/reset
+# run old-burst baseline against the calibrated scenario
+.venv/bin/python run_standalone.py \
+  --compare \
+  --policies old-burst \
+  --scenario scenarios/generated/local-calibrated.yaml \
+  --limit 2 \
+  --cycles 480 \
+  --ticks-per-cycle 1
 ```
-
-## Policy Families
-
-| Policy | Controls | Optimizes | Weakness |
-|--------|----------|-----------|----------|
-| **Old Burst** | Per-run rebase limit | Simple | Active CI can exceed cap over runs |
-| **Top-K** | First K eligible | Queue-position purity | Poisoned top window starves CI |
-| **Active-Cap** | In-flight CI budget | Steady-state concurrency | No preemption for new high-prio |
-| **Phase 1** | Same-root batch merge | MRs per target advance | Requires non-overlapping domains |
-
-## Core Invariant ([qontract-reconcile ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
-
-```
-limit controls steady-state CI concurrency, not per-run rebase bursts.
-```
-
-Equivalent framing:
-- top-K controls eligibility
-- active-cap controls useful in-flight CI inventory
-- Phase 1 multi-merge consumes same-root green inventory
 
 ## Scenarios
 
@@ -174,6 +182,12 @@ Equivalent framing:
 | `clean-nonoverlap-phase1.yaml` | Non-overlapping success pool | Phase 1 |
 | `overlap-conflict-phase1.yaml` | Shared tenant domains | Phase 1 limited |
 | `synthetic-calibration-demo.yaml` | Fabricated calibration-shaped workload | Calibration workflow smoke test |
+| `mvp-active-cap.yaml` | 5 MRs; the smallest thing that runs | Smoke test, and what the harness drives |
+| `large-mixed-queue.yaml` | 100 MRs, mixed priorities | Load, not a specific policy |
+| `large-mixed-queue-advanced.yaml` | 120 MRs over 480 ticks with staggered arrivals, variable CI, failures, pushes and force-merges | Every scenario field at once |
+| `showcase-10h.yaml` | 108 MRs over a 24h horizon, 23 tenants, peak-centred arrivals | The comparison this README quotes |
+
+All twelve are fabricated; none derives from operational logs.
 
 ## Priority Model
 
@@ -313,106 +327,12 @@ scheduled_target_advances:
   25: "external-push-sha-2"   # and again at tick 25
 ```
 
-## Key Metrics
-
-- **peak_active_pipelines**: Maximum concurrent CI at any tick
-- **same_root_success_pool**: Open MRs with valid green pipelines on current target
-- **stale_successes**: Pipelines that succeeded on an old target
-- **duplicate_rebases**: MRs rebased more than once before merge
-- **average_mrs_per_target_advance**: >1 means Phase 1 batching is working
-
-## Repository Compare Semantics
-
-Critical for integration compatibility:
-
-```
-GET /api/v4/projects/:id/repository/compare?from=<mr_sha>&to=<target_head>
-
-commits == []  → housekeeping considers MR rebased
-commits != []  → housekeeping considers MR not rebased
-```
-
-## Queue visualization (NDJSON)
-
-A single-page UI is meant for **walkthroughs in meetings**:
-- A **metrics comparison table** (throughput, CI waste, same-root pool, etc.) for every file you load, with the **active** column highlighted
-- A **Simulation tab** that surfaces scenario/runtime parameters, embedded calibration targets, arrival profile metadata, and per-policy runtime rollups
-- A **kanban board**: one card per merge request, moving through **Waiting → Rebase / CI / Ready → Merged** as you scrub or play
-- **Playback** with **Play / Pause / Reset**, **speed (0.25×–4×)**, **Loop** (optional), and a **step scrubber**
-- A plain-language **“at this time step”** and **“what housekeeping did”** readout
-- **Optional (collapsed) detail** sections for the **stacked bar** chart and **swimlane** (brush and swim range controls only inside that section, so they stay tied to the swimlane)
-
-Durations in the main copy are **time steps** (simulator ticks), not raw log field names.
-
-```bash
-make ui
-```
-
-In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. The brush under the chart only adjusts the **swimlane** window. Chart.js, the nine d3 modules, and js-yaml are vendored in [ui/vendor/](ui/vendor/), so the UI runs offline and makes no third-party requests. The UI sends selected files nowhere; all parsing and rendering happens in the browser.
-
-- **File**: [ui/index.html](ui/index.html) (no build step)
-- **Vendored assets**: [ui/vendor/MANIFEST.txt](ui/vendor/MANIFEST.txt) pins every
-  third-party file to a version and SHA-384. `make vendor-verify` checks the tracked
-  copies offline; `make vendor` re-downloads them and rejects any hash mismatch.
-
-## Standalone Trace Modes
-
-`run_standalone.py` models three runtime modes per policy without a separate
-CLI wait flag:
-
-- `regular` (base name): `wait_for_pipeline=False`, `insist=False`
-- `-wait`: `wait_for_pipeline=True`, `insist=False`
-- `-wait-insist`: `wait_for_pipeline=True`, `insist=True`
-
-Examples:
-
-- `top-k`, `top-k-wait`, `top-k-wait-insist`
-- `active-cap`, `active-cap-wait`, `active-cap-wait-insist`
-- `old-burst`, `old-burst-wait`, `old-burst-wait-insist`
-- `cap+phase1`, `cap+phase1-wait`, `cap+phase1-wait-insist`
-- `omm` (configure grouping with `--omm-group-size` and
-  `--omm-max-interval`)
-
-Policy presets for comparison/Monte Carlo:
-
-- `phase0`: regular mode only (`top-k`, `active-cap`, `old-burst`)
-- `phase1`: `phase0` + `cap+phase1` + `omm` regular
-- `all`: every registered trace; OMM currently has regular mode only
-
-`Makefile` comparison targets pass `POLICY_SET` through to `run_standalone.py`
-for consistent behavior across quick/advanced/Monte Carlo runs.
-
-## Calibrating From Your Own Logs
-
-The repository ships no operational logs or scenarios derived from them.
-`scenarios/synthetic-calibration-demo.yaml` is fully fabricated. Use the
-calibration script locally to derive targets from logs you are authorized to
-process and generate your own scenario. Calibration
-now emits a multidimensional target vector (24h throughput, active-hour
-throughput, peak-window throughput, rebase pressure, and merge interval
-percentiles) in `metadata.calibration_targets.performance_dimensions`:
-
-```bash
-.venv/bin/python scripts/calibrate_from_housekeeping_logs.py \
-  --project example-project \
-  --logs /path/to/log-a.log /path/to/log-b.log /path/to/log-c.log \
-  --emit-scenario scenarios/generated/local-calibrated.yaml
-
-# run old-burst baseline against the calibrated scenario
-.venv/bin/python run_standalone.py \
-  --compare \
-  --policies old-burst \
-  --scenario scenarios/generated/local-calibrated.yaml \
-  --limit 2 \
-  --cycles 480 \
-  --ticks-per-cycle 1
-```
+## Calibrate and gate it
 
 Tune calibration knobs for any policy (defaults to `old-burst`) and emit
-UI-ready calibration CSVs. The tuner now scores candidates against the
-multidimensional target vector (not just a single throughput scalar), while
-retaining compatibility columns (`rel_error_pct`, `target_mph`) for existing
-UI workflows:
+UI-ready calibration CSVs. The tuner scores candidates against the whole target
+vector rather than throughput alone, and the CSVs carry `rel_error_pct` and
+`target_mph` columns for the UI:
 
 ```bash
 .venv/bin/python scripts/tune_prod_calibration.py \
@@ -435,13 +355,91 @@ Cycle planning and scoring controls:
 - Final output reports separate gates for throughput tolerance
   (`--tolerance-pct`) and ranking-score tolerance (`--score-tolerance-pct`),
   plus per-dimension error breakdowns.
-- Acceptance now includes a max single-dimension guardrail
+- Acceptance includes a max single-dimension guardrail
   (`--max-dimension-error-pct`, default `90`).
 - If any acceptance gate fails, calibration is marked **rejected**:
   - `selected-scenario.yaml` is not emitted,
   - `rejected-scenario.yaml` is written for diagnostics,
   - the script exits non-zero so CI/automation cannot treat it as success.
 - To force legacy behavior, pass `--cycle-scaling fixed --tune-cycles ... --validate-cycles ...`.
+
+## Policy Families
+
+| Policy | Controls | Optimizes | Weakness |
+|--------|----------|-----------|----------|
+| **Old Burst** | Per-run rebase limit | Simple | Active CI can exceed cap over runs |
+| **Top-K** | First K eligible | Queue-position purity | Poisoned top window starves CI |
+| **Active-Cap** | In-flight CI budget | Steady-state concurrency | No preemption for new high-prio |
+| **Phase 1 / OMM** | Group lead + pending, `skip_ci` rebase, non-overlapping tenants | MRs per target advance without re-running CI | Group lost to an external merge, lead failure, or window expiry |
+
+**Phase 1 and OMM are the same feature** — optimistic multi-merge — and it is
+what production runs today. Two traces sit at different points in its history:
+`cap+phase1` modelled the concept well before OMM shipped, an upper-bound
+estimate that batches non-overlapping same-root successes within a single
+cycle. `omm` models the protocol that concept became in production — a merged
+lead, `omm-pending` labels, skip-CI rebase at group formation, dynamic
+expansion each cycle, and invalidation only on an external merge. Neither is a
+replica: the simulator has never tracked production 1:1, and does not try to.
+
+`old-burst` is the pre-OMM per-run-limit behavior, kept as a comparison point
+rather than as a description of production.
+
+The default policy set is `phase0` — `old-burst`, `top-k`, `active-cap` — so
+`make compare` and the Monte Carlo targets do not exercise it. Use
+`POLICY_SET=phase1` or `all` to include it.
+
+## Core Invariant ([qontract-reconcile ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md))
+
+`--limit` caps rebases and merges per cycle. It does not cap CI concurrency.
+Concurrency is emergent, and it is the number a merge-queue policy is actually
+trying to govern.
+
+On the 24h showcase run at `--limit 5`, peak concurrent pipelines land at 11
+for `old-burst`, 11 for `top-k`, 10 for `active-cap`, 9 for `cap+phase1` and 8
+for `omm`. Same per-cycle cap, and every policy holds more CI than the cap
+suggests. `peak_active_pipelines` is where you read it; ADR-019 is the argument
+for why that is the number to govern.
+
+## Standalone Trace Modes
+
+`run_standalone.py` models three runtime modes per policy without a separate
+CLI wait flag:
+
+- `regular` (base name): `wait_for_pipeline=False`, `insist=False`
+- `-wait`: `wait_for_pipeline=True`, `insist=False`
+- `-wait-insist`: `wait_for_pipeline=True`, `insist=True`
+
+Examples:
+
+- `top-k`, `top-k-wait`, `top-k-wait-insist`
+- `active-cap`, `active-cap-wait`, `active-cap-wait-insist`
+- `old-burst`, `old-burst-wait`, `old-burst-wait-insist`
+- `cap+phase1`, `cap+phase1-wait`, `cap+phase1-wait-insist`
+- `omm` (group window: `--omm-max-interval`; group size is bounded only by
+  tenant non-overlap, as upstream bounds it)
+
+Policy presets for comparison/Monte Carlo:
+
+- `phase0`: regular mode only (`top-k`, `active-cap`, `old-burst`)
+- `phase1`: `phase0` + `cap+phase1` + `omm` regular
+- `all`: every registered trace; OMM currently has regular mode only
+
+`Makefile` comparison targets pass `POLICY_SET` through to `run_standalone.py`
+for consistent behavior across quick/advanced/Monte Carlo runs.
+
+## Key Metrics
+
+Keys as a run's `run_summary` event carries them:
+
+- **`peak_active_pipelines`**: maximum concurrent CI at any tick
+- **`same_root_success_pool_p95`** / **`_max`**: open MRs with a green pipeline
+  on the current target
+- **`stale_success_max`**: pipelines that succeeded on a target since replaced
+- **`duplicate_rebase_total`**: rebases beyond the first for one MR
+- **`avg_mrs_per_merge_cycle`**: above 1 means multi-merge batched
+
+`src/mqsim/metrics.json` carries the label, unit and `higher_is_better`
+direction for the subset the UI displays; `stale_success_max` is summary-only.
 
 ## Discrimination Pass (policy-agnostic)
 
@@ -495,20 +493,124 @@ titles, authors, labels, changed paths, and inferred services. Treat those
 files as sensitive; the default `reports/` location is ignored by Git. TLS
 verification is enabled by default.
 
+## Queue visualization (NDJSON)
+
+A single-page UI is meant for **walkthroughs in meetings**. Every view is
+captured in the [UI tour](docs/ui-tour.md).
+
+![The Statistics tab's verdict band, comparing omm against old-burst. Tenant
+column: median time to merge 9m vs 14m, p95 tail 15m vs 1h21m, MRs waiting over
+100 ticks 1 vs 10. Platform column: rebases per merge 1.70 vs 3.15, wasted
+rebases 77 vs 230. Below it a metrics table shows throughput of 4.502
+merges/hour for three of five policies.](docs/media/ui/stats-verdict.png)
+
+Statistics opens on this. On a 24h run the throughput table is near-flat —
+4.502 merges/hour for three of five policies, 108 MRs merged for four of five —
+while the median MR merges in 9m instead of 14m and the p95 tail falls from
+1h21m to 15m. Throughput is what the fleet accounts for; wait time is what a
+tenant feels.
+
+- A **metrics comparison table** (throughput, CI waste, same-root pool, etc.) for every file you load, with the **active** column highlighted
+- A **Simulation tab** that surfaces scenario/runtime parameters, embedded calibration targets, arrival profile metadata, and per-policy runtime rollups
+- A **kanban board**: one card per merge request, moving through **Queue → Rebasing → CI → Ready → Stale → Merged** as you scrub or play
+- **Playback** with **Play / Step / Reset**, **speed (0.25×–4×)**, **Loop** (optional), and a **step scrubber**
+- A plain-language **“at this time step”** and **“what housekeeping did”** readout
+- Separate **Trace**, **All Policies** and **Swimlane** tabs: the metric chart with
+  per-MR swimlanes inline beneath it, the stacked-bar composition, and the full-run
+  swimlane. These read a finished run, so they do not follow the playhead — only the
+  kanban board and its readout do
+- A **window control** on those three tabs. A 24h run at 30s ticks is 2880
+  columns, where one CI pipeline is under half a pixel. Drag the overview strip
+  or take a Peak / Off-peak / quarter preset; the window is shared across the
+  three tabs, and the All Policies stat lines and y axis are clipped to it
+
+Durations in the main copy are **time steps** (simulator ticks), not raw log field names.
+
+```bash
+make ui
+```
+
+In the browser, open or drag-and-drop `metrics.ndjson` (e.g. from `--metrics-out` or `reports/…/metrics.ndjson`). Multiple files open in **tabs** for side-by-side policy comparisons. Chart.js, the nine d3 modules, and js-yaml are vendored in [ui/vendor/](ui/vendor/), so the UI runs offline and makes no third-party requests. The UI sends selected files nowhere; all parsing and rendering happens in the browser.
+
+- **File**: [ui/index.html](ui/index.html) (no build step)
+- **Vendored assets**: [ui/vendor/MANIFEST.txt](ui/vendor/MANIFEST.txt) pins every
+  third-party file to a version and SHA-384. `make vendor-verify` checks the tracked
+  copies offline; `make vendor` re-downloads them and rejects any hash mismatch.
+
+## Harness mode (provenance)
+
+Not a stage in the pipeline above. It is the evidence the arc rests on — that
+the policies compared here are the ones the real integration runs — and
+evidence has to be checkable once, not re-executed by every reader. Everything
+else in this repository runs without it.
+
+`pip install -e ".[harness]"` pulls qontract-reconcile at commit
+[`5d6cf91`](https://github.com/app-sre/qontract-reconcile/commit/5d6cf917ab73472068ff746196f13c5e52662508)
+into the same interpreter — the integration is imported into this process, so
+one environment has to satisfy both. It is not on PyPI and has no usable tag:
+the newest, 0.10.1 (2024-12-10), predates `gitlab_housekeeping.py`. Two of its
+dependencies are uv workspace members of that repo, pinned here by git
+subdirectory because pip would otherwise take unrelated packages of those
+names from PyPI. `--qontract-reconcile-root /path/to/checkout` remains the
+alternative; without either, the harness exits saying so.
+
+Validated 2026-09-04 on Python 3.14.6: qontract-reconcile 0.10.2.dev859 at
+that commit rebased three merge requests against
+`scenarios/mvp-active-cap.yaml`, then merged MR 1 and advanced the target head
+after four ticks. Everything else in this repository runs without it.
+
+## Simulator Control API
+
+While the server is running, advance simulation with:
+
+```bash
+# Advance pipeline state by one tick
+curl -X POST http://127.0.0.1:8080/__sim/tick
+
+# Get computed metrics
+curl http://127.0.0.1:8080/__sim/metrics
+
+# Get current state
+curl http://127.0.0.1:8080/__sim/state
+
+# List merge requests merged during this run
+curl http://127.0.0.1:8080/__sim/merged_mrs
+
+# Reset to initial scenario
+curl -X POST http://127.0.0.1:8080/__sim/reset
+```
+
+## Repository Compare Semantics
+
+How `gitlab_housekeeping` decides whether an MR is rebased:
+
+```
+GET /api/v4/projects/:id/repository/compare?from=<mr_sha>&to=<target_head>
+
+commits == []  → housekeeping considers MR rebased
+commits != []  → housekeeping considers MR not rebased
+```
+
 ## Running Tests
 
 ```bash
-PYTHONPATH=. .venv/bin/pytest tests/ -v
+make test          # or: PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```
 
 ## Acknowledgments
 
-Built by Tyler Pate, who wrote [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md),
-and Ryan Hur, who joined after and built the optimistic multi-merge
-implementation this simulator validates.
+Built by Tyler Pate ([@TGPSKI](https://github.com/TGPSKI)), who wrote
+[ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md),
+and Ryan Hur ([@rhur-pixel](https://github.com/rhur-pixel)), who joined after and built the
+optimistic multi-merge implementation this simulator validates.
 
-Reviewed and refined in design and code review by Di Wang, Christian
-Assing, Karl Fischer, Esron Silva, Feng Huang, and Suzana Nesic.
+Reviewed and refined in design and code review by
+Di Wang ([@hemslo](https://github.com/hemslo)), Christian Assing ([@chassing](https://github.com/chassing)),
+Karl Fischer ([@fishi0x01](https://github.com/fishi0x01)), Esron Silva ([@esron](https://github.com/esron)),
+Feng Huang ([@BumbleFeng](https://github.com/BumbleFeng)), and Suzana Nesic ([@suzana-nesic](https://github.com/suzana-nesic)).
 
 Built on the foundation of `gitlab_housekeeping` and the wider
-`qontract-reconcile` project, thanks to Jaime Melis and Maor Friedman.
+`qontract-reconcile` project — thanks to Jaime Melis
+([@jmelis](https://github.com/jmelis)), Maor Friedman
+([@maorfr](https://github.com/maorfr)), and everyone who has contributed to the
+AppSRE codebase.
