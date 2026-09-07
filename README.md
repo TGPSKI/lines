@@ -47,6 +47,41 @@ development harness, not a reverse proxy.
 
 The fake GitLab server is compatible with the real `python-gitlab` path used by `qontract-reconcile`.
 
+### Harness mode
+
+`pip install -e ".[harness]"` pulls qontract-reconcile at commit
+[`5d6cf91`](https://github.com/app-sre/qontract-reconcile/commit/5d6cf917ab73472068ff746196f13c5e52662508)
+into the same interpreter — the integration is imported into this process, so
+one environment has to satisfy both. It is not on PyPI and has no usable tag:
+the newest, 0.10.1 (2024-12-10), predates `gitlab_housekeeping.py`. Two of its
+dependencies are uv workspace members of that repo, pinned here by git
+subdirectory because pip would otherwise take unrelated packages of those
+names from PyPI. `--qontract-reconcile-root /path/to/checkout` remains the
+alternative; without either, the harness exits saying so.
+
+Validated 2026-09-04 on Python 3.14.6: qontract-reconcile 0.10.2.dev859 at
+that commit rebased three merge requests against
+`scenarios/mvp-active-cap.yaml`, then merged MR 1 and advanced the target head
+after four ticks. Everything else in this repository runs without it.
+
+## Documentation
+
+| Document | What it answers |
+|---|---|
+| [docs/log-format.md](docs/log-format.md) | The record every stage reads, the two shipped log adapters, and what writing your own takes |
+| [docs/methodology.md](docs/methodology.md) | Why the pipeline is shaped this way: the counterfactual production cannot provide, why CI duration is not a knob, and what a passing calibration does and does not prove |
+| [docs/logs-to-scenario.md](docs/logs-to-scenario.md) | The four stages from a production log to a proofed scenario: what each derives, what it fabricates, and the traps between them |
+| [docs/scenario-schema.md](docs/scenario-schema.md) | Every field a scenario YAML can carry, and which two carry meaning rather than data |
+| [docs/golden-scenarios.md](docs/golden-scenarios.md) | What makes a scenario trustworthy, how to author a probe, and why the proof must travel with it |
+
+Three agent-executable patterns live in `.agents/skills/`:
+
+| Pattern | Use it when |
+|---|---|
+| `calibrate-and-compare` | walking the arc from your own logs to a policy recommendation |
+| `queue-behaviour-triage` | a run's numbers contradict what you expected |
+| `findings-readout` | a comparison has run and you need what it means, not what it measured |
+
 ## Quick Start
 
 ```bash
@@ -66,9 +101,8 @@ python -m glab_api.cli serve \
   --metrics-out reports/active-cap/metrics.ndjson
 
 # In another shell, run the optional qontract-reconcile compatibility harness:
-# QONTRACT_RECONCILE_ROOT=/path/to/qontract-reconcile \
-# SIM_URL=http://127.0.0.1:8080 \
-#   .venv/bin/python run_harness.py
+# pip install -e ".[harness]"
+# SIM_URL=http://127.0.0.1:8080 .venv/bin/python run_harness.py
 
 # Generate a report
 python -m mqsim.cli report \
@@ -466,3 +500,15 @@ verification is enabled by default.
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```
+
+## Acknowledgments
+
+Built by Tyler Pate, who wrote [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md),
+and Ryan Hur, who joined after and built the optimistic multi-merge
+implementation this simulator validates.
+
+Reviewed and refined in design and code review by Di Wang, Christian
+Assing, Karl Fischer, Esron Silva, Feng Huang, and Suzana Nesic.
+
+Built on the foundation of `gitlab_housekeeping` and the wider
+`qontract-reconcile` project, thanks to Jaime Melis and Maor Friedman.

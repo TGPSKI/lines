@@ -1,0 +1,1074 @@
+[
+ {
+  "@timestamp": "2026-05-06 13:01:19.000",
+  "message": "2026-05-06T13:01:19Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:02:36.000",
+  "message": "2026-05-06T13:02:36Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:04:01.000",
+  "message": "2026-05-06T13:04:01Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:04:45.000",
+  "message": "2026-05-06T13:04:45Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:05:28.000",
+  "message": "2026-05-06T13:05:28Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:08:39.000",
+  "message": "2026-05-06T13:08:39Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1200]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:09:22.000",
+  "message": "2026-05-06T13:09:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:09:54.000",
+  "message": "2026-05-06T13:09:54Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:11:11.000",
+  "message": "2026-05-06T13:11:11Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:12:09.000",
+  "message": "2026-05-06T13:12:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:12:47.000",
+  "message": "2026-05-06T13:12:47Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:14:10.000",
+  "message": "2026-05-06T13:14:10Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1201]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:15:20.000",
+  "message": "2026-05-06T13:15:20Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1202]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:16:37.000",
+  "message": "2026-05-06T13:16:37Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1202]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:20:24.000",
+  "message": "2026-05-06T13:20:24Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1202]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:20:45.000",
+  "message": "2026-05-06T13:20:45Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1203]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:22:12.000",
+  "message": "2026-05-06T13:22:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1203]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:22:40.000",
+  "message": "2026-05-06T13:22:40Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1203]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:23:55.000",
+  "message": "2026-05-06T13:23:55Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1203]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:24:39.000",
+  "message": "2026-05-06T13:24:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1204]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:25:29.000",
+  "message": "2026-05-06T13:25:29Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1204]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:29:02.000",
+  "message": "2026-05-06T13:29:02Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1204]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:30:21.000",
+  "message": "2026-05-06T13:30:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1205]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:31:22.000",
+  "message": "2026-05-06T13:31:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1205]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:34:14.000",
+  "message": "2026-05-06T13:34:14Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1205]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:35:40.000",
+  "message": "2026-05-06T13:35:40Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1206]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:36:29.000",
+  "message": "2026-05-06T13:36:29Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1206]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:37:26.000",
+  "message": "2026-05-06T13:37:26Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1206]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:40:33.000",
+  "message": "2026-05-06T13:40:33Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1206]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:41:03.000",
+  "message": "2026-05-06T13:41:03Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1207]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:42:21.000",
+  "message": "2026-05-06T13:42:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1207]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:46:08.000",
+  "message": "2026-05-06T13:46:08Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1207]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:47:20.000",
+  "message": "2026-05-06T13:47:20Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1208]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:48:50.000",
+  "message": "2026-05-06T13:48:50Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1208]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:49:20.000",
+  "message": "2026-05-06T13:49:20Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1208]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:50:12.000",
+  "message": "2026-05-06T13:50:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1208]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:52:32.000",
+  "message": "2026-05-06T13:52:32Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1208]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:53:57.000",
+  "message": "2026-05-06T13:53:57Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1209]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:54:53.000",
+  "message": "2026-05-06T13:54:53Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1209]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:55:16.000",
+  "message": "2026-05-06T13:55:16Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1209]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:56:33.000",
+  "message": "2026-05-06T13:56:33Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1209]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:57:44.000",
+  "message": "2026-05-06T13:57:44Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1210]"
+ },
+ {
+  "@timestamp": "2026-05-06 13:58:17.000",
+  "message": "2026-05-06T13:58:17Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1210]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:00:31.000",
+  "message": "2026-05-06T14:00:31Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1210]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:00:59.000",
+  "message": "2026-05-06T14:00:59Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:01:21.000",
+  "message": "2026-05-06T14:01:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:01:41.000",
+  "message": "2026-05-06T14:01:41Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:02:28.000",
+  "message": "2026-05-06T14:02:28Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:03:14.000",
+  "message": "2026-05-06T14:03:14Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:04:27.000",
+  "message": "2026-05-06T14:04:27Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1211]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:05:35.000",
+  "message": "2026-05-06T14:05:35Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:06:45.000",
+  "message": "2026-05-06T14:06:45Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:07:58.000",
+  "message": "2026-05-06T14:07:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:08:27.000",
+  "message": "2026-05-06T14:08:27Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:09:12.000",
+  "message": "2026-05-06T14:09:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:13:04.000",
+  "message": "2026-05-06T14:13:04Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1212]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:14:07.000",
+  "message": "2026-05-06T14:14:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1213]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:14:38.000",
+  "message": "2026-05-06T14:14:38Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1213]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:15:37.000",
+  "message": "2026-05-06T14:15:37Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1213]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:16:39.000",
+  "message": "2026-05-06T14:16:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1213]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:17:42.000",
+  "message": "2026-05-06T14:17:42Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1213]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:18:17.000",
+  "message": "2026-05-06T14:18:17Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:18:54.000",
+  "message": "2026-05-06T14:18:54Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:19:45.000",
+  "message": "2026-05-06T14:19:45Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:20:17.000",
+  "message": "2026-05-06T14:20:17Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:20:38.000",
+  "message": "2026-05-06T14:20:38Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:21:53.000",
+  "message": "2026-05-06T14:21:53Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1214]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:23:15.000",
+  "message": "2026-05-06T14:23:15Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:23:57.000",
+  "message": "2026-05-06T14:23:57Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:24:41.000",
+  "message": "2026-05-06T14:24:41Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:25:58.000",
+  "message": "2026-05-06T14:25:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:27:23.000",
+  "message": "2026-05-06T14:27:23Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:29:11.000",
+  "message": "2026-05-06T14:29:11Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1215]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:30:24.000",
+  "message": "2026-05-06T14:30:24Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1216]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:31:33.000",
+  "message": "2026-05-06T14:31:33Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1216]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:32:07.000",
+  "message": "2026-05-06T14:32:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1216]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:34:48.000",
+  "message": "2026-05-06T14:34:48Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1216]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:35:35.000",
+  "message": "2026-05-06T14:35:35Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:35:55.000",
+  "message": "2026-05-06T14:35:55Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:36:49.000",
+  "message": "2026-05-06T14:36:49Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:37:47.000",
+  "message": "2026-05-06T14:37:47Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:38:09.000",
+  "message": "2026-05-06T14:38:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:40:02.000",
+  "message": "2026-05-06T14:40:02Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1217]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:41:12.000",
+  "message": "2026-05-06T14:41:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1218]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:41:44.000",
+  "message": "2026-05-06T14:41:44Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1218]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:42:09.000",
+  "message": "2026-05-06T14:42:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1218]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:43:46.000",
+  "message": "2026-05-06T14:43:46Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1218]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:45:02.000",
+  "message": "2026-05-06T14:45:02Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1219]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:45:55.000",
+  "message": "2026-05-06T14:45:55Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1219]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:46:16.000",
+  "message": "2026-05-06T14:46:16Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1219]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:49:52.000",
+  "message": "2026-05-06T14:49:52Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1219]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:50:49.000",
+  "message": "2026-05-06T14:50:49Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1220]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:51:58.000",
+  "message": "2026-05-06T14:51:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1220]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:52:27.000",
+  "message": "2026-05-06T14:52:27Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1220]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:52:56.000",
+  "message": "2026-05-06T14:52:56Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1220]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:54:19.000",
+  "message": "2026-05-06T14:54:19Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1220]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:55:10.000",
+  "message": "2026-05-06T14:55:10Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1221]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:55:31.000",
+  "message": "2026-05-06T14:55:31Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1221]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:56:38.000",
+  "message": "2026-05-06T14:56:38Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1221]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:59:13.000",
+  "message": "2026-05-06T14:59:13Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1221]"
+ },
+ {
+  "@timestamp": "2026-05-06 14:59:49.000",
+  "message": "2026-05-06T14:59:49Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:01:10.000",
+  "message": "2026-05-06T15:01:10Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:01:47.000",
+  "message": "2026-05-06T15:01:47Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:02:56.000",
+  "message": "2026-05-06T15:02:56Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:03:39.000",
+  "message": "2026-05-06T15:03:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:07:19.000",
+  "message": "2026-05-06T15:07:19Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1222]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:08:18.000",
+  "message": "2026-05-06T15:08:18Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1223]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:09:07.000",
+  "message": "2026-05-06T15:09:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1223]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:09:58.000",
+  "message": "2026-05-06T15:09:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1223]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:11:46.000",
+  "message": "2026-05-06T15:11:46Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1223]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:13:16.000",
+  "message": "2026-05-06T15:13:16Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1224]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:14:01.000",
+  "message": "2026-05-06T15:14:01Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1224]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:15:10.000",
+  "message": "2026-05-06T15:15:10Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1224]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:18:13.000",
+  "message": "2026-05-06T15:18:13Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1224]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:19:26.000",
+  "message": "2026-05-06T15:19:26Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1225]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:19:52.000",
+  "message": "2026-05-06T15:19:52Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1225]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:21:18.000",
+  "message": "2026-05-06T15:21:18Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1225]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:21:42.000",
+  "message": "2026-05-06T15:21:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1226]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:23:07.000",
+  "message": "2026-05-06T15:23:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1226]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:25:12.000",
+  "message": "2026-05-06T15:25:12Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1226]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:26:22.000",
+  "message": "2026-05-06T15:26:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1227]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:27:14.000",
+  "message": "2026-05-06T15:27:14Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1227]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:28:27.000",
+  "message": "2026-05-06T15:28:27Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1227]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:31:59.000",
+  "message": "2026-05-06T15:31:59Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1227]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:32:56.000",
+  "message": "2026-05-06T15:32:56Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:34:22.000",
+  "message": "2026-05-06T15:34:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:35:04.000",
+  "message": "2026-05-06T15:35:04Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:35:32.000",
+  "message": "2026-05-06T15:35:32Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:36:08.000",
+  "message": "2026-05-06T15:36:08Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:38:06.000",
+  "message": "2026-05-06T15:38:06Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1228]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:38:35.000",
+  "message": "2026-05-06T15:38:35Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:39:30.000",
+  "message": "2026-05-06T15:39:30Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:40:17.000",
+  "message": "2026-05-06T15:40:17Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:41:03.000",
+  "message": "2026-05-06T15:41:03Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:41:25.000",
+  "message": "2026-05-06T15:41:25Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:42:42.000",
+  "message": "2026-05-06T15:42:42Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1229]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:43:54.000",
+  "message": "2026-05-06T15:43:54Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1230]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:45:11.000",
+  "message": "2026-05-06T15:45:11Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1230]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:46:02.000",
+  "message": "2026-05-06T15:46:02Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1230]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:46:29.000",
+  "message": "2026-05-06T15:46:29Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1230]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:47:40.000",
+  "message": "2026-05-06T15:47:40Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1230]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:48:36.000",
+  "message": "2026-05-06T15:48:36Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1231]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:49:43.000",
+  "message": "2026-05-06T15:49:43Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1231]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:51:10.000",
+  "message": "2026-05-06T15:51:10Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1231]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:54:36.000",
+  "message": "2026-05-06T15:54:36Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1231]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:55:07.000",
+  "message": "2026-05-06T15:55:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1232]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:56:13.000",
+  "message": "2026-05-06T15:56:13Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1232]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:56:50.000",
+  "message": "2026-05-06T15:56:50Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1232]"
+ },
+ {
+  "@timestamp": "2026-05-06 15:59:45.000",
+  "message": "2026-05-06T15:59:45Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1232]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:01:11.000",
+  "message": "2026-05-06T16:01:11Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1233]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:01:48.000",
+  "message": "2026-05-06T16:01:48Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1233]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:02:12.000",
+  "message": "2026-05-06T16:02:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1233]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:02:34.000",
+  "message": "2026-05-06T16:02:34Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1233]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:05:35.000",
+  "message": "2026-05-06T16:05:35Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1233]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:06:34.000",
+  "message": "2026-05-06T16:06:34Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1234]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:06:58.000",
+  "message": "2026-05-06T16:06:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1234]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:07:20.000",
+  "message": "2026-05-06T16:07:20Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1234]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:07:49.000",
+  "message": "2026-05-06T16:07:49Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1234]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:10:52.000",
+  "message": "2026-05-06T16:10:52Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1234]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:11:51.000",
+  "message": "2026-05-06T16:11:51Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1235]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:12:51.000",
+  "message": "2026-05-06T16:12:51Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1235]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:14:25.000",
+  "message": "2026-05-06T16:14:25Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1235]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:14:54.000",
+  "message": "2026-05-06T16:14:54Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1236]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:16:11.000",
+  "message": "2026-05-06T16:16:11Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1236]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:19:30.000",
+  "message": "2026-05-06T16:19:30Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1236]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:19:55.000",
+  "message": "2026-05-06T16:19:55Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1237]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:20:31.000",
+  "message": "2026-05-06T16:20:31Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1237]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:21:34.000",
+  "message": "2026-05-06T16:21:34Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1237]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:22:39.000",
+  "message": "2026-05-06T16:22:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1237]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:24:00.000",
+  "message": "2026-05-06T16:24:00Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1237]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:24:29.000",
+  "message": "2026-05-06T16:24:29Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:25:42.000",
+  "message": "2026-05-06T16:25:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:26:05.000",
+  "message": "2026-05-06T16:26:05Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:27:28.000",
+  "message": "2026-05-06T16:27:28Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:27:49.000",
+  "message": "2026-05-06T16:27:49Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:31:28.000",
+  "message": "2026-05-06T16:31:28Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1238]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:32:36.000",
+  "message": "2026-05-06T16:32:36Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:32:57.000",
+  "message": "2026-05-06T16:32:57Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:33:26.000",
+  "message": "2026-05-06T16:33:26Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:33:56.000",
+  "message": "2026-05-06T16:33:56Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:34:27.000",
+  "message": "2026-05-06T16:34:27Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:38:10.000",
+  "message": "2026-05-06T16:38:10Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1239]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:39:02.000",
+  "message": "2026-05-06T16:39:02Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1240]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:40:15.000",
+  "message": "2026-05-06T16:40:15Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1240]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:42:39.000",
+  "message": "2026-05-06T16:42:39Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1240]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:43:57.000",
+  "message": "2026-05-06T16:43:57Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:45:13.000",
+  "message": "2026-05-06T16:45:13Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:46:32.000",
+  "message": "2026-05-06T16:46:32Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:48:01.000",
+  "message": "2026-05-06T16:48:01Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:48:31.000",
+  "message": "2026-05-06T16:48:31Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:51:43.000",
+  "message": "2026-05-06T16:51:43Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1241]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:52:42.000",
+  "message": "2026-05-06T16:52:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1242]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:53:13.000",
+  "message": "2026-05-06T16:53:13Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1242]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:56:16.000",
+  "message": "2026-05-06T16:56:16Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1242]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:57:05.000",
+  "message": "2026-05-06T16:57:05Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1243]"
+ },
+ {
+  "@timestamp": "2026-05-06 16:57:39.000",
+  "message": "2026-05-06T16:57:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1243]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:00:46.000",
+  "message": "2026-05-06T17:00:46Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1243]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:01:38.000",
+  "message": "2026-05-06T17:01:38Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:01:59.000",
+  "message": "2026-05-06T17:01:59Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:03:06.000",
+  "message": "2026-05-06T17:03:06Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:04:04.000",
+  "message": "2026-05-06T17:04:04Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:04:42.000",
+  "message": "2026-05-06T17:04:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:08:35.000",
+  "message": "2026-05-06T17:08:35Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1244]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:10:01.000",
+  "message": "2026-05-06T17:10:01Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1245]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:10:42.000",
+  "message": "2026-05-06T17:10:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1245]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:11:45.000",
+  "message": "2026-05-06T17:11:45Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1245]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:15:33.000",
+  "message": "2026-05-06T17:15:33Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1245]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:16:56.000",
+  "message": "2026-05-06T17:16:56Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:17:46.000",
+  "message": "2026-05-06T17:17:46Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:18:47.000",
+  "message": "2026-05-06T17:18:47Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:19:58.000",
+  "message": "2026-05-06T17:19:58Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:20:50.000",
+  "message": "2026-05-06T17:20:50Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:22:40.000",
+  "message": "2026-05-06T17:22:40Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1246]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:23:25.000",
+  "message": "2026-05-06T17:23:25Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:24:12.000",
+  "message": "2026-05-06T17:24:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:25:21.000",
+  "message": "2026-05-06T17:25:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:26:09.000",
+  "message": "2026-05-06T17:26:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:27:09.000",
+  "message": "2026-05-06T17:27:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:29:02.000",
+  "message": "2026-05-06T17:29:02Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1247]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:29:39.000",
+  "message": "2026-05-06T17:29:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1248]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:31:02.000",
+  "message": "2026-05-06T17:31:02Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1248]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:32:06.000",
+  "message": "2026-05-06T17:32:06Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1248]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:33:16.000",
+  "message": "2026-05-06T17:33:16Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1248]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:34:11.000",
+  "message": "2026-05-06T17:34:11Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1249]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:34:52.000",
+  "message": "2026-05-06T17:34:52Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1249]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:36:20.000",
+  "message": "2026-05-06T17:36:20Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1249]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:37:40.000",
+  "message": "2026-05-06T17:37:40Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:38:35.000",
+  "message": "2026-05-06T17:38:35Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:39:22.000",
+  "message": "2026-05-06T17:39:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:40:34.000",
+  "message": "2026-05-06T17:40:34Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:41:42.000",
+  "message": "2026-05-06T17:41:42Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:45:22.000",
+  "message": "2026-05-06T17:45:22Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1250]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:46:22.000",
+  "message": "2026-05-06T17:46:22Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:47:39.000",
+  "message": "2026-05-06T17:47:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:48:40.000",
+  "message": "2026-05-06T17:48:40Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:49:09.000",
+  "message": "2026-05-06T17:49:09Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:49:33.000",
+  "message": "2026-05-06T17:49:33Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:51:44.000",
+  "message": "2026-05-06T17:51:44Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1251]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:52:39.000",
+  "message": "2026-05-06T17:52:39Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1252]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:53:44.000",
+  "message": "2026-05-06T17:53:44Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1252]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:56:03.000",
+  "message": "2026-05-06T17:56:03Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1252]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:56:40.000",
+  "message": "2026-05-06T17:56:40Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1253]"
+ },
+ {
+  "@timestamp": "2026-05-06 17:57:51.000",
+  "message": "2026-05-06T17:57:51Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1253]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:00:47.000",
+  "message": "2026-05-06T18:00:47Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1253]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:01:10.000",
+  "message": "2026-05-06T18:01:10Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1254]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:02:04.000",
+  "message": "2026-05-06T18:02:04Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1254]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:02:54.000",
+  "message": "2026-05-06T18:02:54Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1254]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:04:30.000",
+  "message": "2026-05-06T18:04:30Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1254]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:05:04.000",
+  "message": "2026-05-06T18:05:04Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1255]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:06:21.000",
+  "message": "2026-05-06T18:06:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1255]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:07:48.000",
+  "message": "2026-05-06T18:07:48Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1255]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:08:17.000",
+  "message": "2026-05-06T18:08:17Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1256]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:09:02.000",
+  "message": "2026-05-06T18:09:02Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1256]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:09:47.000",
+  "message": "2026-05-06T18:09:47Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1256]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:11:07.000",
+  "message": "2026-05-06T18:11:07Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1256]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:13:12.000",
+  "message": "2026-05-06T18:13:12Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1256]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:13:33.000",
+  "message": "2026-05-06T18:13:33Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1257]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:14:53.000",
+  "message": "2026-05-06T18:14:53Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1257]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:16:21.000",
+  "message": "2026-05-06T18:16:21Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1257]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:17:30.000",
+  "message": "2026-05-06T18:17:30Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1257]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:18:18.000",
+  "message": "2026-05-06T18:18:18Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1258]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:19:12.000",
+  "message": "2026-05-06T18:19:12Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1258]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:20:16.000",
+  "message": "2026-05-06T18:20:16Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1258]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:23:34.000",
+  "message": "2026-05-06T18:23:34Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1258]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:24:44.000",
+  "message": "2026-05-06T18:24:44Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1259]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:25:32.000",
+  "message": "2026-05-06T18:25:32Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1259]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:26:03.000",
+  "message": "2026-05-06T18:26:03Z 1 INFO [gitlab_housekeeping.py:rebase_merge_requests:733] processing [example/queue-lab, 1259]"
+ },
+ {
+  "@timestamp": "2026-05-06 18:28:48.000",
+  "message": "2026-05-06T18:28:48Z 1 INFO [gitlab_housekeeping.py:merge_merge_requests:412] processing [example/queue-lab, 1259]"
+ }
+]
