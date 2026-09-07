@@ -1,5 +1,7 @@
 # lines
 
+[![DOI](https://zenodo.org/badge/1359829980.svg)](https://doi.org/10.5281/zenodo.22637380)
+
 [UI tour](docs/ui-tour.md) | [methodology](docs/methodology.md) | [scenario schema](docs/scenario-schema.md) | [logs to scenario](docs/logs-to-scenario.md) | [ADR-019](https://github.com/app-sre/qontract-reconcile/blob/master/docs/adr/ADR-019-merge-queue-acceleration.md) | [pate.sh](https://pate.sh)
 
 **A merge-queue policy lab - design a strategy, calibrate it against your own

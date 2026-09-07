@@ -7,6 +7,12 @@ authors:
     given-names: Tyler
     alias: TGPSKI
 version: 0.1.0
+doi: 10.5281/zenodo.22637381
+date-released: "2026-09-07"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.22637380
+    description: "Concept DOI, resolves to the latest release"
 license: Apache-2.0
 repository-code: "https://github.com/TGPSKI/lines"
 abstract: >-
