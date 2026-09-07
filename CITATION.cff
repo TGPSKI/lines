@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use lines in research, cite it as below."
+type: software
+title: "lines: a merge-queue policy lab calibrated against production logs"
+authors:
+  - family-names: Pate
+    given-names: Tyler
+    alias: TGPSKI
+version: 0.1.0
+license: Apache-2.0
+repository-code: "https://github.com/TGPSKI/lines"
+abstract: >-
+  A fake GitLab API server and a policy simulator that drives merge-queue
+  policies against it, including the unchanged production integration under a
+  harness. Scenarios are derived from housekeeping logs and gated against a
+  multidimensional calibration target before any policy comparison is read
+  from them.
+keywords:
+  - merge queue
+  - continuous integration
+  - simulation
+  - calibration
+  - GitLab
+  - qontract-reconcile

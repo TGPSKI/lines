@@ -582,6 +582,26 @@ commits != []  → housekeeping considers MR not rebased
 make test          # or: PYTHONPATH=. .venv/bin/pytest tests/ -v
 ```
 
+## History
+
+| Date | Event |
+|---|---|
+| 2026-03-05 | [ADR-019](https://github.com/app-sre/qontract-reconcile/pull/5439) opened, proposing optimistic non-overlapping multi-merge. Merged 2026-04-15 |
+| 2026-04-23 | First OMM implementation PR ([#5508](https://github.com/app-sre/qontract-reconcile/pull/5508)) opened. Merged 2026-05-06 |
+| 2026-04-29 | First simulator commit, `2138aec` in this history |
+| 2026-05-01 | Simulator public on the [`tgpski-gitlab-housekeeping-performance-simulator`](https://github.com/TGPSKI/qontract-reconcile/tree/tgpski-gitlab-housekeeping-performance-simulator/tools/gitlab_housekeeping_perf_sim) branch of the qontract-reconcile fork |
+| 2026-09-04 | Harness validated against qontract-reconcile `5d6cf91` |
+| 2026-09-07 | Published as `TGPSKI/lines` |
+
+Speculative multi-merge is older than this repository. Zuul's dependent
+pipelines have tested changes against the assumed success of the changes ahead
+of them since 2012, and Uber's SubmitQueue design, published at EuroSys 2019
+as [Keeping Master Green at Scale](https://dl.acm.org/doi/10.1145/3302424.3303970),
+prunes the speculation tree by a build-target conflict graph. What this
+repository adds is the harness that runs the production integration unchanged
+against the fake server, and the calibration gate that rejects a scenario
+before any policy comparison is read from it.
+
 ## Acknowledgments
 
 Built by Tyler Pate ([@TGPSKI](https://github.com/TGPSKI)), who wrote
