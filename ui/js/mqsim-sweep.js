@@ -112,53 +112,10 @@ function getSweepSeriesForMetric(metric) {
 }
 
 function renderSweepCharts() {
-  renderSweepLineChart();
+  // The grouped bars carry per-limit comparison and the convergence chart
+  // carries the trend; a line chart of the same numbers added neither.
   renderSweepBarChart();
   renderSweepConvergeChart();
-}
-
-function renderSweepLineChart() {
-  const ctx = document.getElementById("sweepLineCanvas");
-  const series = getSweepSeriesForMetric(sweepCurrentMetric);
-  const labels = sweepData.limits.map(l => `limit=${l}`);
-
-  document.getElementById("sweepLineTitle").textContent = `${sweepCurrentMetric} vs Limit`;
-
-  const datasets = series.map(s => ({
-    label: s.policy,
-    data: s.values,
-    borderColor: s.color,
-    backgroundColor: s.color + "33",
-    tension: 0.3,
-    pointRadius: 5,
-    pointHoverRadius: 7,
-    borderWidth: 2,
-  }));
-
-  if (sweepLineChart) {
-    sweepLineChart.data.labels = labels;
-    sweepLineChart.data.datasets = datasets;
-    sweepLineChart.options.plugins.title.text = sweepCurrentMetric;
-    sweepLineChart.update();
-  } else {
-    sweepLineChart = new Chart(ctx, {
-      type: "line",
-      data: { labels, datasets },
-      options: {
-        responsive: true, maintainAspectRatio: false,
-        plugins: {
-          title: { display: false },
-          legend: { position: "bottom", labels: { color: "#c9d1d9", boxWidth: 12, font: { size: 11 } } },
-          tooltip: { mode: "index", intersect: false },
-        },
-        scales: {
-          x: { ticks: { color: "#8b949e" }, grid: { color: "rgba(255,255,255,0.04)" } },
-          y: { beginAtZero: true, ticks: { color: "#8b949e" }, grid: { color: "rgba(255,255,255,0.06)" } },
-        },
-        interaction: { mode: "index", intersect: false },
-      },
-    });
-  }
 }
 
 function renderSweepBarChart() {

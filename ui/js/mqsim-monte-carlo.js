@@ -31,6 +31,14 @@ const MC_LOWER_BETTER = new Set([
   "merge_errors", "rebase_errors", "pipeline_cancels"
 ]);
 const MC_SKIP_METRICS = new Set(["total_time_ticks", "tick_seconds"]);
+// Must track the datasets order in renderMcBoxChart.
+const STRIP_DATASET_INDEX = 2;
+
+// Deterministic offset in [-0.5, 0.5]: the strip must not jump on every redraw.
+function mcJitter(n) {
+  const t = Math.sin((n + 1) * 12.9898) * 43758.5453;
+  return (t - Math.floor(t)) - 0.5;
+}
 
 function loadMcCSVText(text) {
   const { headers, rows } = mqParseCsvRecords(text);
@@ -140,37 +148,61 @@ function renderMcBoxChart() {
 
   mqDestroyChartIfPresent(mcBoxChart);
 
+  const stats = policies.map(p => mcStats(mcData.trials[p]?.[metric] || []));
+  // One entry per strip point, in the scatter dataset's own order.
+  const strip = policies.flatMap((policy, i) =>
+    (mcData.trials[policy]?.[metric] || []).map((_, j) => ({ column: i, spread: mcJitter(j) })));
   const allValues = policies.flatMap(p => mcData.trials[p]?.[metric] || []);
-  const yMin = allValues.length ? Math.min(...allValues) * 0.9 : 0;
-  const yMax = allValues.length ? Math.max(...allValues) * 1.1 : 100;
+  // Sizes the median tick. Not an axis bound; the scale sets its own.
+  const dataRange = allValues.length
+    ? (Math.max(...allValues) - Math.min(...allValues)) || Math.abs(allValues[0]) || 1
+    : 1;
 
   mcBoxChart = new Chart(ctx, {
     type: "bar",
     data: {
       labels: policies,
       datasets: [
-        ...policies.map((policy, i) => {
-          const values = mcData.trials[policy]?.[metric] || [];
-          const s = mcStats(values);
-          const color = mcPolicyColor(policy);
-          return {
-            label: policy + " IQR",
-            data: [{ x: policy, y: s.q3 - s.q1 }],
-            base: policies.map((p, j) => j === i ? mcStats(mcData.trials[p]?.[metric] || []).q1 : null),
-            backgroundColor: color + "44",
-            borderColor: color,
-            borderWidth: 2,
-            barPercentage: 0.5,
-          };
-        }),
+        {
+          // Floating bars: Chart.js draws [y0, y1] as a bar spanning that range.
+          // The previous version passed `base` an array, which Chart.js ignores
+          // because base is a scalar option, so every box was drawn from the
+          // axis floor instead of from q1.
+          label: "IQR (q1-q3)",
+          // Both bar datasets share the category slot instead of splitting it,
+          // so the median draws inside its box and the strip lands on top of
+          // both rather than between them.
+          grouped: false,
+          data: stats.map(s => [s.q1, s.q3]),
+          backgroundColor: policies.map(p => mcPolicyColor(p) + "44"),
+          borderColor: policies.map(p => mcPolicyColor(p)),
+          borderWidth: 2,
+          barPercentage: 0.5,
+        },
+        {
+          label: "Median",
+          grouped: false,
+          data: stats.map(s => {
+            // Span from the data range, not the IQR: a policy whose trials all
+            // land on one value has q3 - q1 = 0 and would draw no median at all.
+            const span = Math.max(dataRange * 0.004, 1e-9);
+            return [s.median - span, s.median + span];
+          }),
+          backgroundColor: policies.map(p => mcPolicyColor(p)),
+          borderWidth: 0,
+          barPercentage: 0.5,
+        },
         {
           type: "scatter",
           label: "Trials",
-          data: policies.flatMap((policy, i) => {
+          // Category labels, not indices: the bars are keyed by label, so
+          // numeric x drops the points of every column but the last. The
+          // horizontal spread is applied to the drawn pixels instead, below.
+          data: policies.flatMap(policy => {
             const values = mcData.trials[policy]?.[metric] || [];
-            return values.map(v => ({ x: i, y: v }));
+            return values.map(v => ({ x: policy, y: v }));
           }),
-          backgroundColor: policies.flatMap((policy) => {
+          backgroundColor: policies.flatMap(policy => {
             const values = mcData.trials[policy]?.[metric] || [];
             const color = mcPolicyColor(policy);
             return values.map(() => color + "88");
@@ -182,10 +214,49 @@ function renderMcBoxChart() {
     },
     options: mqChartOptions({
       x: mqThemedScale(),
-      y: mqThemedScale({ min: yMin, max: yMax })
+      // Forcing min/max to min*0.9 and max*1.1 drew labels like 610 and 3,700
+      // a few pixels from the 1,000 and 3,500 ticks. `grace` pads the same way
+      // and keeps a uniform step, but only once beginAtZero is off:
+      // BarController overrides the value scale with it, which would squash
+      // every box against the top of a chart whose values start in the thousands.
+      y: mqThemedScale({ beginAtZero: false, grace: "8%" })
     }, {
       plugins: { legend: { display: false }, tooltip: { enabled: true } },
-    })
+    }),
+    plugins: [{
+      // Drawn before the datasets so the box and the points sit over the
+      // whisker line.
+      id: "mcBoxOverlay",
+      beforeDatasetsDraw(chart) {
+        const { ctx, scales: { x, y } } = chart;
+        const slot = (chart.chartArea.right - chart.chartArea.left) / Math.max(policies.length, 1);
+        const capHalfWidth = Math.max(slot * 0.09, 4);
+
+        // Recomputed from the scale every frame rather than added to the
+        // last x, which would drift on redraw.
+        const stripMeta = chart.getDatasetMeta(STRIP_DATASET_INDEX);
+        (stripMeta?.data || []).forEach((point, k) => {
+          const s = strip[k];
+          if (s) point.x = x.getPixelForValue(s.column) + s.spread * capHalfWidth * 2;
+        });
+
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        stats.forEach((s, i) => {
+          const xPos = x.getPixelForValue(i);
+          ctx.strokeStyle = mcPolicyColor(policies[i]);
+          ctx.beginPath();
+          [[s.min, s.q1], [s.q3, s.max]].forEach(([from, to]) => {
+            const yFrom = y.getPixelForValue(from);
+            const yTo = y.getPixelForValue(to);
+            ctx.moveTo(xPos, yFrom); ctx.lineTo(xPos, yTo);
+            ctx.moveTo(xPos - capHalfWidth, yFrom); ctx.lineTo(xPos + capHalfWidth, yFrom);
+          });
+          ctx.stroke();
+        });
+        ctx.restore();
+      }
+    }]
   });
 }
 
@@ -279,8 +350,11 @@ function renderMcStatsTable() {
       best === null ? s.mean : (lowerBetter ? Math.min(best, s.mean) : Math.max(best, s.mean))
     ), null);
 
+    // When every policy ties there is no winner to mark; highlighting them all
+    // reads as "everyone won" rather than "no difference".
+    const allTied = statsArr.every(s => Math.abs(s.mean - bestVal) < 0.001);
     statsArr.forEach(s => {
-      const isBest = Math.abs(s.mean - bestVal) < 0.001;
+      const isBest = !allTied && Math.abs(s.mean - bestVal) < 0.001;
       const cls = isBest ? " class=\"best\"" : "";
       html += `<td${cls}>${s.mean.toFixed(2)} <span style="color:var(--muted);font-size:0.68rem">+/-${s.ci95.toFixed(2)}</span></td>`;
     });
@@ -434,8 +508,11 @@ function renderMcHeatmap() {
         return;
       }
       const r = results[pA][pB];
-      const total = r.wins + r.losses + r.ties;
-      const ratio = total > 0 ? r.wins / total : 0;
+      // Share of the metrics that separated the two, not of all of them. Ties
+      // are absence of evidence: counting them in the denominator coloured
+      // 8W/6T/0L amber, and made 3W/6T/5L and its mirror 5W/6T/3L both red.
+      const decided = r.wins + r.losses;
+      const ratio = decided > 0 ? r.wins / decided : 0.5;
       let bg, color;
       if (ratio > 0.6) { bg = `rgba(46,160,67,${0.15 + ratio * 0.3})`; color = "#3fb950"; }
       else if (ratio < 0.4) { bg = `rgba(248,81,73,${0.15 + (1 - ratio) * 0.2})`; color = "#f85149"; }

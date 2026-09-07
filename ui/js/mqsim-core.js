@@ -649,6 +649,26 @@ function buildNarrativeAtTick(evs, t) {
   return a.length ? a : ["Clock advanced."];
 }
 
+/**
+ * The run's own summary, keyed the way this UI's renderers expect.
+ *
+ * src/mqsim/metrics.json carries each metric's short UI alias, so the mapping
+ * between the two naming schemes is stated once rather than implied by two
+ * codebases agreeing.
+ */
+function mqsimSummaryForUi(events) {
+  const summaryEvent = (events || []).slice().reverse()
+    .find(e => e && e.event === "run_summary");
+  const summary = summaryEvent && summaryEvent.metrics;
+  if (!summary || typeof summary !== "object") return {};
+  const out = { ...summary };
+  Object.entries(MQSIM_METRIC_SPEC).forEach(([canon, entry]) => {
+    if (!(canon in summary)) return;
+    (entry.ui_aliases || []).forEach(alias => { out[alias] = summary[canon]; });
+  });
+  return out;
+}
+
 function computeFileMetrics(evs) {
   const f = normalizeEventsForAnalysis(evs);
   const packed = buildPackedSeriesFromEvents(f);
@@ -693,35 +713,22 @@ function computeFileMetrics(evs) {
     tickSeconds,
     totalTicks: timelineTicks,
   });
+  // Denominator is the whole scenario population — starting queue plus every
+  // scheduled arrival — so drain cannot exceed 100% once MRs arrive after t=0.
+  const queueDrainBase = Number(meta?.total_mrs) || o0;
   const peakOffRatio = timeline.throughput_offpeak_window_mph > 0
     ? timeline.throughput_peak_window_mph / timeline.throughput_offpeak_window_mph
     : 0;
   return {
-    packed, total_time_ticks: totalT, mrs_merged: mergeE.length, throughput: mergeE.length / Math.max(1, totalT),
-    throughput_hour: totalHours > 0 ? mergeE.length / totalHours : 0,
-    tick_seconds: tickSeconds,
-    time_to_first: mTicks[0] ?? totalT, time_to_10: mTicks[9] ?? totalT, avg_int: totalT / Math.max(1, mergeE.length),
-    queue_drain: o0 ? (100 * mergeE.length) / o0 : 0, rebase_calls: rebaseE.length, pipelines: rebaseE.length,
-    peak, dup, stale_max: stL.length ? Math.max(...stL) : 0, srp_p95: percentile(srpL, 95), srp_max: srpL.length ? Math.max(...srpL) : 0,
-    merge_rounds: mergeRounds, avg_mrs_per_round: mergeE.length / Math.max(1, mergeRounds),
-    ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg, mr_count: collectAllIids(f).size,
-    force_merges: forceMergeCount, ci_failures: ciFailures,
-    rebase_errors: rebaseErrE.length, merge_errors: mergeErrE.length,
-    pipeline_cancels: pipelineCancelE.length,
-    modeled_hours: timeline.modeled_hours,
-    total_arrivals: timeline.total_arrivals,
-    throughput_24h_mph: timeline.throughput_24h_mph,
-    throughput_active_mph: timeline.throughput_active_mph,
-    throughput_peak8_mph: timeline.throughput_peak8_mph,
-    throughput_peak8_p90_mph: timeline.throughput_peak8_p90_mph,
-    throughput_peak_window_mph: timeline.throughput_peak_window_mph,
-    throughput_offpeak_window_mph: timeline.throughput_offpeak_window_mph,
-    arrivals_peak_window_per_hour: timeline.arrivals_peak_window_per_hour,
-    arrivals_offpeak_window_per_hour: timeline.arrivals_offpeak_window_per_hour,
-    peak_offpeak_throughput_ratio: peakOffRatio,
-    merge_interval_p50_seconds: timeline.merge_interval_p50_seconds,
-    merge_interval_p95_seconds: timeline.merge_interval_p95_seconds
-  };
+    packed,
+    // Segment-derived, so the UI is the only implementation and there is
+    // nothing to drift against.
+    ci_min: ciMin, ci_max: ciMax, ci_avg: ciAvg,
+    // Everything else comes from the run's own run_summary event, written by
+    // mqsim/summary.py. The UI used to recompute all of it from the same
+    // events, which is how queue_drain ended up with two denominators.
+    ...mqsimSummaryForUi(f),
+};
 }
 
 function globalMaxTick() { let mx = 0; filesData.forEach(d => { if (d.packed) mx = Math.max(mx, d.packed.maxTick); }); return mx; }
@@ -876,12 +883,13 @@ function flattenMetadata(obj, prefix = "", out = {}) {
   return out;
 }
 
-const RUN_CATEGORIES = new Set(["comparisons", "discrimination", "monte-carlo", "calibration", "sweep"]);
+const RUN_CATEGORIES = new Set(["comparisons", "discrimination", "monte-carlo", "calibration", "sweep", "multi-merge"]);
 
 function inferRunCategory(normalizedPath) {
   const lower = String(normalizedPath || "").toLowerCase();
   if (/(?:^|\/)discrimination-summary\.csv$/i.test(lower)) return "discrimination";
   if (/(?:^|\/)monte-carlo-summary\.csv$/i.test(lower)) return "monte-carlo";
+  if (/(?:^|\/)plan-raw.*\.json$/i.test(lower)) return "multi-merge";
   if (
     /(?:^|\/)calibration-(?:grid|validation)\.csv$/i.test(lower)
     || /(?:^|\/)calibration-.*\.csv$/i.test(lower)
@@ -1218,6 +1226,10 @@ function summarizeRunBubbles(run) {
     push("scenario", tailPath(firstMetaValue(flat, ["context.base_scenario", "context.scenario"])));
     push("cycles", flat["context.cycles"]);
     push("limit", flat["context.limit"]);
+  } else if (run.category === "multi-merge") {
+    push("window", firstMetaValue(flat, ["context.window", "context.period"]), "mm-primary");
+    push("project", firstMetaValue(flat, ["context.project"]), "mm-secondary");
+    push("mrs", flat["context.total_mrs"] || flat["context.mr_count"]);
   } else if (run.category === "monte-carlo") {
     const policySet = firstMetaValue(flat, ["context.policy_set"]);
     const policies = firstMetaValue(flat, ["context.policies"]);
@@ -1499,6 +1511,7 @@ function pickLoadFilesForRun(run) {
   if (run.category === "comparisons") return byExt.filter(x => /\.ndjson$/i.test(x.file.name) || /\.ya?ml$/i.test(x.file.name) || /per-label-merge-times\.json$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "discrimination") return byExt.filter(x => /discrimination-summary\.csv$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "monte-carlo") return byExt.filter(x => /monte-carlo-summary\.csv$/i.test(x.file.name)).map(x => x.file);
+  if (run.category === "multi-merge") return byExt.filter(x => /plan-raw.*\.json$/i.test(x.file.name)).map(x => x.file);
   if (run.category === "calibration") return byExt.filter(x => /calibration-.*\.csv$/i.test(x.file.name) || /-grid\.csv$/i.test(x.file.name) || /-validation\.csv$/i.test(x.file.name) || /adaptive-vs-fixed-summary\.csv$/i.test(x.file.name) || /selected-scenario\.ya?ml$/i.test(x.file.name) || /scenario.*\.ya?ml$/i.test(x.file.name)).map(x => x.file);
   return byExt.map(x => x.file);
 }
@@ -2031,60 +2044,20 @@ function renderFileList() {
 let selectedSeries = null; // null = all selected
 let statsExtendedMode = false; // false=standard, true=extended
 
-const METRIC_TOOLTIPS = {
-  total_time_ticks: "Total simulation duration in discrete time steps",
-  mrs_merged: "Number of merge requests successfully merged during the simulation",
-  throughput: "Merge rate: MRs merged divided by total time steps",
-  throughput_hour: "Merge rate normalized by scenario tick length (MRs/hour)",
-  tick_seconds: "Scenario tick duration in seconds used to convert tick-based rates to wall-clock rates",
-  time_to_first: "Steps elapsed before the first MR was merged",
-  time_to_10: "Steps elapsed before 10 MRs were merged",
-  avg_int: "Average number of steps between successive merges",
-  queue_drain: "Percentage of the initial open queue that was merged (can exceed 100% if new MRs arrive)",
-  rebase_calls: "Total number of rebase operations triggered by housekeeping",
-  rebase_errors: "Total rebase API failures observed",
-  merge_errors: "Total merge API failures observed",
-  pipeline_cancels: "Pipelines canceled due to invalidation after target changes",
-  peak: "Maximum number of CI pipelines running concurrently at any step",
-  dup: "Rebases that were wasted because the MR needed rebasing again before merge",
-  ci_min: "Shortest CI pipeline duration observed (in ticks)",
-  ci_avg: "Average CI pipeline duration across all runs (in ticks)",
-  ci_max: "Longest CI pipeline duration observed (in ticks)",
-  srp_p95: "95th percentile of same-root success pool size (MRs sharing a base SHA)",
-  srp_max: "Maximum same-root success pool size observed",
-  merge_rounds: "Number of distinct ticks where at least one merge occurred",
-  avg_mrs_per_round: "Average number of MRs merged per merge round (batch efficiency)",
-  mr_count: "Total unique MRs that appeared in the simulation",
-  force_merges: "Number of MRs that bypassed the queue via operator force-merge",
-  ci_failures: "Total pipeline failures observed during the simulation",
-  modeled_hours: "Modeled wall-clock duration derived from total ticks and tick length",
-  total_arrivals: "Total arriving MRs in the modeled timeline",
-  throughput_24h_mph: "Overall throughput normalized to merges/hour over the full modeled window",
-  throughput_active_mph: "Throughput during active merge hours only (hours with at least one merge)",
-  throughput_peak8_mph: "Best moving 8-hour throughput average (merges/hour)",
-  throughput_peak8_p90_mph: "90th percentile throughput across the best 8-hour peak slice",
-  throughput_peak_window_mph: "Throughput during configured peak UTC hours only",
-  throughput_offpeak_window_mph: "Throughput during off-peak UTC hours",
-  arrivals_peak_window_per_hour: "Average MR arrivals per hour during peak UTC window",
-  arrivals_offpeak_window_per_hour: "Average MR arrivals per hour during off-peak UTC window",
-  peak_offpeak_throughput_ratio: "Peak throughput divided by off-peak throughput (higher means stronger daytime burst)",
-  merge_interval_p50_seconds: "Median merge interval in seconds (derived from merge events)",
-  merge_interval_p95_seconds: "95th percentile merge interval in seconds"
-};
-const METRIC_HIGHER_IS_BETTER = {
-  mrs_merged: true, throughput: true, throughput_hour: true, queue_drain: true, merge_rounds: true, avg_mrs_per_round: true,
-  total_time_ticks: null, time_to_first: false, time_to_10: false, avg_int: false,
-  tick_seconds: null, rebase_calls: false, rebase_errors: false, merge_errors: false,
-  pipeline_cancels: false, peak: false, dup: false, ci_min: null, ci_avg: null, ci_max: null,
-  srp_p95: false, srp_max: false, mr_count: true,
-  force_merges: null, ci_failures: false,
-  modeled_hours: null, total_arrivals: true,
-  throughput_24h_mph: true, throughput_active_mph: true, throughput_peak8_mph: true, throughput_peak8_p90_mph: true,
-  throughput_peak_window_mph: true, throughput_offpeak_window_mph: true,
-  arrivals_peak_window_per_hour: true, arrivals_offpeak_window_per_hour: true,
-  peak_offpeak_throughput_ratio: true,
-  merge_interval_p50_seconds: false, merge_interval_p95_seconds: false
-};
+// Both tables are derived from src/mqsim/metrics.json via ui/metrics-spec.js.
+// They used to be maintained here by hand, which is how the Discrimination
+// panel ended up reading a weights key the producer never wrote.
+const MQSIM_METRIC_SPEC = window.MQSIM_METRIC_SPEC || {};
+const METRIC_TOOLTIPS = {};
+const METRIC_HIGHER_IS_BETTER = {};
+Object.entries(MQSIM_METRIC_SPEC).forEach(([key, entry]) => {
+  const names = [key].concat(entry.ui_aliases || []);
+  names.forEach(name => {
+    METRIC_TOOLTIPS[name] = entry.tooltip;
+    METRIC_HIGHER_IS_BETTER[name] = entry.higher_is_better;
+  });
+});
+
 
 function getSelectedIndices() {
   if (!selectedSeries || selectedSeries.length === 0) return filesData.map((_, i) => i);
@@ -2185,15 +2158,21 @@ function renderScenarioInfoCard() {
   const modeSwitchCls = statsExtendedMode ? " on" : "";
 
   let mainItems = `<span class="si-title">Scenario</span>`;
-  if (Number.isFinite(Number(m.total_mrs))) mainItems += `<span class="si-item"><span class="si-label">MRs:</span><span class="si-val">${m.total_mrs}</span></span>`;
+  if (Number.isFinite(Number(m.total_mrs))) {
+    const scheduled = Array.isArray(m.arrivals) ? m.arrivals.length : 0;
+    const starting = Math.max(0, Number(m.total_mrs) - scheduled);
+    const split = scheduled ? ` (${starting} starting + ${scheduled} arriving)` : "";
+    mainItems += `<span class="si-item"><span class="si-label">MRs:</span><span class="si-val">${m.total_mrs}${split}</span></span>`;
+  }
   mainItems += `<span class="si-item"><span class="si-label">Tick:</span><span class="si-val">${m.tick_seconds || 60}s</span></span>`;
   if (m.pipeline_duration) mainItems += `<span class="si-item"><span class="si-label">CI Duration:</span><span class="si-val">${m.pipeline_duration.min}–${m.pipeline_duration.max} ticks</span></span>`;
   if (m.failure_rate != null) mainItems += `<span class="si-item"><span class="si-label">Failure Rate:</span><span class="si-val${m.failure_rate > 0 ? " danger" : ""}">${(Number(m.failure_rate) * 100).toFixed(1)}%</span></span>`;
   if (m.operation_failure_rate) {
     mainItems += `<span class="si-item"><span class="si-label">Op failures:</span><span class="si-val${hasOpsFail ? " danger" : ""}">merge ${mergePct}% / rebase ${rebasePct}%</span></span>`;
   }
-  if (m.arrivals && m.arrivals.length) {
-    mainItems += `<span class="si-item"><span class="si-label">Arrivals:</span><span class="si-val">${m.arrivals.length}</span></span>`;
+  const modeledHours = filesData.length ? Number(filesData[0]?.metrics?.modeled_hours) : NaN;
+  if (Number.isFinite(modeledHours) && modeledHours > 0) {
+    mainItems += `<span class="si-item"><span class="si-label">Duration:</span><span class="si-val">${modeledHours.toFixed(1)}h</span></span>`;
   }
 
   el.innerHTML = `
@@ -2279,19 +2258,34 @@ function parsePeakWindowHours(arrivalProfile) {
 }
 
 function collectArrivalTicks(events, scenarioMeta) {
-  const ticks = [];
-  const fromMeta = Array.isArray(scenarioMeta?.arrivals) ? scenarioMeta.arrivals : [];
-  fromMeta.forEach(a => {
-    const t = Number(a?.tick);
-    if (Number.isFinite(t) && t >= 0) ticks.push(Math.floor(t));
-  });
+  // An arrival that fires appears both in scenarioMeta.arrivals (the schedule)
+  // and in the tick event that emitted it. Counting both double-counts every
+  // arrival and adds the scheduled ones that never happened, so prefer the
+  // observed ticks and fall back to the schedule only for runs that emitted none.
+  const observed = [];
   events.forEach(e => {
     if (e.event !== "tick" || !Array.isArray(e.arrivals)) return;
     const tick = Number(e.tick);
     if (!Number.isFinite(tick) || tick < 0) return;
-    e.arrivals.forEach(() => ticks.push(Math.floor(tick)));
+    e.arrivals.forEach(() => observed.push(Math.floor(tick)));
   });
-  return ticks;
+  if (observed.length) return observed;
+  const fromMeta = Array.isArray(scenarioMeta?.arrivals) ? scenarioMeta.arrivals : [];
+  const scheduled = [];
+  fromMeta.forEach(a => {
+    const t = Number(a?.tick);
+    if (Number.isFinite(t) && t >= 0) scheduled.push(Math.floor(t));
+  });
+  return scheduled;
+}
+
+// Ticks as MM:SS, minutes allowed past 59 so the unit never changes mid-column.
+function fmtTicksAsDuration(ticks, tickSeconds) {
+  const secs = Math.round(Number(ticks) * (Number(tickSeconds) || 60));
+  if (!Number.isFinite(secs)) return "—";
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
 }
 
 function percentileFromSorted(sortedValues, percentileValue) {
@@ -2580,7 +2574,7 @@ function _renderSimScenario(el, ctx) {
         <span class="k">Initial open MRs</span><span class="v">${initialOpenCount || "—"}</span>
         <span class="k">Dynamic arrivals</span><span class="v">${arrivalCount}</span>
         ${limit ? `<span class="k">Limit (concurrency cap)</span><span class="v">${limit}</span>` : ""}
-        <span class="k">Modeled window</span><span class="v">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))} (${modeledWindowTicks} ticks × ${tickSeconds}s)</span>
+        <span class="k">Scenario window</span><span class="v">${mqEscapeHtml(fmtHoursLabel(timelineBase.modeled_hours))} (${modeledWindowTicks} ticks × ${tickSeconds}s)</span>
         <span class="k">Pipeline duration</span><span class="v">${mqEscapeHtml(pdFmt)}</span>
         <span class="k">Pipeline failure rate</span><span class="v">${(failRate * 100).toFixed(2)}%</span>
         <span class="k">Operation failure rate</span><span class="v">merge ${(mergeFailRate * 100).toFixed(3)}% / rebase ${(rebaseFailRate * 100).toFixed(3)}%</span>
@@ -2598,7 +2592,7 @@ function _renderSimScenario(el, ctx) {
       `<tr><td>${b.label}</td><td>${b.count}</td><td>${b.pct}%</td></tr>`
     ).join("");
     sections.push(`<div class="sim-section">
-      <div class="sim-section-title">CI Pipeline</div>
+      <div class="sim-section-title">CI Pipeline${ownerFile ? ` <span style="color:var(--muted);font-weight:400">(observed in ${mqEscapeHtml(ownerFile.name)}${filesData.length > 1 ? `, 1 of ${filesData.length} loaded runs` : ""})</span>` : ""}</div>
       <div class="sim-card full">
         <div class="sim-split">
           <div class="sim-kv">
@@ -2645,7 +2639,10 @@ function _renderSimScenario(el, ctx) {
         </div>
         <div class="sim-split" style="margin-top:0.6rem">
           <div style="height:160px"><canvas id="simPriorityChart"></canvas></div>
-          <div style="height:160px"><canvas id="simTenantChart"></canvas></div>
+          <div>
+            <div style="height:160px"><canvas id="simTenantChart"></canvas></div>
+            ${serviceSorted.length > 12 ? `<div class="sim-subtle" style="text-align:center">chart shows the top 12 of ${serviceSorted.length}; the table lists all</div>` : ""}
+          </div>
         </div>
       </div>
     </div>`);
@@ -2747,7 +2744,10 @@ function _renderSimScenarioCharts(ctx, ciData) {
   });
 
   const prioritySorted = Object.entries(priorityCounts).sort((a, b) => b[1] - a[1]);
-  const serviceSorted = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1]).slice(0, 12);
+  const serviceAll = Object.entries(serviceCounts).sort((a, b) => b[1] - a[1]);
+  const SERVICE_CHART_LIMIT = 12;
+  const serviceSorted = serviceAll.slice(0, SERVICE_CHART_LIMIT);
+  const serviceTruncated = serviceAll.length > SERVICE_CHART_LIMIT;
 
   const prioCanvas = document.getElementById("simPriorityChart");
   if (prioCanvas && prioritySorted.length) {
@@ -2864,11 +2864,11 @@ function _renderSimCalibration(el, ctx) {
     }).join("");
     if (targetRows) {
       sections.push(`<div class="sim-section">
-        <div class="sim-section-title calibration">Target vs Measured</div>
+        <div class="sim-section-title calibration">Calibration target vs this run</div>
         <div class="sim-card full">
           <div class="sim-subtle">Calibrated policy: <strong>${mqEscapeHtml(calibratedPolicy)}</strong> — comparing runtime measurements against calibration targets</div>
           <div class="sim-table-wrap"><table class="sim-table dense">
-            <thead><tr><th>Dimension</th><th>Target</th><th>Measured</th><th>Delta</th></tr></thead>
+            <thead><tr><th>Dimension</th><th>Calibration target</th><th>This run</th><th>Delta</th></tr></thead>
             <tbody>${targetRows}</tbody>
           </table></div>
         </div>
@@ -2898,7 +2898,7 @@ function _renderSimCalibration(el, ctx) {
       <div class="sim-section-title runtime">Per-Policy Runtime</div>
       <div class="sim-card full"><div class="sim-table-wrap"><table class="sim-table dense">
         <thead><tr>
-          <th class="sticky-col">Policy</th><th>Window</th><th>24h mph</th><th>Active mph</th><th>Peak8 mph</th>
+          <th class="sticky-col">Policy</th><th>Run window</th><th>24h mph</th><th>Active mph</th><th>Peak8 mph</th>
           <th>Peak avg</th><th>Off-peak avg</th><th>Rebases</th><th>Rebase/Merge</th><th>Merge p95 (s)</th><th>Merged</th><th>Arrivals</th>
         </tr></thead>
         <tbody>${runtimeRows}</tbody>
@@ -2933,12 +2933,16 @@ function _renderSimCalibration(el, ctx) {
         gateHtml += `<span class="k">${mqEscapeHtml(k)}</span><span class="v" style="color:${passed ? "var(--green)" : "var(--red)"}">${passed ? "✓ pass" : "✗ fail"}</span>`;
       });
     }
+    gateHtml += `</div>`;
     if (thresholds) {
+      // These are the configured limits the gates were judged against, not
+      // results. Rendered in the same list they read as more outcomes.
+      gateHtml += `<div class="sim-subtle" style="margin-top:0.5rem">Thresholds these were judged against</div><div class="sim-kv">`;
       Object.entries(thresholds).forEach(([k, v]) => {
         gateHtml += `<span class="k">${mqEscapeHtml(k)}</span><span class="v">${mqEscapeHtml(String(v))}</span>`;
       });
+      gateHtml += `</div>`;
     }
-    gateHtml += `</div>`;
     sections.push(`<div class="sim-section">
       <div class="sim-section-title calibration">Decision Gates</div>
       <div class="sim-card full">${gateHtml}</div>
@@ -3066,7 +3070,7 @@ function renderPerLabelView() {
   const fallbackColors = ["#2ea043", "#8b949e", "#da3633", "#79c0ff"];
 
   const ctx0 = getTimeContext(0);
-  const tickSec = ctx0.tickSeconds || 30;
+  const tickSec = ctx0.tickSeconds || 60;  // match every other fallback in this file
   const isTicks = timeDisplayMode === "ticks";
   const yLabel = isTicks ? "Ticks" : "Minutes";
   const yFmt = v => isTicks ? Math.round(v / tickSec) + "" : (v / 60).toFixed(0) + "m";
@@ -3191,7 +3195,7 @@ function _getSimCiMedianSeconds() {
     const d = filesData[i];
     if (!d || !d.packed || !d.packed.segs) continue;
     const m = d.metrics;
-    if (m && m.tick_seconds) tickSec = Number(m.tick_seconds) || 30;
+    if (m && m.tick_seconds) tickSec = Number(m.tick_seconds) || 60;
     d.packed.segs.forEach(s => { if (s.kind === "running") allCiTicks.push(s.end - s.start); });
   }
   if (allCiTicks.length) {
@@ -3202,7 +3206,7 @@ function _getSimCiMedianSeconds() {
   }
   const meta = filesData.map(d => (d.events || []).find(e => e.event === "scenario_meta")).filter(Boolean)[0];
   if (meta) {
-    const ts = Number(meta.tick_seconds) || 30;
+    const ts = Number(meta.tick_seconds) || 60;
     const pd = meta.pipeline_duration;
     if (pd && pd.min != null && pd.max != null) return ((pd.min + pd.max) / 2) * ts;
   }
@@ -3313,21 +3317,27 @@ function renderHeroCards(metrics) {
     let best = numericRows[0];
     numericRows.forEach(r => { if (c.higher ? r.val > best.val : r.val < best.val) best = r; });
     const worstVal = numericRows.reduce((w, r) => c.higher ? Math.min(w, r.val) : Math.max(w, r.val), best.val);
-    el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">${c.fmt(best.val)}</div><div class="winner">${mqEscapeHtml(filesData[best.idx].name)}</div><div class="sub">${c.higher ? "worst" : "max"}: ${c.fmt(worstVal)}</div></div>`;
+    // A card that names a winner when every policy scored the same reads as a
+    // result. Say "all tied" and drop the redundant worst line instead.
+    const tied = numericRows.every(r => Math.abs(r.val - best.val) < 1e-9);
+    const winner = tied
+      ? `all ${numericRows.length} tied`
+      : mqEscapeHtml(filesData[best.idx].name);
+    const sub = tied ? "" : `<div class="sub">${c.higher ? "worst" : "max"}: ${c.fmt(worstVal)}</div>`;
+    el.innerHTML += `<div class="hero-card"><div class="label">${c.label}</div><div class="value">${c.fmt(best.val)}</div><div class="winner">${winner}</div>${sub}</div>`;
   });
 }
 function renderCmpTable() {
   const sel = getSelectedIndices();
   const heads = sel.map(i => filesData[i].name);
   const metrics = sel.map(i => filesData[i].metrics);
-  const fmt = (x, f) => (f === "d3" ? (typeof x === "number" ? x.toFixed(3) : x) : f === "d1" ? (typeof x === "number" ? x.toFixed(1) : x) : f === "d0" ? String(Math.round(x)) : x);
+  const fmt = (x, f, M) => (f === "dur" ? fmtTicksAsDuration(x, M && M.tick_seconds) : f === "d3" ? (typeof x === "number" ? x.toFixed(3) : x) : f === "d1" ? (typeof x === "number" ? x.toFixed(1) : x) : f === "d0" ? String(Math.round(x)) : x);
   const rows = [
-    ["s", "── Throughput & Time ──"], ["total_time_ticks", "Total time (steps)", "d0"], ["tick_seconds", "Tick length (seconds)", "d0"], ["mrs_merged", "MRs merged", "d0"], ["throughput", "Throughput (merges/step)", "d3"], ["throughput_hour", "Throughput (merges/hour)", "d3"],
-    ["time_to_first", "Time to first merge", "d0"], ["time_to_10", "Time to merge 10", "d0"], ["avg_int", "Avg merge interval", "d0"], ["queue_drain", "Queue drain %", "d0"], ["modeled_hours", "Modeled duration (hours)", "d1"], ["total_arrivals", "Modeled arrivals", "d0"],
-    ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min (ticks)", "d0"], ["ci_avg", "CI avg (ticks)", "d1"], ["ci_max", "CI max (ticks)", "d0"], ["ci_failures", "CI Failures", "d0"],
-    ["s", "── Events ──"], ["force_merges", "Force-merges", "d0"], ["merge_errors", "Merge errors", "d0"], ["rebase_errors", "Rebase errors", "d0"], ["pipeline_cancels", "Pipeline cancels", "d0"],
+    ["s", "── Throughput & Time ──"], ["mrs_merged", "MRs merged", "d0"], ["throughput_hour", "Throughput (merges/hour)", "d3"],
+    ["time_to_first", "Time to first merge", "dur"], ["time_to_10", "Time to merge 10", "dur"], ["avg_int", "Avg merge interval", "dur"], ["queue_drain", "Queue drain %", "d0"],
+    ["s", "── CI ──"], ["rebase_calls", "Rebases", "d0"], ["peak", "Peak active", "d0"], ["dup", "Wasted rebases", "d0"], ["ci_min", "CI min", "dur"], ["ci_avg", "CI avg", "dur"], ["ci_max", "CI max", "dur"], ["ci_failures", "CI Failures", "d0"],
     ["s", "── Pool ──"], ["srp_p95", "Same-root p95", "d0"], ["srp_max", "Same-root max", "d0"],
-    ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"], ["mr_count", "Total MRs seen", "d0"]
+    ["s", "── Batch ──"], ["merge_rounds", "Merge rounds", "d0"], ["avg_mrs_per_round", "Avg MRs/round", "d3"]
   ];
   if (statsExtendedMode) {
     const extendedRows = [
@@ -3351,7 +3361,7 @@ function renderCmpTable() {
     }
     h += `<tr class="data-row"><td class="metric-name" data-tip="${mqEscapeHtml(tip)}">${r[1]}</td>` + metrics.map((M, i) => {
       const v = M[key], cls = bestSet.has(i) ? ' class="best"' : "";
-      return `<td${cls}>${r[2] && v != null && typeof v === "number" ? fmt(v, r[2]) : (v == null ? "—" : v)}</td>`;
+      return `<td${cls}>${r[2] && v != null && typeof v === "number" ? fmt(v, r[2], M) : (v == null ? "—" : v)}</td>`;
     }).join("") + "</tr>";
   });
   h += "</tbody>";
@@ -3895,7 +3905,7 @@ function renderBarsTab() {
   destroyBarCharts();
   const selected = Array.from(barVisibleIdxs).sort((a, b) => a - b);
   if (!selected.length) {
-    host.innerHTML = `<div class="kanban-empty">No policies selected. Use the bubbles above to choose composition charts.</div>`;
+    host.innerHTML = `<div class="kanban-empty">No policies selected. Use the bubbles above to choose policies.</div>`;
     return;
   }
   const single = selected.length === 1;
@@ -3929,71 +3939,13 @@ function renderBarsTab() {
     panel.className = "bars-panel" + (single ? " single" : "");
     panel.innerHTML = `<h3>${mqEscapeHtml(d.name)}</h3><canvas id="barsCanvas${idx}-${n}"></canvas>`;
     host.appendChild(panel);
-    const tCtx = getTimeContext(idx);
-    const barLabels = timeDisplayMode === "ticks" ? d.packed.series.labels : d.packed.series.labels.map(t => fmtTickAsTime(t, tCtx));
     const ctx = panel.querySelector("canvas").getContext("2d");
-    const ch = new Chart(ctx, {
-      type: "bar",
-      data: {
-        labels: barLabels,
-        datasets: [{
-          label: "Ready",
-          seriesKey: "Ready",
-          data: d.packed.series.pool,
-          backgroundColor: C0.pool,
-          stack: "a",
-          order: 3,
-          borderWidth: 0
-        }, {
-          label: "CI",
-          seriesKey: "CI",
-          data: d.packed.series.active,
-          backgroundColor: C0.active,
-          stack: "a",
-          order: 2,
-          borderWidth: 0
-        }, {
-          label: "Stale",
-          seriesKey: "Stale",
-          data: d.packed.series.stale,
-          backgroundColor: C0.stale,
-          stack: "a",
-          order: 1,
-          borderWidth: 0
-        }, {
-          label: "Idle",
-          seriesKey: "Idle",
-          data: d.packed.series.rest,
-          backgroundColor: C0.other,
-          stack: "a",
-          order: 0,
-          borderWidth: 0
-        }, {
-          label: "Open (total)",
-          seriesKey: "Open (total)",
-          data: d.packed.series.open,
-          type: "line",
-          borderColor: "rgba(180,186,194,0.9)",
-          borderWidth: 2,
-          pointRadius: 0,
-          borderDash: [5, 4]
-        }],
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        animation: false,
-        interaction: { mode: "index", intersect: false },
-        plugins: {
-          legend: { display: false },
-          tooltip: { enabled: isTooltipEnabled("bars") }
-        },
-        scales: {
-          x: { min: 0, max: d.packed.maxTick, title: { display: true, text: timeAxisTitle() }, ticks: { maxTicksLimit: 12 } },
-          y: { stacked: true, beginAtZero: true, max: sharedYMax }
-        }
-      },
-      plugins: [plPeakBand(idx), plMergePlay(d.packed), plCrosshair(), plBarsStatLine(d.packed, idx)]
+    const ch = buildCompositionChart(ctx, d.packed, {
+      fileIdx: idx,
+      sharedYMax,
+      tooltipScope: "bars",
+      animation: false,
+      extraPlugins: [plBarsStatLine(d.packed, idx)],
     });
     ch.data.datasets.forEach((ds, datasetIdx) => {
       const key = barsLegendKeyFromDataset(ds);
@@ -4755,25 +4707,64 @@ function getSharedYMax() {
   return mx > 0 ? mx : undefined;
 }
 
+function buildCompositionChart(canvas, packed, opts = {}) {
+  // Pure factory. Constructs and returns a Chart and nothing else: it owns no
+  // registry and assigns no module state, so chartInstL/chartInstR and the
+  // barCharts map stay with their callers and the two tabs keep independent
+  // lifecycles. Everything it reads — C0, timeDisplayMode, the plugin
+  // factories — is shared config both tabs already read identically.
+  const { fileIdx = 0, sharedYMax = null, tooltipScope = "composition" } = opts;
+  const tCtx = getTimeContext(fileIdx);
+  const labels = timeDisplayMode === "ticks"
+    ? packed.series.labels
+    : packed.series.labels.map(t => fmtTickAsTime(t, tCtx));
+  const yOpts = { stacked: true, beginAtZero: true };
+  if (sharedYMax != null) yOpts.max = sharedYMax;
+  const options = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: opts.legend || { display: false },
+      tooltip: { enabled: isTooltipEnabled(tooltipScope) },
+    },
+    scales: {
+      x: {
+        min: 0,
+        max: packed.maxTick,
+        title: { display: true, text: timeAxisTitle() },
+        ticks: { maxTicksLimit: 12 },
+      },
+      y: yOpts,
+    },
+  };
+  if (opts.animation !== undefined) options.animation = opts.animation;
+  return new Chart(canvas, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [
+        { label: "Ready", seriesKey: "Ready", data: packed.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
+        { label: "CI", seriesKey: "CI", data: packed.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
+        { label: "Stale", seriesKey: "Stale", data: packed.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
+        { label: "Idle", seriesKey: "Idle", data: packed.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
+        { label: "Open (total)", seriesKey: "Open (total)", data: packed.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
+      ],
+    },
+    options,
+    plugins: [plPeakBand(fileIdx), plMergePlay(packed), plCrosshair(), ...(opts.extraPlugins || [])],
+  });
+}
+
 function doChart(p, canvasId, side, sharedYMax, fileIdx) {
   const cvs = document.getElementById(canvasId); if (!cvs) return;
   if (typeof Chart.getChart === "function") { const o = Chart.getChart(cvs); if (o) o.destroy(); }
-  const x0 = 0;
-  const x1 = p.maxTick;
-  const yOpts = { stacked: true, beginAtZero: true };
-  if (sharedYMax != null) { yOpts.max = sharedYMax; }
-  const tCtx = getTimeContext(fileIdx);
-  const chartLabels = timeDisplayMode === "ticks" ? p.series.labels : p.series.labels.map(t => fmtTickAsTime(t, tCtx));
-  const inst = new Chart(cvs, { type: "bar", data: { labels: chartLabels, datasets: [
-    { label: "Ready", data: p.series.pool, backgroundColor: C0.pool, stack: "a", order: 3, borderWidth: 0 },
-    { label: "CI", data: p.series.active, backgroundColor: C0.active, stack: "a", order: 2, borderWidth: 0 },
-    { label: "Stale", data: p.series.stale, backgroundColor: C0.stale, stack: "a", order: 1, borderWidth: 0 },
-    { label: "Idle", data: p.series.rest, backgroundColor: C0.other, stack: "a", order: 0, borderWidth: 0 },
-    { label: "Open (total)", data: p.series.open, type: "line", borderColor: "rgba(180,186,194,0.9)", borderWidth: 2, pointRadius: 0, borderDash: [5, 4] },
-  ]}, options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-    plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { size: MQSIM_LEGEND_FONT_SIZE } }, onClick: handleLegendToggle }, tooltip: { enabled: isTooltipEnabled("composition") } },
-    scales: { x: { min: x0, max: x1, title: { display: true, text: timeAxisTitle() }, ticks: { maxTicksLimit: 12 } }, y: yOpts }
-  }, plugins: [plPeakBand(fileIdx), plMergePlay(p), plCrosshair()] });
+  const inst = buildCompositionChart(cvs, p, {
+    fileIdx,
+    sharedYMax,
+    tooltipScope: "composition",
+    legend: { position: "bottom", labels: { boxWidth: 10, font: { size: MQSIM_LEGEND_FONT_SIZE } }, onClick: handleLegendToggle },
+  });
   if (side === "L") chartInstL = inst; else chartInstR = inst;
 }
 

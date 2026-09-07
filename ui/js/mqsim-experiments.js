@@ -317,9 +317,11 @@ function renderDiscriminationExperiments(content) {
   const bestRow = sortedByDelta[0];
   const worstRow = sortedByDelta[sortedByDelta.length - 1];
   const calMetaCtx = loadedRunMetadataByCategory?.calibration?.context || {};
-  const dimWeightsRaw = (calMetaCtx.dimension_weights && typeof calMetaCtx.dimension_weights === "object")
-    ? calMetaCtx.dimension_weights
-    : {};
+  // tune_prod_calibration.py writes standard_dimension_weights; mqsim-core.js
+  // reads that name too. This tab read "dimension_weights", which the producer
+  // never writes, so the panel always showed its empty state.
+  const dimWeightsSrc = calMetaCtx.standard_dimension_weights || calMetaCtx.dimension_weights;
+  const dimWeightsRaw = (dimWeightsSrc && typeof dimWeightsSrc === "object") ? dimWeightsSrc : {};
   const targetDimsRaw = (calMetaCtx.target_dimensions && typeof calMetaCtx.target_dimensions === "object")
     ? calMetaCtx.target_dimensions
     : {};
@@ -350,20 +352,20 @@ function renderDiscriminationExperiments(content) {
           <span class="k">${lhsPolicy} wins</span><span class="v">${lhsWins}</span>
           <span class="k">Ties</span><span class="v">${ties}</span>
           <span class="k">Mean Δ throughput</span><span class="v">${expMean(deltas).toFixed(3)} mph</span>
-          <span class="k">Median-like signal</span><span class="v">${deltas.slice().sort((a,b)=>a-b)[Math.floor((deltas.length - 1) / 2)].toFixed(3)} mph</span>
+          <span class="k">Median Δ throughput</span><span class="v">${deltas.slice().sort((a,b)=>a-b)[Math.floor((deltas.length - 1) / 2)].toFixed(3)} mph</span>
           <span class="k">Mean rebase savings</span><span class="v">${expMean(rebaseSavings).toFixed(2)}</span>
           <span class="k">Mean starved savings</span><span class="v">${expMean(starvedSavings).toFixed(2)}</span>
         </div>
       </div>
       <div class="exp-card">
-        <h3>Best / Worst Variant</h3>
+        <h3>Most Discriminating Variants</h3>
         <div class="sim-kv">
-          <span class="k">Best variant</span><span class="v">${mqEscapeHtml(bestRow?.variant || "—")}</span>
-          <span class="k">Best Δ throughput</span><span class="v">${expFormatOrDash(bestRow?.deltaMph, 3)} mph</span>
-          <span class="k">Best rebase savings</span><span class="v">${expFormatOrDash(bestRow?.rebaseSavings, 0)}</span>
-          <span class="k">Worst variant</span><span class="v">${mqEscapeHtml(worstRow?.variant || "—")}</span>
-          <span class="k">Worst Δ throughput</span><span class="v">${expFormatOrDash(worstRow?.deltaMph, 3)} mph</span>
-          <span class="k">Worst rebase savings</span><span class="v">${expFormatOrDash(worstRow?.rebaseSavings, 0)}</span>
+          <span class="k">Strongest for ${mqEscapeHtml(rhsPolicy)}</span><span class="v">${mqEscapeHtml(bestRow?.variant || "—")}</span>
+          <span class="k">Its Δ throughput</span><span class="v">${expFormatOrDash(bestRow?.deltaMph, 3)} mph</span>
+          <span class="k">Its rebase savings</span><span class="v">${expFormatOrDash(bestRow?.rebaseSavings, 0)}</span>
+          <span class="k">Strongest for ${mqEscapeHtml(lhsPolicy)}</span><span class="v">${mqEscapeHtml(worstRow?.variant || "—")}</span>
+          <span class="k">Its Δ throughput</span><span class="v">${expFormatOrDash(worstRow?.deltaMph, 3)} mph</span>
+          <span class="k">Its rebase savings</span><span class="v">${expFormatOrDash(worstRow?.rebaseSavings, 0)}</span>
         </div>
       </div>
     </div>
@@ -402,8 +404,8 @@ function renderDiscriminationExperiments(content) {
           borderColor: "#58a6ff",
           borderWidth: 1
         },
-        ...(baselinePolicy ? [{
-          label: `${baselinePolicy} mph`,
+        ...(baselinePolicy && baselinePolicy !== lhsPolicy && baselinePolicy !== rhsPolicy ? [{
+          label: `${baselinePolicy} mph (baseline)`,
           data: rows.map(r => Number(r.policyMetrics?.[baselinePolicy]?.throughput_mph) || 0),
           backgroundColor: "rgba(46,160,67,0.50)",
           borderColor: "#2ea043",
@@ -418,7 +420,10 @@ function renderDiscriminationExperiments(content) {
     data: {
       labels,
       datasets: [
-        { label: `Δ throughput (${rhsPolicy}-${lhsPolicy})`, data: rows.map(r => Number(r.deltaMph) || 0), backgroundColor: rows.map(r => (Number(r.deltaMph) || 0) >= 0 ? "rgba(46,160,67,0.55)" : "rgba(248,81,73,0.55)"), borderColor: rows.map(r => (Number(r.deltaMph) || 0) >= 0 ? "#2ea043" : "#f85149"), borderWidth: 1, yAxisID: "y" },
+        // One colour per series: the bar already carries sign by direction, and
+        // red-for-negative read as "bad" on the variants where the tested policy
+        // wins, which is the opposite of what the panel states.
+        { label: `Δ throughput (${rhsPolicy}-${lhsPolicy})`, data: rows.map(r => Number(r.deltaMph) || 0), backgroundColor: "rgba(46,160,67,0.55)", borderColor: "#2ea043", borderWidth: 1, yAxisID: "y" },
         { label: `Rebase savings (${lhsPolicy}-${rhsPolicy})`, data: rows.map(r => Number(r.rebaseSavings) || 0), backgroundColor: "rgba(210,153,34,0.55)", borderColor: "#d29922", borderWidth: 1, yAxisID: "y1" },
         { label: `Starved savings (${lhsPolicy}-${rhsPolicy})`, data: rows.map(r => (Number(r.lhsStarved) || 0) - (Number(r.rhsStarved) || 0)), backgroundColor: "rgba(121,192,255,0.55)", borderColor: "#79c0ff", borderWidth: 1, yAxisID: "y1" }
       ]
@@ -653,7 +658,7 @@ function renderCalibrationExperiments(content) {
         <div class="exp-chart-wrap"><canvas id="expCalDimChart"></canvas></div>
       </div>
       <div class="exp-card" style="overflow-x:auto">
-        <h3>Target vs best by dimension</h3>
+        <h3>Target vs best grid candidate</h3>
         <table class="cmp" id="expCalDimTable"></table>
       </div>
     </div>
@@ -815,7 +820,7 @@ function renderCalibrationExperiments(content) {
     options: expSingleYChartOptions({ title: { display: true, text: "Percent error" } })
   });
 
-  let dimHtml = "<thead><tr><th>Dimension</th><th>Target</th><th>Best actual</th><th>Error %</th></tr></thead><tbody>";
+  let dimHtml = "<thead><tr><th>Dimension</th><th>Calibration target</th><th>Best candidate</th><th>Error %</th></tr></thead><tbody>";
   dimKeys.forEach(k => {
     const targetVal = Number(targetDims[k]);
     const metricName = dimToRunMetric[k];

@@ -4,6 +4,7 @@
  */
 
 const MQSIM_LEGEND_FONT_SIZE = 14;
+const MQSIM_CHART_FONT_SIZE = 13;
 const MQSIM_POLICY_COLOR_PALETTE = ["#58a6ff", "#a371f7", "#2ea043", "#d29922", "#f85149", "#79c0ff", "#d2a8ff", "#56d364"];
 const MQSIM_THEME = Object.freeze({
   ticks: "#8b949e",
@@ -11,8 +12,16 @@ const MQSIM_THEME = Object.freeze({
   legendText: "#8b949e",
 });
 
+// Chart.js defaults to 12px for ticks and tooltips, the smallest text on a
+// chart-heavy screen. Lift it toward the body size; zoom scales this too, so
+// the point is the ratio, not the absolute.
+if (typeof Chart !== "undefined" && Chart.defaults) {
+  Chart.defaults.font.size = MQSIM_CHART_FONT_SIZE;
+}
+
 // Expose constants inspected by the CSP-safe runtime self-check.
 globalThis.MQSIM_LEGEND_FONT_SIZE = MQSIM_LEGEND_FONT_SIZE;
+globalThis.MQSIM_CHART_FONT_SIZE = MQSIM_CHART_FONT_SIZE;
 globalThis.MQSIM_POLICY_COLOR_PALETTE = MQSIM_POLICY_COLOR_PALETTE;
 
 function mqParseNumber(v, fallback = 0) {
@@ -102,7 +111,9 @@ function mqParseCsvRecords(text) {
 function mqDetectCsvType(text) {
   const { headers } = mqParseCsvRecords(text);
   const h = new Set(headers);
-  if (h.has("run") && h.has("policy")) return "monteCarlo";
+  // run_standalone.py writes "trial" as the first column; "run" is accepted
+  // for older files. loadMcCSVText itself is positional, so either works.
+  if ((h.has("trial") || h.has("run")) && h.has("policy")) return "monteCarlo";
   if (
     h.has("variant")
     && (

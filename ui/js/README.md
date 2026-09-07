@@ -16,6 +16,13 @@ This UI is intentionally **client-side only**:
 - `mqsim-sweep.js`: parameter-sweep parsing and rendering.
 - `mqsim-multi-merge.js`: multi-merge experiment parsing and rendering.
 - `mqsim-selfcheck.js`: runtime self-check + smoke tests for split-file integrity.
+- `mqsim-demo.js`: loads the bundled comparison in `../demo/demo-runs.js` on open,
+  through the same `loadFiles()` path a dropped file takes.
+
+Metric values are not computed here. Each run's `*-metrics.ndjson` ends with a
+`run_summary` event written by `src/mqsim/summary.py`; `computeFileMetrics`
+reads it and only derives what the summary cannot carry — the swimlane segment
+model and the CI durations taken from it.
 
 ## Load order contract
 
@@ -24,6 +31,12 @@ This UI is intentionally **client-side only**:
 `d3-array`, `d3-format`, `d3-time`, `d3-interpolate`, `d3-time-format`,
 `d3-scale`, `d3-selection`, `d3-axis` — then `js-yaml.min.js`). Every d3 module's
 UMD build merges into the same `d3` global, so the dependency order matters.
+
+Then `../metrics-spec.js`, generated from `src/mqsim/metrics.json` by
+`make metric-spec`. It assigns `window.MQSIM_METRIC_SPEC`, from which
+`mqsim-core.js` derives every metric label, unit, direction and tooltip — so it
+must load before the modules below. The UI cannot fetch the JSON directly; its
+CSP sets `connect-src 'none'`.
 
 It then loads this repository's scripts in this exact order:
 
@@ -34,6 +47,9 @@ It then loads this repository's scripts in this exact order:
 5. `mqsim-sweep.js`
 6. `mqsim-multi-merge.js`
 7. `mqsim-selfcheck.js`
+
+Then `../demo/demo-runs.js` (generated) and `mqsim-demo.js`, which must come
+last: it calls `loadFiles()` at parse time.
 
 Do not reorder unless you also update cross-file references.
 
@@ -66,6 +82,7 @@ node --check ui/js/mqsim-monte-carlo.js
 node --check ui/js/mqsim-sweep.js
 node --check ui/js/mqsim-multi-merge.js
 node --check ui/js/mqsim-selfcheck.js
+node --check ui/js/mqsim-demo.js
 ```
 
 ### 3) Manual parity spot-check
